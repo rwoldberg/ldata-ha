@@ -1,0 +1,30 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Account is already configured"
+        },
+        "error": {
+            "cannot_connect": "Failed to connect",
+            "invalid_auth": "Invalid authentication",
+            "unknown": "Unexpected error"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "my.leviton.com Username",
+                    "password": "my.leviton.com Password"
+                }
+            }
+        }
+    },
+        "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "update_interval": "Interval to poll my.leviton.com (Seconds)"
+                },
+                "description": "Configure Controller Options"
+            }
+        }
+    }
+}

@@ -1,0 +1,6 @@
+{
+	"name": "ldata",
+	"render_readme": true,
+	"domains": ["binary_sensor", "sensor"],
+	"homeassistant": "2021.12.4"
+}

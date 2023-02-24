@@ -1,0 +1,11 @@
+### Python ###
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# MacOS drops these files all over the place to store finder view preferences. They can be safelu deleted.
+.DS_Store
+
+# Intellij IDEA stores project information in this directory
+.idea
