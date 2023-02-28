@@ -103,31 +103,31 @@ async def async_setup_entry(
         entity_data["hardware"] = "LDATA"
         entity_data["firmware"] = panel["firmware"]
         total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[0], average=False
+            entry, entity_data, SENSOR_TYPES[0], average=False, which_leg="both"
         )
         async_add_entities([total_sensor])
         total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[2], average=False
+            entry, entity_data, SENSOR_TYPES[2], average=False, which_leg="both"
         )
         async_add_entities([total_sensor])
         total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[3], average=True
+            entry, entity_data, SENSOR_TYPES[3], average=True, which_leg="both"
         )
         async_add_entities([total_sensor])
         total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[0], average=False, which_leg=1
+            entry, entity_data, SENSOR_TYPES[0], average=False, which_leg="1"
         )
         async_add_entities([total_sensor])
         total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[0], average=False, which_leg=2
+            entry, entity_data, SENSOR_TYPES[0], average=False, which_leg="2"
         )
         async_add_entities([total_sensor])
         total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[2], average=False, which_leg=1
+            entry, entity_data, SENSOR_TYPES[2], average=False, which_leg="1"
         )
         async_add_entities([total_sensor])
         total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[2], average=False, which_leg=2
+            entry, entity_data, SENSOR_TYPES[2], average=False, which_leg="2"
         )
         async_add_entities([total_sensor])
 
@@ -235,11 +235,11 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         data,
         description: SensorDescription,
         average: bool,
-        which_leg: int = 0,
+        which_leg: str,
     ) -> None:
         """Init sensor."""
         self.entity_description = description
-        self.leg = which_leg
+        self.leg_to_total = which_leg
         super().__init__(data=data, coordinator=coordinator)
         self.is_average = average
         self._state = self.total_values()
@@ -252,11 +252,11 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         count = 0
         for breaker_id in self.coordinator.data["breakers"]:
             breaker_data = self.coordinator.data["breakers"][breaker_id]
-            if self.leg == 0:
+            if self.leg_to_total == "both":
                 total += float(breaker_data[self.entity_description.key])
             else:
                 total += float(
-                    breaker_data[self.entity_description.key + str(self.leg)]
+                    breaker_data[self.entity_description.key + self.leg_to_total]
                 )
             count += 1
         if self.is_average is True:
@@ -272,16 +272,16 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
     @property
     def name_suffix(self) -> str | None:
         """Suffix to append to the LDATA device's name."""
-        if (self.entity_description.name is not None) and (self.leg != 0):
-            return str(self.entity_description.name) + " Leg " + str(self.leg)
+        if (self.entity_description.name is not None) and (self.leg_to_total != "both"):
+            return str(self.entity_description.name) + " Leg " + self.leg_to_total
         return self.entity_description.name
 
     @property
     def unique_id_suffix(self) -> str | None:
         """Suffix to append to the LDATA device's unique ID."""
-        if (self.entity_description.name is not None) and (self.leg != 0):
+        if (self.entity_description.name is not None) and (self.leg_to_total != "both"):
             return (
-                "_leg_" + str(self.leg) + str(self.entity_description.unique_id_suffix)
+                "_leg_" + self.leg_to_total + str(self.entity_description.unique_id_suffix)
             )
         return self.entity_description.unique_id_suffix
 

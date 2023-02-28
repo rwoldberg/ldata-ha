@@ -3,6 +3,8 @@ import logging
 
 import requests
 
+from .const import _LEG1_POSITIONS
+
 defaultHeaders = {
     "Accept": "*/*",
     "Content-Type": "application/json",
@@ -251,7 +253,7 @@ class LDATAService:
                             ) / 2.0
                         else:
                             breaker_data["frequency"] = float(breaker["lineFrequency"])
-                        if int(breaker["position"]) & 1 == 1:
+                        if breaker["position"] in _LEG1_POSITIONS:
                             breaker_data["leg"] = 1
                             breaker_data["power1"] = float(breaker["power"])
                             breaker_data["power2"] = float(breaker["power2"])

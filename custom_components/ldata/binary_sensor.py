@@ -55,7 +55,7 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, str]:
         """Returns the extra attributes for the breaker."""
-        attributes = {}
+        attributes = super().extra_state_attributes
         attributes["id"] = self.breaker_data["id"]
         attributes["rating"] = self.breaker_data["rating"]
         attributes["position"] = self.breaker_data["position"]
@@ -64,6 +64,7 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         attributes["serialNumber"] = self.breaker_data["serialNumber"]
         attributes["hardware"] = self.breaker_data["hardware"]
         attributes["firmware"] = self.breaker_data["firmware"]
+
         return attributes
 
     @property
