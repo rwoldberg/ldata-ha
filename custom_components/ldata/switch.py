@@ -45,13 +45,16 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
-        if breakers := self.coordinator.data["breakers"]:
-            if new_data := breakers[self.breaker_data["id"]]:
-                if new_data["state"] == "ManualON":
-                    self._state = True
-                else:
-                    self._state = False
-                self.async_write_ha_state()
+        try:
+            if breakers := self.coordinator.data["breakers"]:
+                if new_data := breakers[self.breaker_data["id"]]:
+                    if new_data["state"] == "ManualON":
+                        self._state = True
+                    else:
+                        self._state = False
+        except Exception as ex:  # pylint: disable=broad-except
+            self._state = None
+        self.async_write_ha_state()
 
     @property
     def icon(self) -> str:

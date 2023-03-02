@@ -196,32 +196,35 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
-        if new_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
-            current_value = new_data["power"]
+        try:
+            if new_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
+                current_value = new_data["power"]
 
-            # Save the current date and time
-            current_time = time.time()
-            current_date = dt.now()
-            # Only update if we have a previous update
-            if self.last_update_time > 0:
-                # Clear the running total if the last update date and now are not the same day
-                if (
-                    (self.last_update_date.day != current_date.day)
-                    or (self.last_update_date.month != current_date.month)
-                    or (self.last_update_date.year != current_date.year)
-                ):
-                    self._state = 0
-                # Power usage is hale the previous plus current power consumption in kilowatts
-                power = ((self.previous_value + current_value) / 2) / 1000
-                # How long has it been since the last update in hours
-                time_span = (current_time - self.last_update_time) / 3600
-                # Update our running total
-                self._state = self._state + (power * time_span)
-            # Save the current values
-            self.last_update_time = current_time
-            self.previous_value = current_value
-            self.last_update_date = current_date
-            self.async_write_ha_state()
+                # Save the current date and time
+                current_time = time.time()
+                current_date = dt.now()
+                # Only update if we have a previous update
+                if self.last_update_time > 0:
+                    # Clear the running total if the last update date and now are not the same day
+                    if (
+                        (self.last_update_date.day != current_date.day)
+                        or (self.last_update_date.month != current_date.month)
+                        or (self.last_update_date.year != current_date.year)
+                    ):
+                        self._state = 0
+                    # Power usage is hale the previous plus current power consumption in kilowatts
+                    power = ((self.previous_value + current_value) / 2) / 1000
+                    # How long has it been since the last update in hours
+                    time_span = (current_time - self.last_update_time) / 3600
+                    # Update our running total
+                    self._state = self._state + (power * time_span)
+                # Save the current values
+                self.last_update_time = current_time
+                self.previous_value = current_value
+                self.last_update_date = current_date
+        except Exception as ex:  # pylint: disable=broad-except
+            self._state = None
+        self.async_write_ha_state()
 
 
 class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
@@ -310,10 +313,13 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
-        if breakers := self.coordinator.data["breakers"]:
-            if new_data := breakers[self.breaker_data["id"]]:
-                self._state = new_data[self.entity_description.key]
-                self.async_write_ha_state()
+        try:
+            if breakers := self.coordinator.data["breakers"]:
+                if new_data := breakers[self.breaker_data["id"]]:
+                    self._state = new_data[self.entity_description.key]
+        except Exception as ex:  # pylint: disable=broad-except
+            self._state = None
+        self.async_write_ha_state()
 
     @property
     def name_suffix(self) -> str | None:
