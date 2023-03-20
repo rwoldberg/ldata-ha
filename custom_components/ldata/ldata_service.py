@@ -227,6 +227,7 @@ class LDATAService:
                         and breaker["model"] != "NONE-1"
                     ):
                         breaker_data = {}
+                        breaker_data["panel_id"] = panel["id"]
                         breaker_data["rating"] = breaker["currentRating"]
                         breaker_data["position"] = breaker["position"]
                         breaker_data["name"] = breaker["name"]

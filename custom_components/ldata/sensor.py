@@ -222,7 +222,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
                 self.last_update_time = current_time
                 self.previous_value = current_value
                 self.last_update_date = current_date
-        except Exception as ex:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             self._state = None
         self.async_write_ha_state()
 
@@ -284,7 +284,9 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         """Suffix to append to the LDATA device's unique ID."""
         if (self.entity_description.name is not None) and (self.leg_to_total != "both"):
             return (
-                "_leg_" + self.leg_to_total + str(self.entity_description.unique_id_suffix)
+                "_leg_"
+                + self.leg_to_total
+                + str(self.entity_description.unique_id_suffix)
             )
         return self.entity_description.unique_id_suffix
 
@@ -317,7 +319,7 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
             if breakers := self.coordinator.data["breakers"]:
                 if new_data := breakers[self.breaker_data["id"]]:
                     self._state = new_data[self.entity_description.key]
-        except Exception as ex:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             self._state = None
         self.async_write_ha_state()
 
@@ -335,3 +337,11 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
     def native_value(self) -> StateType:
         """Return the power value."""
         return round(self._state, 2)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        """Returns the extra attributes for the breaker."""
+        attributes = super().extra_state_attributes
+        attributes["panel_id"] = self.breaker_data["panel_id"]
+
+        return attributes

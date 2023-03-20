@@ -51,7 +51,7 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
                         self._state = True
                     else:
                         self._state = False
-        except Exception as ex:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             self._state = None
         self.async_write_ha_state()
 
@@ -67,6 +67,7 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         attributes["serialNumber"] = self.breaker_data["serialNumber"]
         attributes["hardware"] = self.breaker_data["hardware"]
         attributes["firmware"] = self.breaker_data["firmware"]
+        attributes["panel_id"] = self.breaker_data["panel_id"]
 
         return attributes
 
