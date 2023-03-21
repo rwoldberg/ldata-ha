@@ -255,13 +255,14 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         count = 0
         for breaker_id in self.coordinator.data["breakers"]:
             breaker_data = self.coordinator.data["breakers"][breaker_id]
-            if self.leg_to_total == "both":
-                total += float(breaker_data[self.entity_description.key])
-            else:
-                total += float(
-                    breaker_data[self.entity_description.key + self.leg_to_total]
-                )
-            count += 1
+            if breaker_data["panel_id"] == self.entity_data["serialNumber"]:
+                if self.leg_to_total == "both":
+                    total += float(breaker_data[self.entity_description.key])
+                else:
+                    total += float(
+                        breaker_data[self.entity_description.key + self.leg_to_total]
+                    )
+                count += 1
         if self.is_average is True:
             return total / count
         return total
