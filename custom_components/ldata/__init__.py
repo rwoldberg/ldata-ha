@@ -10,12 +10,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
+from .const import DOMAIN, LOGGER_NAME, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
 from .ldata_uppdate_coordinator import LDATAUpdateCoordinator
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger(LOGGER_NAME)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -31,9 +31,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     user = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
     update_interval = entry.options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT)
-    _LOGGER.debug(update_interval)
-    for item in entry.data:
-        _LOGGER.debug(item)
+    _LOGGER.debug("LDATA update interval: %d", update_interval)
 
     coordinator = LDATAUpdateCoordinator(hass, user, password, update_interval)
 

@@ -7,6 +7,6 @@
   "documentation": "https://github.com/rwoldberg/ldata-ha",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/rwoldberg/ldata-ha/issues",
-  "requirements": [],
-  "version": "1.0.0"
+  "loggers": ["aiohue"],
+  "requirements": []
 }

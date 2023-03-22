@@ -12,10 +12,10 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import DOMAIN, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
+from .const import DOMAIN, LOGGER_NAME, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
 from .ldata_service import LDATAService
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger(LOGGER_NAME)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {

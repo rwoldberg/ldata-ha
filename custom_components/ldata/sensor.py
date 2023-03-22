@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 import time
 
 from homeassistant.components.sensor import (
@@ -25,9 +26,11 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt
 
-from .const import DATA_UPDATED, DOMAIN
+from .const import DATA_UPDATED, DOMAIN, LOGGER_NAME
 from .ldata_entity import LDATAEntity
 from .ldata_uppdate_coordinator import LDATAUpdateCoordinator
+
+_LOGGER = logging.getLogger(LOGGER_NAME)
 
 
 @dataclass
@@ -150,11 +153,11 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
+        last_state = await self.async_get_last_state()
         await super().async_added_to_hass()
-        state = await self.async_get_last_state()
-        if not state:
+        if not last_state:
             return
-        last_update_date = dt.as_local(state.last_updated)
+        last_update_date = dt.as_local(last_state.last_updated)
         current_date = dt.now()
         new_state = 0.0
         # Only load running total if the last update day is same as today
@@ -164,7 +167,9 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
             and (last_update_date.year == current_date.year)
         ):
             if self._state is not None:
-                new_state = float(self._state) + float(state.state)
+                new_state = float(self._state) + float(last_state.state)
+            else:
+                new_state = float(last_state.state)
         self._state = new_state  # type: ignore[assignment]
         async_dispatcher_connect(
             self.hass, DATA_UPDATED, self._schedule_immediate_update

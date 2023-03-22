@@ -7,10 +7,10 @@ import async_timeout
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN
+from .const import DOMAIN, LOGGER_NAME
 from .ldata_service import LDATAService
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger(LOGGER_NAME)
 
 
 class LDATAUpdateCoordinator(DataUpdateCoordinator):
@@ -40,8 +40,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 return data
         except Exception as ex:
             self._available = False  # Mark as unavailable
-            _LOGGER.warning(str(ex))
-            _LOGGER.warning("Error communicating with LDATA for %s", self.user)
+            _LOGGER.warning(
+                "Error communicating with LDATA for %s: %s", self.user, str(ex)
+            )
             raise UpdateFailed(
                 f"Error communicating with LDATA for {self.user}"
             ) from ex

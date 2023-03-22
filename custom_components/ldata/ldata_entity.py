@@ -3,10 +3,10 @@ import logging
 
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import _LEG1_POSITIONS, DOMAIN, MANUFACTURER
+from .const import _LEG1_POSITIONS, DOMAIN, LOGGER_NAME, MANUFACTURER
 from .ldata_uppdate_coordinator import LDATAUpdateCoordinator
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger(LOGGER_NAME)
 
 
 class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
@@ -47,7 +47,6 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     @property
     def name(self):
         """Return the name of the entity."""
-        _LOGGER.debug(self._name)
         return self._name
 
     @property

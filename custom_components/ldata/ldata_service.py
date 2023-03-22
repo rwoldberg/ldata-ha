@@ -3,7 +3,7 @@ import logging
 
 import requests
 
-from .const import _LEG1_POSITIONS
+from .const import _LEG1_POSITIONS, LOGGER_NAME
 
 defaultHeaders = {
     "Accept": "*/*",
@@ -14,7 +14,7 @@ defaultHeaders = {
     "host": "my.leviton.com",
 }
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger(LOGGER_NAME)
 
 
 class LDATAService:
@@ -49,9 +49,9 @@ class LDATAService:
                 json=data,
                 timeout=15,
             )
-            # _LOGGER.debug(result.request.body)
-            _LOGGER.debug(result.status_code)
-            _LOGGER.debug(result.text)
+            _LOGGER.debug(
+                "Authorization result %d: %s", result.status_code, result.text
+            )
 
             if result.status_code == 200:
                 self.auth_token = result.json()["id"]
@@ -73,9 +73,9 @@ class LDATAService:
                 headers=headers,
                 timeout=15,
             )
-            # _LOGGER.debug(result.request.body)
-            _LOGGER.debug(result.status_code)
-            _LOGGER.debug(result.text)
+            _LOGGER.debug(
+                "Get Residential Account result %d: %s", result.status_code, result.text
+            )
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
                 self.account_id = result_json[0]["residentialAccountId"]
@@ -101,9 +101,9 @@ class LDATAService:
                 headers=headers,
                 timeout=15,
             )
-            # _LOGGER.debug(result.request.body)
-            _LOGGER.debug(result.status_code)
-            _LOGGER.debug(result.text)
+            _LOGGER.debug(
+                "Get Residence Account result %d: %s", result.status_code, result.text
+            )
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
                 self.residence_id = result_json[0]["id"]
@@ -132,9 +132,7 @@ class LDATAService:
                 headers=headers,
                 timeout=15,
             )
-            # _LOGGER.debug(result.request.body)
-            _LOGGER.debug(result.status_code)
-            _LOGGER.debug(result.text)
+            _LOGGER.debug("Get Panels result %d: %s", result.status_code, result.text)
 
             if result.status_code == 200:
                 return result.json()
@@ -179,7 +177,6 @@ class LDATAService:
 
     def status(self):
         """Get the breakers from the API."""
-        _LOGGER.debug(self.auth_token)
         # Make sure we are logged in.
         if self.auth_token is None or self.auth_token == "":
             _LOGGER.debug("Not authenticated yet!")
@@ -218,9 +215,7 @@ class LDATAService:
                 panel_data["voltage1"] = float(panel["rmsVoltage"])
                 panel_data["voltage2"] = float(panel["rmsVoltage2"])
                 panels.append(panel_data)
-                _LOGGER.debug(panel)
                 for breaker in panel["residentialBreakers"]:
-                    _LOGGER.debug(breaker)
                     if (
                         breaker["model"] is not None
                         and breaker["model"] != "NONE-2"

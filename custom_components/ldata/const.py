@@ -3,6 +3,8 @@
 DOMAIN = "ldata"
 MANUFACTURER = "Leviton"
 
+LOGGER_NAME = "ldata"
+
 SENSORS = {
     "breaker": {"icon": "mdi:electric-switch-closed"},
     "amps": {"icon": "mdi:lightning-bolt-circle", "measurement": "A"},
