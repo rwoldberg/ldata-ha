@@ -9,5 +9,5 @@
   "issue_tracker": "https://github.com/rwoldberg/ldata-ha/issues",
   "loggers": ["aiohue"],
   "requirements": [],
-  "version": "1.0.6"
+  "version": "1.0.7"
 }
