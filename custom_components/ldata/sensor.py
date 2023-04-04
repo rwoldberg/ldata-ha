@@ -1,10 +1,10 @@
 """Support for power sensors in LDATA devices."""
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import logging
 import time
-import copy
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,

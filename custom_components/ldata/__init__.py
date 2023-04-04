@@ -10,7 +10,14 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, LOGGER_NAME, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
+from .const import (
+    DOMAIN,
+    LOGGER_NAME,
+    THREE_PHASE,
+    THREE_PHASE_DEFAULT,
+    UPDATE_INTERVAL,
+    UPDATE_INTERVAL_DEFAULT,
+)
 from .ldata_uppdate_coordinator import LDATAUpdateCoordinator
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
@@ -31,9 +38,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     user = entry.data[CONF_USERNAME]
     password = entry.data[CONF_PASSWORD]
     update_interval = entry.options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT)
+    three_phase = entry.options.get(
+        THREE_PHASE, entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
+    )
     _LOGGER.debug("LDATA update interval: %d", update_interval)
+    _LOGGER.debug("LDATA three phase: %d", three_phase)
 
-    coordinator = LDATAUpdateCoordinator(hass, user, password, update_interval)
+    coordinator = LDATAUpdateCoordinator(hass, user, password, update_interval, entry)
 
     await coordinator.async_refresh()  # Get initial data
 

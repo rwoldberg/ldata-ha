@@ -12,7 +12,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import DOMAIN, LOGGER_NAME, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
+from .const import (
+    DOMAIN,
+    LOGGER_NAME,
+    THREE_PHASE,
+    THREE_PHASE_DEFAULT,
+    UPDATE_INTERVAL,
+    UPDATE_INTERVAL_DEFAULT,
+)
 from .ldata_service import LDATAService
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -21,6 +28,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required("username"): str,
         vol.Required("password"): str,
+        vol.Required("three_phase"): bool,
     }
 )
 
@@ -31,7 +39,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
     Data has the keys from DATA_SCHEMA with values provided by the user.
     """
 
-    service = LDATAService(data[CONF_USERNAME], data[CONF_PASSWORD])
+    service = LDATAService(data[CONF_USERNAME], data[CONF_PASSWORD], data[THREE_PHASE])
 
     try:
         result = await hass.async_add_executor_job(service.auth)
@@ -43,7 +51,9 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         raise CannotConnect
 
     # Return info that you want to store in the config entry.
-    return {"title": f"Leviton LDATA ({data[CONF_USERNAME],data[CONF_PASSWORD]})"}
+    return {
+        "title": f"Leviton LDATA ({data[CONF_USERNAME],data[CONF_PASSWORD], data[THREE_PHASE]})"
+    }
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -71,12 +81,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_USERNAME): str,
-                    vol.Required(CONF_PASSWORD): str,
-                }
-            ),
+            data_schema=STEP_USER_DATA_SCHEMA,
             errors=errors,
         )
 
@@ -105,6 +110,13 @@ class OptionsFlow(config_entries.OptionsFlow):
                     UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
                 ),
             ): int,
+            vol.Optional(
+                THREE_PHASE,
+                default=self.config_entry.data.get(
+                    THREE_PHASE,
+                    self.config_entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT),
+                ),
+            ): bool,
         }
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(options))

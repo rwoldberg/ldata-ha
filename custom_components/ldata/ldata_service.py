@@ -3,7 +3,7 @@ import logging
 
 import requests
 
-from .const import _LEG1_POSITIONS, LOGGER_NAME
+from .const import _LEG1_POSITIONS, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT
 
 defaultHeaders = {
     "Accept": "*/*",
@@ -20,10 +20,11 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 class LDATAService:
     """The LDATAService object."""
 
-    def __init__(self, username, password) -> None:
+    def __init__(self, username, password, entry) -> None:
         """Init LDATAService."""
         self.username = username
         self.password = password
+        self.entry = entry
         self.auth_token = ""
         self.userid = ""
         self.account_id = ""
@@ -178,6 +179,9 @@ class LDATAService:
     def status(self):
         """Get the breakers from the API."""
         # Make sure we are logged in.
+        three_phase = self.entry.options.get(
+            THREE_PHASE, self.entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
+        )
         if self.auth_token is None or self.auth_token == "":
             _LOGGER.debug("Not authenticated yet!")
             self.auth()
@@ -236,9 +240,15 @@ class LDATAService:
                         breaker_data["power"] = float(breaker["power"]) + float(
                             breaker["power2"]
                         )
-                        breaker_data["voltage"] = float(breaker["rmsVoltage"]) + float(
-                            breaker["rmsVoltage2"]
-                        )
+                        if (three_phase is False) or (breaker["poles"] == 1):
+                            breaker_data["voltage"] = float(
+                                breaker["rmsVoltage"]
+                            ) + float(breaker["rmsVoltage2"])
+                        else:
+                            breaker_data["voltage"] = (
+                                float(breaker["rmsVoltage"]) * 0.866025403784439
+                            ) + (float(breaker["rmsVoltage2"]) * 0.866025403784439)
+
                         breaker_data["current"] = float(breaker["rmsCurrent"]) + float(
                             breaker["rmsCurrent2"]
                         )

@@ -16,11 +16,13 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 class LDATAUpdateCoordinator(DataUpdateCoordinator):
     """LDATAUpdateCoordinator to handle fetching new data about the LDATA module."""
 
-    def __init__(self, hass: HomeAssistant, user, password, update_interval) -> None:
+    def __init__(
+        self, hass: HomeAssistant, user, password, update_interval, entry
+    ) -> None:
         """Initialize the coordinator and set up the Controller object."""
         self._hass = hass
         self.user = user
-        self._service = LDATAService(user, password)
+        self._service = LDATAService(user, password, entry)
         self._available = True
 
         super().__init__(
