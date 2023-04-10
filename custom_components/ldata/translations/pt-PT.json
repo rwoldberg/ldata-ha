@@ -1,0 +1,33 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Conta já configurada"
+        },
+        "error": {
+            "cannot_connect": "Falha na ligação",
+            "invalid_auth": "Falha na autenticação",
+            "unknown": "Erro desconhecido"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "my.leviton.com Utilizador",
+                    "password": "my.leviton.com Password",
+                    "three_phase": "3 Fases?"
+                },
+                "title": "Configurar LDATA"
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "data": {
+                    "update_interval": "Intervalo de pesquisa my.leviton.com (segundos)",
+                    "three_phase": "3 Fases?"
+                },
+                "description": "Configurar o controlador"
+            }
+        }
+    }
+}
