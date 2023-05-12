@@ -5,7 +5,8 @@
         "data": {
           "username": "[%key:common::config_flow::data::username%]",
           "password": "[%key:common::config_flow::data::password%]",
-          "three_phase": "Three phase power"
+          "three_phase": "Three phase power",
+          "read_only": "Read only"
         }
       }
     },
@@ -25,7 +26,8 @@
         "description": "Configure Controller Options",
         "data": {
           "update_interval": "Interval to poll my.leviton.com (Seconds)",
-          "three_phase": "Three phase power"
+          "three_phase": "Three phase power",
+          "read_only": "Read only"
         }
       }
     }

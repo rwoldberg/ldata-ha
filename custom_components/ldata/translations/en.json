@@ -13,7 +13,8 @@
                 "data": {
                     "username": "my.leviton.com Username",
                     "password": "my.leviton.com Password",
-                    "three_phase": "Three phase power"
+                    "three_phase": "Three phase power",
+                    "read_only": "Read only"
                 },
                 "title": "Configure LDATA"
             }
@@ -24,7 +25,8 @@
             "init": {
                 "data": {
                     "update_interval": "Interval to poll my.leviton.com (Seconds)",
-                    "three_phase": "Three phase power"
+                    "three_phase": "Three phase power",
+                    "read_only": "Read only"
                 },
                 "description": "Configure Controller Options"
             }

@@ -176,7 +176,10 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
             if self._state is not None:
                 new_state = float(self._state) + float(last_state.state)
             else:
-                new_state = float(last_state.state)
+                try:
+                    new_state = float(last_state.state)
+                except Exception:  # pylint: disable=broad-except
+                    new_state = 0.0
         self._state = new_state  # type: ignore[assignment]
         async_dispatcher_connect(
             self.hass, DATA_UPDATED, self._schedule_immediate_update

@@ -13,6 +13,8 @@ from homeassistant.helpers.typing import ConfigType
 from .const import (
     DOMAIN,
     LOGGER_NAME,
+    READ_ONLY,
+    READ_ONLY_DEFAULT,
     THREE_PHASE,
     THREE_PHASE_DEFAULT,
     UPDATE_INTERVAL,
@@ -41,8 +43,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     three_phase = entry.options.get(
         THREE_PHASE, entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
     )
+    read_only = entry.options.get(
+        READ_ONLY, entry.data.get(READ_ONLY, READ_ONLY_DEFAULT)
+    )
     _LOGGER.debug("LDATA update interval: %d", update_interval)
     _LOGGER.debug("LDATA three phase: %d", three_phase)
+    _LOGGER.debug("LDATA read only: %d", read_only)
 
     coordinator = LDATAUpdateCoordinator(hass, user, password, update_interval, entry)
 

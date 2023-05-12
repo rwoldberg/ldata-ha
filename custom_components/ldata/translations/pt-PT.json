@@ -13,7 +13,8 @@
                 "data": {
                     "username": "my.leviton.com Utilizador",
                     "password": "my.leviton.com Password",
-                    "three_phase": "3 Fases?"
+                    "three_phase": "3 Fases?",
+                    "read_only": "Somente leitura"
                 },
                 "title": "Configurar LDATA"
             }
@@ -24,7 +25,8 @@
             "init": {
                 "data": {
                     "update_interval": "Intervalo de pesquisa my.leviton.com (segundos)",
-                    "three_phase": "3 Fases?"
+                    "three_phase": "3 Fases?",
+                    "read_only": "Somente leitura"
                 },
                 "description": "Configurar o controlador"
             }

@@ -7,7 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, LOGGER_NAME
+from .const import DOMAIN, LOGGER_NAME, READ_ONLY, READ_ONLY_DEFAULT
 from .ldata_entity import LDATAEntity
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -22,10 +22,17 @@ async def async_setup_entry(
 
     entry = hass.data[DOMAIN][config_entry.entry_id]
 
-    for breaker_id in entry.data["breakers"]:
-        breaker_data = entry.data["breakers"][breaker_id]
-        switch = LDATASwitch(entry, breaker_data)
-        async_add_entities([switch])
+    read_only = config_entry.options.get(
+        READ_ONLY,
+        config_entry.data.get(
+            READ_ONLY, config_entry.data.get(READ_ONLY, READ_ONLY_DEFAULT)
+        ),
+    )
+    if read_only is False:
+        for breaker_id in entry.data["breakers"]:
+            breaker_data = entry.data["breakers"][breaker_id]
+            switch = LDATASwitch(entry, breaker_data)
+            async_add_entities([switch])
 
 
 class LDATASwitch(LDATAEntity, SwitchEntity):

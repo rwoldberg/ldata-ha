@@ -15,6 +15,8 @@ from homeassistant.exceptions import HomeAssistantError
 from .const import (
     DOMAIN,
     LOGGER_NAME,
+    READ_ONLY,
+    READ_ONLY_DEFAULT,
     THREE_PHASE,
     THREE_PHASE_DEFAULT,
     UPDATE_INTERVAL,
@@ -29,6 +31,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required("username"): str,
         vol.Required("password"): str,
         vol.Required("three_phase"): bool,
+        vol.Required("read_only"): bool,
     }
 )
 
@@ -51,9 +54,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         raise CannotConnect
 
     # Return info that you want to store in the config entry.
-    return {
-        "title": f"Leviton LDATA ({data[CONF_USERNAME],data[CONF_PASSWORD], data[THREE_PHASE]})"
-    }
+    return {"title": f"Leviton LDATA ({data[CONF_USERNAME]})"}
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -101,6 +102,7 @@ class OptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None) -> FlowResult:
         """Return the options form."""
+        # foo = self.config_entry.options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT)
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         options = {
@@ -112,9 +114,15 @@ class OptionsFlow(config_entries.OptionsFlow):
             ): int,
             vol.Optional(
                 THREE_PHASE,
-                default=self.config_entry.data.get(
+                default=self.config_entry.options.get(
                     THREE_PHASE,
                     self.config_entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT),
+                ),
+            ): bool,
+            vol.Optional(
+                READ_ONLY,
+                default=self.config_entry.options.get(
+                    READ_ONLY, self.config_entry.data.get(READ_ONLY, READ_ONLY_DEFAULT)
                 ),
             ): bool,
         }
