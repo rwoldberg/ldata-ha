@@ -75,3 +75,8 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     def is_on(self) -> bool | None:
         """Returns true if the breaker is on."""
         return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's name."""
+        return "Status"

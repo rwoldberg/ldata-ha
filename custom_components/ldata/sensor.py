@@ -7,6 +7,7 @@ import logging
 import time
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -23,9 +24,8 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
-from homeassistant.util import dt
+from homeassistant.util import dt as dt_util
 
 from .const import DATA_UPDATED, DOMAIN, LOGGER_NAME
 from .ldata_entity import LDATAEntity
@@ -39,6 +39,7 @@ class SensorDescription(SensorEntityDescription):
     """SensorEntityDescription for LDATA entities."""
 
     unique_id_suffix: str | None = None
+    name: str | None = None
 
 
 SENSOR_TYPES = (
@@ -142,7 +143,7 @@ async def async_setup_entry(
         async_add_entities([total_sensor])
 
 
-class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
+class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
     """Sensor that tracks daily usage for an LDATA device."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -156,7 +157,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
         self._state = None
         self.last_update_time = 0.0
         self.previous_value = 0.0
-        self.last_update_date = dt.now()
+        self.last_update_date = dt_util.now()
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
@@ -164,8 +165,8 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
         await super().async_added_to_hass()
         if not last_state:
             return
-        last_update_date = dt.as_local(last_state.last_updated)
-        current_date = dt.now()
+        last_update_date = dt_util.as_local(last_state.last_updated)
+        current_date = dt_util.now()
         new_state = 0.0
         # Only load running total if the last update day is same as today
         if (
@@ -217,7 +218,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity, SensorEntity):
 
                 # Save the current date and time
                 current_time = time.time()
-                current_date = dt.now()
+                current_date = dt_util.now()
                 # Only update if we have a previous update
                 if self.last_update_time > 0:
                     # Clear the running total if the last update date and now are not the same day

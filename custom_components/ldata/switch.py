@@ -67,8 +67,8 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
     def icon(self) -> str:
         """Return the icon type."""
         if self.is_on is True:
-            return "mdi:electric-switch-open"
-        return "mdi:electric-switch-closed"
+            return "mdi:electric-switch-closed"
+        return "mdi:electric-switch"
 
     @property
     def is_on(self) -> bool | None:
@@ -92,3 +92,8 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         attributes["panel_id"] = self.breaker_data["panel_id"]
 
         return attributes
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's name."""
+        return "Breaker"

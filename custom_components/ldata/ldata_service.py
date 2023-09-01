@@ -114,16 +114,71 @@ class LDATAService:
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.exception("Unable to get Residence! %s", ex)
             self.clear_tokens()
-
         return False
 
-    def get_panels(self) -> object:
+    def get_Whems_breakers(self, panel_id: str) -> object:
+        """Get the whemns modules for the residence."""
+        headers = {**defaultHeaders}
+        headers["authorization"] = self.auth_token
+        headers["filter"] = "{}"
+        url = f"https://my.leviton.com/api/IotWhems/{panel_id}/residentialBreakers"
+        try:
+            result = requests.get(
+                url,
+                headers=headers,
+                timeout=15,
+            )
+            _LOGGER.debug(
+                "Get WHEMS breakers result %d: %s", result.status_code, result.text
+            )
+            if result.status_code == 200:
+                return result.json()
+            _LOGGER.exception("Unable to WHEMS breakers!")
+        except Exception as ex:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get WHEMS breakers! %s", ex)
+            self.clear_tokens()
+
+        return None
+
+    def get_iotWhemsPanels(self) -> object:
+        """Get the whemns modules for the residence."""
+        headers = {**defaultHeaders}
+        headers["authorization"] = self.auth_token
+        headers["filter"] = "{}"
+        url = f"https://my.leviton.com/api/Residences/{self.residence_id}/iotWhems"
+        try:
+            result = requests.get(
+                url,
+                headers=headers,
+                timeout=15,
+            )
+            _LOGGER.debug(
+                "Get WHEMS Panels result %d: %s", result.status_code, result.text
+            )
+
+            if result.status_code == 200:
+                returnPanels = result.json()
+                for panel in returnPanels:
+                    panel["ModuleType"] = "WHEMS"
+                    # Make the data look like an LDATA module
+                    panel["rmsVoltage"] = panel["rmsVoltageA"]
+                    panel["rmsVoltage2"] = panel["rmsVoltageB"]
+                    panel["updateVersion"] = panel["version"]
+                    panel["residentialBreakers"] = self.get_Whems_breakers(panel["id"])
+                return returnPanels
+            _LOGGER.exception("Unable to get WHEMS Panels!")
+        except Exception as ex:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get WHEMS Panels! %s", ex)
+            self.clear_tokens()
+        return None
+
+    def get_ldata_panels(self) -> object:
         """Get the breaker panels for the residence."""
         headers = {**defaultHeaders}
         headers["authorization"] = self.auth_token
         headers["filter"] = '{"include":["residentialBreakers"]}'
         url = (
-            " https://my.leviton.com/api/Residences/{}/residentialBreakerPanels".format(
+            "https://my.leviton.com/api/Residences/{}/residentialBreakerPanels".format(
                 self.residence_id
             )
         )
@@ -136,18 +191,24 @@ class LDATAService:
             _LOGGER.debug("Get Panels result %d: %s", result.status_code, result.text)
 
             if result.status_code == 200:
-                return result.json()
+                returnPanels = result.json()
+                for panel in returnPanels:
+                    panel["ModuleType"] = "LDATA"
+                return returnPanels
             _LOGGER.exception("Unable to get Panels!")
-            self.clear_tokens()
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.exception("Unable to get Panels! %s", ex)
             self.clear_tokens()
 
         return None
 
-    def put_residential_breaker_panels(self, panel_id: str) -> None:
-        """call PUT  on the ResidentialBreakerPanels API this must be done to force an update of the power values."""
-        url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
+    def put_residential_breaker_panels(self, panel_id: str, panel_type: str) -> None:
+        """Call PUT  on the ResidentialBreakerPanels API this must be done to force an update of the power values."""
+        # https://my.leviton.com/api/IotWhems/1000_002F_A3B4
+        if panel_type == "LDATA":
+            url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
+        else:
+            url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
         headers = {**defaultHeaders}
         headers["authorization"] = self.auth_token
         data = {"bandwidth": 1}
@@ -176,6 +237,17 @@ class LDATAService:
         )
         return result
 
+    def none_to_zero(self, value) -> float:
+        """Convert a value to a float and replace None with 0.0."""
+        result = 0.0
+        if value is None:
+            return result
+        try:
+            result = float(value)
+        except Exception:  # pylint: disable=broad-except
+            result = 0.0
+        return result
+
     def status(self):
         """Get the breakers from the API."""
         # Make sure we are logged in.
@@ -200,22 +272,33 @@ class LDATAService:
         if self.residence_id is None or self.residence_id == "":
             return
         # Get the breaker panels.
-        panels_html = self.get_panels()
+        panels_json = self.get_ldata_panels()
+        whems_panels_json = self.get_iotWhemsPanels()
+        if panels_json is None:
+            panels_json = whems_panels_json
+        elif whems_panels_json is not None:
+            for panel in whems_panels_json:
+                panels_json.append(panel)
         status_data = {}
         breakers = {}
         panels = []
-        if panels_html is not None:
-            for panel in panels_html:
-                self.put_residential_breaker_panels(panel["id"])
+        if panels_json is not None:
+            for panel in panels_json:
+                self.put_residential_breaker_panels(panel["id"], panel["ModuleType"])
                 panel_data = {}
                 panel_data["firmware"] = panel["updateVersion"]
                 panel_data["model"] = panel["model"]
                 panel_data["id"] = panel["id"]
                 panel_data["name"] = panel["name"]
                 panel_data["serialNumber"] = panel["id"]
-                panel_data["voltage"] = (
-                    float(panel["rmsVoltage"]) + float(panel["rmsVoltage2"])
-                ) / 2.0
+                if three_phase is False:
+                    panel_data["voltage"] = (
+                        float(panel["rmsVoltage"]) + float(panel["rmsVoltage2"])
+                    ) / 2.0
+                else:
+                    panel_data["voltage"] = (
+                        float(panel["rmsVoltage"]) * 0.866025403784439
+                    ) + (float(panel["rmsVoltage2"]) * 0.866025403784439)
                 panel_data["voltage1"] = float(panel["rmsVoltage"])
                 panel_data["voltage2"] = float(panel["rmsVoltage2"])
                 panels.append(panel_data)
@@ -237,52 +320,82 @@ class LDATAService:
                         breaker_data["serialNumber"] = breaker["serialNumber"]
                         breaker_data["hardware"] = breaker["hwVersion"]
                         breaker_data["firmware"] = breaker["firmwareVersionMeter"]
-                        breaker_data["power"] = float(breaker["power"]) + float(
-                            breaker["power2"]
-                        )
+                        breaker_data["power"] = self.none_to_zero(
+                            breaker["power"]
+                        ) + self.none_to_zero(breaker["power2"])
                         if (three_phase is False) or (breaker["poles"] == 1):
-                            breaker_data["voltage"] = float(
+                            breaker_data["voltage"] = self.none_to_zero(
                                 breaker["rmsVoltage"]
-                            ) + float(breaker["rmsVoltage2"])
+                            ) + self.none_to_zero(breaker["rmsVoltage2"])
                         else:
                             breaker_data["voltage"] = (
-                                float(breaker["rmsVoltage"]) * 0.866025403784439
-                            ) + (float(breaker["rmsVoltage2"]) * 0.866025403784439)
+                                self.none_to_zero(breaker["rmsVoltage"])
+                                * 0.866025403784439
+                            ) + (
+                                self.none_to_zero(breaker["rmsVoltage2"])
+                                * 0.866025403784439
+                            )
 
-                        breaker_data["current"] = float(breaker["rmsCurrent"]) + float(
-                            breaker["rmsCurrent2"]
-                        )
+                        breaker_data["current"] = self.none_to_zero(
+                            breaker["rmsCurrent"]
+                        ) + self.none_to_zero(breaker["rmsCurrent2"])
                         if breaker["poles"] == 2:
                             breaker_data["frequency"] = (
-                                float(breaker["lineFrequency"])
-                                + float(breaker["lineFrequency2"])
+                                self.none_to_zero(breaker["lineFrequency"])
+                                + self.none_to_zero(breaker["lineFrequency2"])
                             ) / 2.0
                         else:
-                            breaker_data["frequency"] = float(breaker["lineFrequency"])
+                            breaker_data["frequency"] = self.none_to_zero(
+                                breaker["lineFrequency"]
+                            )
                         if breaker["position"] in _LEG1_POSITIONS:
                             breaker_data["leg"] = 1
-                            breaker_data["power1"] = float(breaker["power"])
-                            breaker_data["power2"] = float(breaker["power2"])
-                            breaker_data["voltage1"] = float(breaker["rmsVoltage"])
-                            breaker_data["voltage2"] = float(breaker["rmsVoltage2"])
-                            breaker_data["current1"] = float(breaker["rmsCurrent"])
-                            breaker_data["current2"] = float(breaker["rmsCurrent2"])
-                            breaker_data["frequency1"] = float(breaker["lineFrequency"])
-                            breaker_data["frequency2"] = float(
+                            breaker_data["power1"] = self.none_to_zero(breaker["power"])
+                            breaker_data["power2"] = self.none_to_zero(
+                                breaker["power2"]
+                            )
+                            breaker_data["voltage1"] = self.none_to_zero(
+                                breaker["rmsVoltage"]
+                            )
+                            breaker_data["voltage2"] = self.none_to_zero(
+                                breaker["rmsVoltage2"]
+                            )
+                            breaker_data["current1"] = self.none_to_zero(
+                                breaker["rmsCurrent"]
+                            )
+                            breaker_data["current2"] = self.none_to_zero(
+                                breaker["rmsCurrent2"]
+                            )
+                            breaker_data["frequency1"] = self.none_to_zero(
+                                breaker["lineFrequency"]
+                            )
+                            breaker_data["frequency2"] = self.none_to_zero(
                                 breaker["lineFrequency2"]
                             )
                         else:
                             breaker_data["leg"] = 2
-                            breaker_data["power1"] = float(breaker["power2"])
-                            breaker_data["power2"] = float(breaker["power"])
-                            breaker_data["voltage1"] = float(breaker["rmsVoltage2"])
-                            breaker_data["voltage2"] = float(breaker["rmsVoltage"])
-                            breaker_data["current1"] = float(breaker["rmsCurrent2"])
-                            breaker_data["current2"] = float(breaker["rmsCurrent"])
-                            breaker_data["frequency1"] = float(
+                            breaker_data["power1"] = self.none_to_zero(
+                                breaker["power2"]
+                            )
+                            breaker_data["power2"] = self.none_to_zero(breaker["power"])
+                            breaker_data["voltage1"] = self.none_to_zero(
+                                breaker["rmsVoltage2"]
+                            )
+                            breaker_data["voltage2"] = self.none_to_zero(
+                                breaker["rmsVoltage"]
+                            )
+                            breaker_data["current1"] = self.none_to_zero(
+                                breaker["rmsCurrent2"]
+                            )
+                            breaker_data["current2"] = self.none_to_zero(
+                                breaker["rmsCurrent"]
+                            )
+                            breaker_data["frequency1"] = self.none_to_zero(
                                 breaker["lineFrequency2"]
                             )
-                            breaker_data["frequency2"] = float(breaker["lineFrequency"])
+                            breaker_data["frequency2"] = self.none_to_zero(
+                                breaker["lineFrequency"]
+                            )
                         # Add the breaker to the list.
                         breakers[breaker["id"]] = breaker_data
 
