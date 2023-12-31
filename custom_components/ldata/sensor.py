@@ -228,7 +228,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                         or (self.last_update_date.year != current_date.year)
                     ):
                         self._state = 0
-                    # Power usage is hale the previous plus current power consumption in kilowatts
+                    # Power usage is half the previous plus current power consumption in kilowatts
                     power = ((self.previous_value + current_value) / 2) / 1000
                     # How long has it been since the last update in hours
                     time_span = (current_time - self.last_update_time) / 3600
@@ -280,7 +280,9 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
                     )
                 count += 1
         if self.is_average is True:
-            return total / count
+            if count > 0:
+                return total / count
+            return 0
         return total
 
     @callback
