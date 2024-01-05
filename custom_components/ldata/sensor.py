@@ -230,6 +230,15 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
             if ((self.panel_total is True) and (have_values is True)) or (new_data is not None):
                 if new_data is not None:
                     current_value = new_data["power"]
+                # Make sure values are floats
+                try:
+                    current_value = float(current_value)
+                except ValueError:
+                    current_value = 0
+                try:
+                    self.previous_value = float(self.previous_value)
+                except ValueError:
+                    self.previous_value = 0
                 # Save the current date and time
                 current_time = time.time()
                 current_date = dt_util.now()
