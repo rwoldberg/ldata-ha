@@ -402,4 +402,13 @@ class LDATAService:
         status_data["breakers"] = breakers
         status_data["panels"] = panels
 
+        totalPower = 0
+        for breaker in breakers.items():
+            try:
+                breaker_power = float(breaker[1]["power"])
+                totalPower += float(breaker_power)
+            except ValueError:
+                totalPower += 0
+        status_data["totalPower"] = totalPower
+
         return status_data

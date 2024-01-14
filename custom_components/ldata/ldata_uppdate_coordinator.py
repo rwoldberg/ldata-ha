@@ -24,22 +24,31 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self.user = user
         self._service = LDATAService(user, password, entry)
         self._available = True
+        self.service_data = None
 
+        # Set the update interval to half the input value, the update function will only refresh its data every other time.
+        # Hopefully this will help the interface from thinking the sensors are no longer present if for some reason
+        # It takes longer than expected to pull the data from the website. 
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=update_interval),
+            update_interval=timedelta(seconds=update_interval/2),
         )
 
     async def _async_update_data(self):
         """Fetch data from LDATA Controller."""
         try:
-            async with async_timeout.timeout(30):
-                data = await self._hass.async_add_executor_job(
-                    self._service.status  # Fetch new status
-                )
-                return data
+            returnData = self.service_data
+            if self.service_data is None:
+                async with async_timeout.timeout(30):
+                    self.service_data = await self._hass.async_add_executor_job(
+                        self._service.status  # Fetch new status
+                    )
+                returnData = self.service_data
+            else:
+                self.service_data = None
+            return returnData
         except Exception as ex:
             self._available = False  # Mark as unavailable
             _LOGGER.warning(

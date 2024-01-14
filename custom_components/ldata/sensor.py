@@ -219,12 +219,8 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
             have_values = False
             new_data = None
             if self.panel_total is True:
-                current_value = 0
-                for breaker_id in self.coordinator.data["breakers"]:
-                    breaker_data = self.coordinator.data["breakers"][breaker_id]
-                    if breaker_data is not None:
-                        current_value += breaker_data["power"]
-                        have_values = True
+                current_value = self.coordinator.data["totalPower"]
+                have_values = True
             else:
                 new_data = self.coordinator.data["breakers"][self.breaker_data["id"]]
             if ((self.panel_total is True) and (have_values is True)) or (new_data is not None):
