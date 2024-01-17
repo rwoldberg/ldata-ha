@@ -219,11 +219,14 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
             have_values = False
             new_data = None
             if self.panel_total is True:
+                current_value = 0
                 current_value = self.coordinator.data["totalPower"]
                 have_values = True
             else:
                 new_data = self.coordinator.data["breakers"][self.breaker_data["id"]]
-            if ((self.panel_total is True) and (have_values is True)) or (new_data is not None):
+            if ((self.panel_total is True) and (have_values is True)) or (
+                new_data is not None
+            ):
                 if new_data is not None:
                     current_value = new_data["power"]
                 # Make sure values are floats
@@ -257,8 +260,9 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                 self.last_update_time = current_time
                 self.previous_value = current_value
                 self.last_update_date = current_date
-        except Exception:  # pylint: disable=broad-except
+        except Exception as ex:  # pylint: disable=broad-except
             self._state = None
+            _LOGGER.exception("Error updating sensor! %s", ex)
         self.async_write_ha_state()
 
 
@@ -288,15 +292,25 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         """Total value for all breakers."""
         total = 0.0
         count = 0
-        for breaker_id in self.coordinator.data["breakers"]:
-            breaker_data = self.coordinator.data["breakers"][breaker_id]
+        for breaker in self.coordinator.data["breakers"].items():
+            breaker_data = breaker[1]
             if breaker_data["panel_id"] == self.entity_data["serialNumber"]:
+                current_value = 0.0
                 if self.leg_to_total == "both":
-                    total += float(breaker_data[self.entity_description.key])
+                    try:
+                        current_value = float(breaker_data[self.entity_description.key])
+                    except ValueError:
+                        current_value = 0.0
                 else:
-                    total += float(
-                        breaker_data[self.entity_description.key + self.leg_to_total]
-                    )
+                    try:
+                        current_value = float(
+                            breaker_data[
+                                self.entity_description.key + self.leg_to_total
+                            ]
+                        )
+                    except ValueError:
+                        current_value = 0.0
+                total += current_value
                 count += 1
         if self.is_average is True:
             if count > 0:
