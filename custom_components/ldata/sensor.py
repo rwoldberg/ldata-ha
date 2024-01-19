@@ -156,7 +156,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
         """Init sensor."""
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
-        self._state = None
+        self._state = 0.0
         self.last_update_time = 0.0
         self.previous_value = 0.0
         self.last_update_date = dt_util.now()
@@ -210,7 +210,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
         """Return the used kilowatts of the device."""
         if self._state is not None:
             return round(self._state, 2)
-        return None
+        return 0.0
 
     @callback
     def _state_update(self):
@@ -255,13 +255,16 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                     # How long has it been since the last update in hours
                     time_span = (current_time - self.last_update_time) / 3600
                     # Update our running total
-                    self._state = self._state + (power * time_span)
+                    if self._state is not None:
+                        self._state = self._state + (power * time_span)
+                    else:
+                        self._state =  (power * time_span)
                 # Save the current values
                 self.last_update_time = current_time
                 self.previous_value = current_value
                 self.last_update_date = current_date
         except Exception as ex:  # pylint: disable=broad-except
-            self._state = None
+            # self._state = None
             _LOGGER.exception("Error updating sensor! %s", ex)
         self.async_write_ha_state()
 
@@ -345,7 +348,9 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
     @property
     def native_value(self) -> StateType:
         """Return the power value."""
-        return round(self._state, 2)
+        if self._state is not None:
+            return round(self._state, 2)
+        return 0.0
 
 
 class LDATAOutputSensor(LDATAEntity, SensorEntity):
@@ -360,7 +365,10 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
         self.entity_description = description
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
-        self._state = float(self.breaker_data[self.entity_description.key])
+        try:
+            self._state = float(self.breaker_data[self.entity_description.key])
+        except Exception:  # pylint: disable=broad-except
+            self._state = 0.0
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
@@ -388,7 +396,9 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
     @property
     def native_value(self) -> StateType:
         """Return the power value."""
-        return round(self._state, 2)
+        if self._state is not None:
+            return round(self._state, 2)
+        return self._state
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
