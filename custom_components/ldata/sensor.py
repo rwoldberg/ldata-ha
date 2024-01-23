@@ -260,9 +260,6 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                             self._state = self._state + (power * time_span)
                         else:
                             self._state = power * time_span
-                        self.last_update_time = current_time
-                        self.previous_value = current_value
-                        self.last_update_date = current_date
                     except Exception:  # pylint: disable=broad-except
                         _LOGGER.exception(
                             "Error updating sensor! %s (%f %f %f)",
@@ -272,6 +269,9 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                             time_span,
                         )
                 # Save the current values
+                self.last_update_time = current_time
+                self.previous_value = current_value
+                self.last_update_date = current_date
         except Exception as ex:  # pylint: disable=broad-except
             # self._state = None
             _LOGGER.exception("Error updating sensor! %s", ex)
