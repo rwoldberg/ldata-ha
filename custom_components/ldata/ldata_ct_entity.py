@@ -1,37 +1,30 @@
-"""Defines a base LDATA entity."""
+"""Defines a base LDATA CT entity."""
 
 import logging
 
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import _LEG1_POSITIONS, DOMAIN, LOGGER_NAME, MANUFACTURER
+from .const import DOMAIN, LOGGER_NAME, MANUFACTURER
 from .ldata_uppdate_coordinator import LDATAUpdateCoordinator
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 
-class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
-    """Defines a base LDATA entity."""
+class LDATACTEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
+    """Defines CT Sensor entity."""
 
     def __init__(self, data, coordinator: LDATAUpdateCoordinator) -> None:
         """Initialize the entity."""
         super().__init__(coordinator)
         self.coordinator = coordinator
         self.entity_data = data
-        self._device_id = "ldata_" + self.entity_data["id"]
+        self._device_id = (
+            "ldata_" + self.entity_data["panel_id"] + self.entity_data["id"]
+        )
         if suffix := self.name_suffix:
             self._name = self.entity_data["name"] + " " + suffix
         else:
             self._name = self.entity_data["name"]
-        if "poles" in self.entity_data and "position" in self.entity_data:
-            if int(self.entity_data["poles"]) == 2:
-                self.leg = "both"
-            elif self.entity_data["position"] in _LEG1_POSITIONS:
-                self.leg = "1"
-            else:
-                self.leg = "2"
-        else:
-            self.leg = "both"
         # Required for HA 2022.7
         self.coordinator_context = object()
 
@@ -63,22 +56,16 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         return None
 
     @property
-    def unique_id_suffix(self) -> str | None:
-        """Return the unique id suffix of the entity."""
-        return None
-
-    @property
     def device_info(self):
         """Return device information about this device."""
         if self._device_id is None:
             return None
 
         info = {
-            "identifiers": {(DOMAIN, self.entity_data["serialNumber"])},
+            "identifiers": {
+                (DOMAIN, self.entity_data["panel_id"], self.entity_data["id"])
+            },
             "name": self.entity_data["name"],
-            "model": self.entity_data["model"],
-            "hw_version": self.entity_data["hardware"],
-            "sw_version": self.entity_data["firmware"],
             "manufacturer": MANUFACTURER,
         }
 
@@ -88,6 +75,7 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     def extra_state_attributes(self) -> dict[str, str]:
         """Returns the extra attributes for the breaker."""
         attributes = {}
-        attributes["leg"] = self.leg
+        attributes["channel"] = self.entity_data["channel"]
+        attributes["panel_id"] = self.entity_data["panel_id"]
 
         return attributes

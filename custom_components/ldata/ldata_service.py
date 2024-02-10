@@ -1,4 +1,5 @@
 """The LDATAService object."""
+
 import logging
 
 import requests
@@ -28,14 +29,14 @@ class LDATAService:
         self.auth_token = ""
         self.userid = ""
         self.account_id = ""
-        self.residence_id = ""
+        self.residence_id_list = []
 
     def clear_tokens(self) -> None:
         """Clear the tokens to force a re-login."""
         self.auth_token = ""
         self.userid = ""
         self.account_id = ""
-        self.residence_id = ""
+        self.residence_id_list = []
 
     def auth(self) -> bool:
         """Authenticate to the server."""
@@ -89,6 +90,33 @@ class LDATAService:
 
         return False
 
+    def get_residencePermissions(self) -> bool:
+        """Get the additional residences for the user."""
+        headers = {**defaultHeaders}
+        headers["authorization"] = self.auth_token
+        url = f"https://my.leviton.com/api/Person/{self.userid}/residentialPermissions"
+        try:
+            result = requests.get(
+                url,
+                headers=headers,
+                timeout=15,
+            )
+            _LOGGER.debug(
+                "Get Residence Permissions result %d: %s",
+                result.status_code,
+                result.text,
+            )
+            result_json = result.json()
+            if result.status_code == 200 and len(result_json) > 0:
+                for account in result_json:
+                    if account["residenceId"] is not None:
+                        self.residence_id_list.append(account["residenceId"])
+                return True
+            _LOGGER.exception("Unable to get Residence Permissions!")
+        except Exception as ex:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get Residence Permissions! %s", ex)
+        return False
+
     def get_residence(self) -> bool:
         """Get the Residential Account for the user."""
         headers = {**defaultHeaders}
@@ -107,7 +135,7 @@ class LDATAService:
             )
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
-                self.residence_id = result_json[0]["id"]
+                self.residence_id_list.append(result_json[0]["id"])
                 return True
             _LOGGER.exception("Unable to get Residence!")
             self.clear_tokens()
@@ -137,15 +165,14 @@ class LDATAService:
         except Exception as ex:  # pylint: disable=broad-except
             _LOGGER.exception("Unable to get WHEMS breakers! %s", ex)
             self.clear_tokens()
-
         return None
 
-    def get_iotWhemsPanels(self) -> object:
-        """Get the whemns modules for the residence."""
+    def get_Whems_CT(self, panel_id: str) -> object:
+        """Get the whemns CTs for the panel module."""
         headers = {**defaultHeaders}
         headers["authorization"] = self.auth_token
         headers["filter"] = "{}"
-        url = f"https://my.leviton.com/api/Residences/{self.residence_id}/iotWhems"
+        url = f"https://my.leviton.com/api/IotWhems/{panel_id}/iotCts"
         try:
             result = requests.get(
                 url,
@@ -153,54 +180,83 @@ class LDATAService:
                 timeout=15,
             )
             _LOGGER.debug(
-                "Get WHEMS Panels result %d: %s", result.status_code, result.text
+                "Get WHEMS CTs result %d: %s", result.status_code, result.text
             )
-
             if result.status_code == 200:
-                returnPanels = result.json()
-                for panel in returnPanels:
-                    panel["ModuleType"] = "WHEMS"
-                    # Make the data look like an LDATA module
-                    panel["rmsVoltage"] = panel["rmsVoltageA"]
-                    panel["rmsVoltage2"] = panel["rmsVoltageB"]
-                    panel["updateVersion"] = panel["version"]
-                    panel["residentialBreakers"] = self.get_Whems_breakers(panel["id"])
-                return returnPanels
-            _LOGGER.exception("Unable to get WHEMS Panels!")
+                return result.json()
+            _LOGGER.exception("Unable to WHEMS CTs!")
         except Exception as ex:  # pylint: disable=broad-except
-            _LOGGER.exception("Unable to get WHEMS Panels! %s", ex)
+            _LOGGER.exception("Unable to get WHEMS CTs! %s", ex)
             self.clear_tokens()
         return None
+
+    def get_iotWhemsPanels(self) -> object:
+        """Get the whemns modules for all the residences the user has access to."""
+        allPanels = None
+        for residenceId in self.residence_id_list:
+            headers = {**defaultHeaders}
+            headers["authorization"] = self.auth_token
+            headers["filter"] = "{}"
+            url = f"https://my.leviton.com/api/Residences/{residenceId}/iotWhems"
+            try:
+                result = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=15,
+                )
+                _LOGGER.debug(
+                    "Get WHEMS Panels result %d: %s", result.status_code, result.text
+                )
+                if result.status_code == 200:
+                    returnPanels = result.json()
+                    for panel in returnPanels:
+                        panel["ModuleType"] = "WHEMS"
+                        # Make the data look like an LDATA module
+                        panel["rmsVoltage"] = panel["rmsVoltageA"]
+                        panel["rmsVoltage2"] = panel["rmsVoltageB"]
+                        panel["updateVersion"] = panel["version"]
+                        panel["residentialBreakers"] = self.get_Whems_breakers(
+                            panel["id"]
+                        )
+                        panel["CTs"] = self.get_Whems_CT(panel["id"])
+                        if allPanels is None:
+                            allPanels = []
+                        allPanels.append(panel)
+            except Exception as ex:  # pylint: disable=broad-except
+                _LOGGER.exception("Unable to get WHEMS Panels! %s", ex)
+                self.clear_tokens()
+        return allPanels
 
     def get_ldata_panels(self) -> object:
-        """Get the breaker panels for the residence."""
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
-        headers["filter"] = '{"include":["residentialBreakers"]}'
-        url = (
-            "https://my.leviton.com/api/Residences/{}/residentialBreakerPanels".format(
-                self.residence_id
+        """Get the ldata modules for all the residences the user has access to."""
+        allPanels = None
+        for residenceId in self.residence_id_list:
+            headers = {**defaultHeaders}
+            headers["authorization"] = self.auth_token
+            headers["filter"] = '{"include":["residentialBreakers"]}'
+            url = "https://my.leviton.com/api/Residences/{}/residentialBreakerPanels".format(
+                residenceId
             )
-        )
-        try:
-            result = requests.get(
-                url,
-                headers=headers,
-                timeout=15,
-            )
-            _LOGGER.debug("Get Panels result %d: %s", result.status_code, result.text)
-
-            if result.status_code == 200:
-                returnPanels = result.json()
-                for panel in returnPanels:
-                    panel["ModuleType"] = "LDATA"
-                return returnPanels
-            _LOGGER.exception("Unable to get Panels!")
-        except Exception as ex:  # pylint: disable=broad-except
-            _LOGGER.exception("Unable to get Panels! %s", ex)
-            self.clear_tokens()
-
-        return None
+            try:
+                result = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=15,
+                )
+                _LOGGER.debug(
+                    "Get Panels result %d: %s", result.status_code, result.text
+                )
+                if result.status_code == 200:
+                    returnPanels = result.json()
+                    for panel in returnPanels:
+                        panel["ModuleType"] = "LDATA"
+                        if allPanels is None:
+                            allPanels = []
+                        allPanels.append(panel)
+            except Exception as ex:  # pylint: disable=broad-except
+                _LOGGER.exception("Unable to get Panels! %s", ex)
+                self.clear_tokens()
+        return allPanels
 
     def put_residential_breaker_panels(self, panel_id: str, panel_type: str) -> None:
         """Call PUT  on the ResidentialBreakerPanels API this must be done to force an update of the power values."""
@@ -266,10 +322,11 @@ class LDATAService:
         if self.account_id is None or self.account_id == "":
             return
         # Lookup the residential id from the account.
-        if self.residence_id is None or self.residence_id == "":
+        if self.residence_id_list is None or len(self.residence_id_list) == 0:
             _LOGGER.debug("Get Residence ID!")
             self.get_residence()
-        if self.residence_id is None or self.residence_id == "":
+            self.get_residencePermissions()
+        if self.residence_id_list is None or len(self.residence_id_list) == 0:
             return
         # Get the breaker panels.
         panels_json = self.get_ldata_panels()
@@ -281,6 +338,7 @@ class LDATAService:
                 panels_json.append(panel)
         status_data = {}
         breakers = {}
+        cts = {}
         panels = []
         if panels_json is not None:
             for panel in panels_json:
@@ -302,6 +360,33 @@ class LDATAService:
                 panel_data["voltage1"] = float(panel["rmsVoltage"])
                 panel_data["voltage2"] = float(panel["rmsVoltage2"])
                 panels.append(panel_data)
+                # Setup the CT list.
+                if "CTs" in panel:
+                    for ct in panel["CTs"]:
+                        if ct["usageType"] != "NOT_USED":
+                            # Create the CT data
+                            ct_data = {}
+                            ct_data["name"] = ct["usageType"]
+                            ct_data["id"] = str(ct["id"])
+                            ct_data["panel_id"] = panel["id"]
+                            ct_data["channel"] = str(ct["channel"])
+                            ct_data["power"] = self.none_to_zero(
+                                ct["activePower"]
+                            ) + self.none_to_zero(ct["activePower2"])
+                            ct_data["consumption"] = self.none_to_zero(
+                                ct["energyConsumption"]
+                            ) + self.none_to_zero(ct["energyConsumption2"])
+                            ct_data["import"] = self.none_to_zero(
+                                ct["energyImport"]
+                            ) + self.none_to_zero(ct["energyImport2"])
+                            ct_data["current"] = (
+                                self.none_to_zero(ct["rmsCurrent"])
+                                + self.none_to_zero(ct["rmsCurrent2"])
+                            ) / 2
+                            ct_data["current1"] = self.none_to_zero(ct["rmsCurrent"])
+                            ct_data["current2"] = self.none_to_zero(ct["rmsCurrent2"])
+                            # Add the CT to the list.
+                            cts[ct_data["id"]] = ct_data
                 for breaker in panel["residentialBreakers"]:
                     if (
                         breaker["model"] is not None
@@ -336,18 +421,22 @@ class LDATAService:
                                 * 0.866025403784439
                             )
 
-                        breaker_data["current"] = self.none_to_zero(
-                            breaker["rmsCurrent"]
-                        ) + self.none_to_zero(breaker["rmsCurrent2"])
                         if breaker["poles"] == 2:
                             breaker_data["frequency"] = (
                                 self.none_to_zero(breaker["lineFrequency"])
                                 + self.none_to_zero(breaker["lineFrequency2"])
                             ) / 2.0
+                            breaker_data["current"] = (
+                                self.none_to_zero(breaker["rmsCurrent"])
+                                + self.none_to_zero(breaker["rmsCurrent2"])
+                            ) / 2
                         else:
                             breaker_data["frequency"] = self.none_to_zero(
                                 breaker["lineFrequency"]
                             )
+                            breaker_data["current"] = self.none_to_zero(
+                                breaker["rmsCurrent"]
+                            ) + self.none_to_zero(breaker["rmsCurrent2"])
                         if breaker["position"] in _LEG1_POSITIONS:
                             breaker_data["leg"] = 1
                             breaker_data["power1"] = self.none_to_zero(breaker["power"])
@@ -400,6 +489,7 @@ class LDATAService:
                         breakers[breaker["id"]] = breaker_data
 
         status_data["breakers"] = breakers
+        status_data["cts"] = cts
         status_data["panels"] = panels
 
         totalPower = 0
