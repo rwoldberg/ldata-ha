@@ -78,17 +78,17 @@ SENSOR_TYPES = (
         unique_id_suffix="_hz",
     ),
     SensorDescription(  # index=4
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         name="Import",
         key="import",
         unique_id_suffix="_Import_kWh",
     ),
     SensorDescription(  # index=5
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         name="Consumption",
         key="consumption",
         unique_id_suffix="_Consumption_kWh",
@@ -107,9 +107,9 @@ async def async_setup_entry(
 
     for ct_id in entry.data["cts"]:
         ct_data = entry.data["cts"][ct_id]
-        power_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[4])
+        power_sensor = LDATAEnergyUsageSensor(entry, ct_data, SENSOR_TYPES[4])
         async_add_entities([power_sensor])
-        power_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[5])
+        power_sensor = LDATAEnergyUsageSensor(entry, ct_data, SENSOR_TYPES[5])
         async_add_entities([power_sensor])
         power_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[2])
         async_add_entities([power_sensor])
@@ -451,6 +451,58 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
 
 class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
     """Sensor that reads an output based on the passed in description from an LDATA device."""
+
+    entity_description: SensorDescription
+
+    def __init__(
+        self, coordinator: LDATAUpdateCoordinator, data, description: SensorDescription
+    ) -> None:
+        """Init sensor."""
+        self.entity_description = description
+        super().__init__(data=data, coordinator=coordinator)
+        self.ct_data = data
+        try:
+            self._state = float(self.ct_data[self.entity_description.key])
+        except Exception:  # pylint: disable=broad-except
+            self._state = 0.0
+        # Subscribe to updates.
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            if cts := self.coordinator.data["cts"]:
+                if new_data := cts[self.ct_data["id"]]:
+                    self._state = new_data[self.entity_description.key]
+        except Exception:  # pylint: disable=broad-except
+            self._state = None
+        self.async_write_ha_state()
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's name."""
+        return self.entity_description.name
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's unique ID."""
+        return self.entity_description.unique_id_suffix
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the power value."""
+        if self._state is not None:
+            return round(self._state, 2)
+        return self._state
+
+
+class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
+    """Sensor that reads an output based on the passed in description from an LDATA CT device."""
+
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
     entity_description: SensorDescription
 
