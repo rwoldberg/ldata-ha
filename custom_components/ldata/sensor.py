@@ -117,7 +117,7 @@ async def async_setup_entry(
         async_add_entities([power_sensor])
     for breaker_id in entry.data["breakers"]:
         breaker_data = entry.data["breakers"][breaker_id]
-        usage_sensor = LDATADailyUsageSensor(entry, breaker_data, False)
+        usage_sensor = LDATADailyUsageSensor(entry, breaker_data, False, "")
         async_add_entities([usage_sensor])
         power_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[0])
         async_add_entities([power_sensor])
@@ -136,7 +136,9 @@ async def async_setup_entry(
         entity_data["hardware"] = "LDATA"
         entity_data["firmware"] = panel["firmware"]
         entity_data["poles"] = 2
-        usage_sensor = LDATADailyUsageSensor(entry, entity_data, True)
+        usage_sensor = LDATADailyUsageSensor(
+            entry, entity_data, True, which_panel=panel["id"]
+        )
         async_add_entities([usage_sensor])
         total_sensor = LDATATotalUsageSensor(
             entry, entity_data, SENSOR_TYPES[0], average=False, which_leg="both"
@@ -180,7 +182,9 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
-    def __init__(self, coordinator: LDATAUpdateCoordinator, data, panelTotal) -> None:
+    def __init__(
+        self, coordinator: LDATAUpdateCoordinator, data, panelTotal, which_panel: str
+    ) -> None:
         """Init sensor."""
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
@@ -189,6 +193,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
         self.previous_value = 0.0
         self.last_update_date = dt_util.now()
         self.panel_total = panelTotal
+        self.panel_id = which_panel
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
@@ -251,7 +256,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
             new_data = None
             if self.panel_total is True:
                 current_value = 0
-                current_value = self.coordinator.data["totalPower"]
+                current_value = self.coordinator.data[self.panel_id + "totalPower"]
                 have_values = True
             else:
                 new_data = self.coordinator.data["breakers"][self.breaker_data["id"]]

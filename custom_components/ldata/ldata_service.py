@@ -387,6 +387,7 @@ class LDATAService:
                             ct_data["current2"] = self.none_to_zero(ct["rmsCurrent2"])
                             # Add the CT to the list.
                             cts[ct_data["id"]] = ct_data
+                totalPower = 0
                 for breaker in panel["residentialBreakers"]:
                     if (
                         breaker["model"] is not None
@@ -487,18 +488,15 @@ class LDATAService:
                             )
                         # Add the breaker to the list.
                         breakers[breaker["id"]] = breaker_data
+                        try:
+                            breaker_power = float(breaker_data["power"])
+                            totalPower += float(breaker_power)
+                        except ValueError:
+                            totalPower += 0
+                status_data[panel["id"] + "totalPower"] = totalPower
 
         status_data["breakers"] = breakers
         status_data["cts"] = cts
         status_data["panels"] = panels
-
-        totalPower = 0
-        for breaker in breakers.items():
-            try:
-                breaker_power = float(breaker[1]["power"])
-                totalPower += float(breaker_power)
-            except ValueError:
-                totalPower += 0
-        status_data["totalPower"] = totalPower
 
         return status_data
