@@ -36,7 +36,7 @@ from .ldata_uppdate_coordinator import LDATAUpdateCoordinator
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class SensorDescription(SensorEntityDescription):
     """SensorEntityDescription for LDATA entities."""
 
@@ -217,12 +217,12 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
             if self._state is not None:
                 try:
                     new_state = float(self._state) + float(last_state.state)
-                except Exception:  # pylint: disable=broad-except
+                except ValueError:
                     new_state = 0.0
             else:
                 try:
                     new_state = float(last_state.state)
-                except Exception:  # pylint: disable=broad-except
+                except ValueError:
                     new_state = 0.0
         self._state = new_state
         async_dispatcher_connect(
@@ -298,10 +298,9 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                             self._state = self._state + (power * time_span)
                         else:
                             self._state = power * time_span
-                    except Exception as ex:  # pylint: disable=broad-except
+                    except Exception:  # pylint: disable=broad-except
                         _LOGGER.exception(
-                            "Error updating sensor! %s (%f %f %f)",
-                            ex,
+                            "Error updating sensor! (%f %f %f)",
                             self._state,
                             power,
                             time_span,
@@ -310,9 +309,9 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                 self.last_update_time = current_time
                 self.previous_value = current_value
                 self.last_update_date = current_date
-        except Exception as ex:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             # self._state = None
-            _LOGGER.exception("Error updating sensor! %s", ex)
+            _LOGGER.exception("Error updating sensor!")
         self.async_write_ha_state()
 
 
@@ -356,12 +355,12 @@ class LDATACTDailyUsageSensor(LDATACTEntity, RestoreSensor):
             if self._state is not None:
                 try:
                     new_state = float(self._state) + float(last_state.state)
-                except Exception:  # pylint: disable=broad-except
+                except ValueError:
                     new_state = 0.0
             else:
                 try:
                     new_state = float(last_state.state)
-                except Exception:  # pylint: disable=broad-except
+                except ValueError:
                     new_state = 0.0
         self._state = new_state
         async_dispatcher_connect(
@@ -433,10 +432,9 @@ class LDATACTDailyUsageSensor(LDATACTEntity, RestoreSensor):
                             self._state += current_value - self.previous_value
                         else:
                             self._state = current_value - self.previous_value
-                    except Exception as ex:  # pylint: disable=broad-except
+                    except Exception:  # pylint: disable=broad-except
                         _LOGGER.exception(
-                            "Error updating sensor! %s (%f %f)",
-                            ex,
+                            "Error updating sensor! (%f %f)",
                             self._state,
                             current_value,
                         )
@@ -444,9 +442,9 @@ class LDATACTDailyUsageSensor(LDATACTEntity, RestoreSensor):
                 self.last_update_time = current_time
                 self.previous_value = current_value
                 self.last_update_date = current_date
-        except Exception as ex:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except
             # self._state = None
-            _LOGGER.exception("Error updating sensor! %s", ex)
+            _LOGGER.exception("Error updating sensor!")
         self.async_write_ha_state()
 
 
@@ -548,7 +546,7 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
         self.breaker_data = data
         try:
             self._state = float(self.breaker_data[self.entity_description.key])
-        except Exception:  # pylint: disable=broad-except
+        except ValueError:
             self._state = 0.0
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
@@ -560,7 +558,7 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
             if breakers := self.coordinator.data["breakers"]:
                 if new_data := breakers[self.breaker_data["id"]]:
                     self._state = new_data[self.entity_description.key]
-        except Exception:  # pylint: disable=broad-except
+        except KeyError:
             self._state = None
         self.async_write_ha_state()
 
@@ -604,7 +602,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         self.ct_data = data
         try:
             self._state = float(self.ct_data[self.entity_description.key])
-        except Exception:  # pylint: disable=broad-except
+        except ValueError:
             self._state = 0.0
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
@@ -616,7 +614,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
                     self._state = new_data[self.entity_description.key]
-        except Exception:  # pylint: disable=broad-except
+        except KeyError:
             self._state = None
         self.async_write_ha_state()
 
@@ -656,7 +654,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
         self.ct_data = data
         try:
             self._state = float(self.ct_data[self.entity_description.key])
-        except Exception:  # pylint: disable=broad-except
+        except ValueError:
             self._state = 0.0
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
@@ -668,7 +666,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
                     self._state = new_data[self.entity_description.key]
-        except Exception:  # pylint: disable=broad-except
+        except KeyError:
             self._state = None
         self.async_write_ha_state()
 
