@@ -199,6 +199,8 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
+        # Subscribe to updates.
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         last_state = await self.async_get_last_state()
         await super().async_added_to_hass()
         if not last_state:
@@ -226,8 +228,6 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
         async_dispatcher_connect(
             self.hass, DATA_UPDATED, self._schedule_immediate_update
         )
-        # Subscribe to updates.
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _schedule_immediate_update(self):
@@ -338,6 +338,8 @@ class LDATACTDailyUsageSensor(LDATACTEntity, RestoreSensor):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which will be added."""
+        # Subscribe to updates.
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         last_state = await self.async_get_last_state()
         await super().async_added_to_hass()
         if not last_state:
@@ -365,8 +367,6 @@ class LDATACTDailyUsageSensor(LDATACTEntity, RestoreSensor):
         async_dispatcher_connect(
             self.hass, DATA_UPDATED, self._schedule_immediate_update
         )
-        # Subscribe to updates.
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _schedule_immediate_update(self):
