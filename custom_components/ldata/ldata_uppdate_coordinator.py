@@ -1,4 +1,5 @@
 """LDATAUpdateCoordinator class to handle fetching new data about the LDATA module."""
+
 from datetime import timedelta
 import logging
 
@@ -28,12 +29,12 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
 
         # Set the update interval to half the input value, the update function will only refresh its data every other time.
         # Hopefully this will help the interface from thinking the sensors are no longer present if for some reason
-        # It takes longer than expected to pull the data from the website. 
+        # It takes longer than expected to pull the data from the website.
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=update_interval/2),
+            update_interval=timedelta(seconds=update_interval / 2),
         )
 
     async def _async_update_data(self):

@@ -29,7 +29,7 @@ class LDATAService:
         self.auth_token = ""
         self.userid = ""
         self.account_id = ""
-        self.residence_id_list = []
+        self.residence_id_list = []  # type: list[str]
 
     def clear_tokens(self) -> None:
         """Clear the tokens to force a re-login."""

@@ -111,22 +111,24 @@ async def async_setup_entry(
         async_add_entities([power_sensor])
         power_sensor = LDATAEnergyUsageSensor(entry, ct_data, SENSOR_TYPES[5])
         async_add_entities([power_sensor])
-        power_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[2])
-        async_add_entities([power_sensor])
-        power_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[0])
-        async_add_entities([power_sensor])
+        ctpower_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[2])
+        async_add_entities([ctpower_sensor])
+        ctpower_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[0])
+        async_add_entities([ctpower_sensor])
+        ctusage_sensor = LDATACTDailyUsageSensor(entry, ct_data, False, "")
+        async_add_entities([ctusage_sensor])
     for breaker_id in entry.data["breakers"]:
         breaker_data = entry.data["breakers"][breaker_id]
         usage_sensor = LDATADailyUsageSensor(entry, breaker_data, False, "")
         async_add_entities([usage_sensor])
-        power_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[0])
-        async_add_entities([power_sensor])
-        power_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[1])
-        async_add_entities([power_sensor])
-        power_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[2])
-        async_add_entities([power_sensor])
-        power_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[3])
-        async_add_entities([power_sensor])
+        output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[0])
+        async_add_entities([output_sensor])
+        output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[1])
+        async_add_entities([output_sensor])
+        output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[2])
+        async_add_entities([output_sensor])
+        output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[3])
+        async_add_entities([output_sensor])
     for panel in entry.data["panels"]:
         entity_data = {}
         entity_data["id"] = panel["serialNumber"]
@@ -188,7 +190,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
         """Init sensor."""
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
-        self._state = 0.0
+        self._state: float | None = None
         self.last_update_time = 0.0
         self.previous_value = 0.0
         self.last_update_date = dt_util.now()
@@ -220,7 +222,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                     new_state = float(last_state.state)
                 except Exception:  # pylint: disable=broad-except
                     new_state = 0.0
-        self._state = new_state  # type: ignore[assignment]
+        self._state = new_state
         async_dispatcher_connect(
             self.hass, DATA_UPDATED, self._schedule_immediate_update
         )
@@ -296,13 +298,147 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
                             self._state = self._state + (power * time_span)
                         else:
                             self._state = power * time_span
-                    except Exception:  # pylint: disable=broad-except
+                    except Exception as ex:  # pylint: disable=broad-except
                         _LOGGER.exception(
                             "Error updating sensor! %s (%f %f %f)",
                             ex,
                             self._state,
                             power,
                             time_span,
+                        )
+                # Save the current values
+                self.last_update_time = current_time
+                self.previous_value = current_value
+                self.last_update_date = current_date
+        except Exception as ex:  # pylint: disable=broad-except
+            # self._state = None
+            _LOGGER.exception("Error updating sensor! %s", ex)
+        self.async_write_ha_state()
+
+
+class LDATACTDailyUsageSensor(LDATACTEntity, RestoreSensor):
+    """Sensor that tracks daily usage for an LDATA device."""
+
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    def __init__(
+        self, coordinator: LDATAUpdateCoordinator, data, panelTotal, which_panel: str
+    ) -> None:
+        """Init sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.breaker_data = data
+        self._state: float | None = None
+        self.last_update_time = 0.0
+        self.previous_value = 0.0
+        self.last_update_date = dt_util.now()
+        self.panel_total = panelTotal
+        self.panel_id = which_panel
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which will be added."""
+        last_state = await self.async_get_last_state()
+        await super().async_added_to_hass()
+        if not last_state:
+            return
+        last_update_date = dt_util.as_local(last_state.last_updated)
+        current_date = dt_util.now()
+        new_state = 0.0
+        # Only load running total if the last update day is same as today
+        if (
+            (last_update_date.day == current_date.day)
+            and (last_update_date.month == current_date.month)
+            and (last_update_date.year == current_date.year)
+        ):
+            if self._state is not None:
+                try:
+                    new_state = float(self._state) + float(last_state.state)
+                except Exception:  # pylint: disable=broad-except
+                    new_state = 0.0
+            else:
+                try:
+                    new_state = float(last_state.state)
+                except Exception:  # pylint: disable=broad-except
+                    new_state = 0.0
+        self._state = new_state
+        async_dispatcher_connect(
+            self.hass, DATA_UPDATED, self._schedule_immediate_update
+        )
+        # Subscribe to updates.
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _schedule_immediate_update(self):
+        self.async_schedule_update_ha_state(True)
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's name."""
+        return "Total Daily Energy"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's unique ID."""
+        return "todaymw"
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the used kilowatts of the device."""
+        if self._state is not None:
+            return round(self._state, 2)
+        return 0.0
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            have_values = False
+            new_data = None
+            if self.panel_total is True:
+                current_value = 0
+                current_value = self.coordinator.data[self.panel_id + "totalPower"]
+                have_values = True
+            else:
+                new_data = self.coordinator.data["cts"][self.breaker_data["id"]]
+            if ((self.panel_total is True) and (have_values is True)) or (
+                new_data is not None
+            ):
+                if new_data is not None:
+                    current_value = new_data["consumption"]
+                # Make sure values are floats
+                try:
+                    current_value = float(current_value)
+                except ValueError:
+                    current_value = 0
+                try:
+                    self.previous_value = float(self.previous_value)
+                except ValueError:
+                    self.previous_value = 0
+                # Save the current date and time
+                current_time = time.time()
+                current_date = dt_util.now()
+                # Only update if we have a previous update
+                if self.last_update_time > 0:
+                    # Clear the running total if the last update date and now are not the same day
+                    if (
+                        (self.last_update_date.day != current_date.day)
+                        or (self.last_update_date.month != current_date.month)
+                        or (self.last_update_date.year != current_date.year)
+                    ):
+                        self._state = 0
+                    # Update our running total
+                    try:
+                        if self._state is not None:
+                            self._state += current_value - self.previous_value
+                        else:
+                            self._state = current_value - self.previous_value
+                    except Exception as ex:  # pylint: disable=broad-except
+                        _LOGGER.exception(
+                            "Error updating sensor! %s (%f %f)",
+                            ex,
+                            self._state,
+                            current_value,
                         )
                 # Save the current values
                 self.last_update_time = current_time
