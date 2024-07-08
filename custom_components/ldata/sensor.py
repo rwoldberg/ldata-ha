@@ -8,7 +8,6 @@ import logging
 import time
 
 from homeassistant.components.sensor import (
-    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -23,12 +22,11 @@ from homeassistant.const import (
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
-from .const import DATA_UPDATED, DOMAIN, LOGGER_NAME
+from .const import DOMAIN, LOGGER_NAME
 from .ldata_ct_entity import LDATACTEntity
 from .ldata_entity import LDATAEntity
 from .ldata_uppdate_coordinator import LDATAUpdateCoordinator
@@ -177,7 +175,7 @@ async def async_setup_entry(
         async_add_entities([total_sensor])
 
 
-class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
+class LDATADailyUsageSensor(LDATAEntity, SensorEntity):
     """Sensor that tracks daily usage for an LDATA device."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -201,33 +199,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
         """Handle entity which will be added."""
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-        last_state = await self.async_get_last_state()
         await super().async_added_to_hass()
-        if not last_state:
-            return
-        last_update_date = dt_util.as_local(last_state.last_updated)
-        current_date = dt_util.now()
-        new_state = 0.0
-        # Only load running total if the last update day is same as today
-        if (
-            (last_update_date.day == current_date.day)
-            and (last_update_date.month == current_date.month)
-            and (last_update_date.year == current_date.year)
-        ):
-            if self._state is not None:
-                try:
-                    new_state = float(self._state) + float(last_state.state)
-                except ValueError:
-                    new_state = 0.0
-            else:
-                try:
-                    new_state = float(last_state.state)
-                except ValueError:
-                    new_state = 0.0
-        self._state = new_state
-        async_dispatcher_connect(
-            self.hass, DATA_UPDATED, self._schedule_immediate_update
-        )
 
     @callback
     def _schedule_immediate_update(self):
@@ -315,7 +287,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreSensor):
         self.async_write_ha_state()
 
 
-class LDATACTDailyUsageSensor(LDATACTEntity, RestoreSensor):
+class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity):
     """Sensor that tracks daily usage for an LDATA device."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -339,33 +311,7 @@ class LDATACTDailyUsageSensor(LDATACTEntity, RestoreSensor):
         """Handle entity which will be added."""
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-        last_state = await self.async_get_last_state()
         await super().async_added_to_hass()
-        if not last_state:
-            return
-        last_update_date = dt_util.as_local(last_state.last_updated)
-        current_date = dt_util.now()
-        new_state = 0.0
-        # Only load running total if the last update day is same as today
-        if (
-            (last_update_date.day == current_date.day)
-            and (last_update_date.month == current_date.month)
-            and (last_update_date.year == current_date.year)
-        ):
-            if self._state is not None:
-                try:
-                    new_state = float(self._state) + float(last_state.state)
-                except ValueError:
-                    new_state = 0.0
-            else:
-                try:
-                    new_state = float(last_state.state)
-                except ValueError:
-                    new_state = 0.0
-        self._state = new_state
-        async_dispatcher_connect(
-            self.hass, DATA_UPDATED, self._schedule_immediate_update
-        )
 
     @callback
     def _schedule_immediate_update(self):
