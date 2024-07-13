@@ -1,7 +1,7 @@
 # ldata-ha
-# leviton LDATA integration for Home Assistant (https://my.leviton.com/)
+# leviton LDATA and LWHEM integration for Home Assistant (https://my.leviton.com/)
 
-This is a home assistant integration for the LDATA hub for levitons smart breakers.
+This is a home assistant integration for the LDATA and LWHEM hubs for levitons smart breakers.
 
 If this integration has been useful to you, please consider chipping in and buying me a coffee!
 
