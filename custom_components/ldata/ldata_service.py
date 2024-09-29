@@ -117,13 +117,34 @@ class LDATAService:
             _LOGGER.exception("Unable to get Residence Permissions! %s", ex)
         return False
 
+    def get_residences(self) -> bool:
+        """Get the Residential Account for the user."""
+        headers = {**defaultHeaders}
+        headers["authorization"] = self.auth_token
+        url = f"https://my.leviton.com/api/ResidentialAccounts/{self.account_id}/residences"
+        try:
+            result = requests.get(
+                url,
+                headers=headers,
+                timeout=15,
+            )
+            _LOGGER.debug(
+                "Get Residences Account result %d: %s", result.status_code, result.text
+            )
+            result_json = result.json()
+            if result.status_code == 200 and len(result_json) > 0:
+                self.residence_id_list.append(result_json[0]["id"])
+                return True
+            _LOGGER.exception("Unable to get Residences!")
+        except Exception as ex:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get Residences! %s", ex)
+        return False
+
     def get_residence(self) -> bool:
         """Get the Residential Account for the user."""
         headers = {**defaultHeaders}
         headers["authorization"] = self.auth_token
-        url = "https://my.leviton.com/api/ResidentialAccounts/{}/residences".format(
-            self.account_id
-        )
+        url = f"https://my.leviton.com/api/ResidentialAccounts/{self.account_id}"
         try:
             result = requests.get(
                 url,
@@ -135,7 +156,7 @@ class LDATAService:
             )
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
-                self.residence_id_list.append(result_json[0]["id"])
+                self.residence_id_list.append(result_json["primaryResidenceId"])
                 return True
             _LOGGER.exception("Unable to get Residence!")
             self.clear_tokens()
@@ -234,9 +255,7 @@ class LDATAService:
             headers = {**defaultHeaders}
             headers["authorization"] = self.auth_token
             headers["filter"] = '{"include":["residentialBreakers"]}'
-            url = "https://my.leviton.com/api/Residences/{}/residentialBreakerPanels".format(
-                residenceId
-            )
+            url = f"https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels"
             try:
                 result = requests.get(
                     url,
@@ -281,9 +300,9 @@ class LDATAService:
         url = f"https://my.leviton.com/api/ResidentialBreakers/{breaker_id}"
         headers = {**defaultHeaders}
         headers["authorization"] = self.auth_token
-        headers[
-            "referer"
-        ] = f"https://my.leviton.com/home/residential-breakers/{breaker_id}/settings"
+        headers["referer"] = (
+            f"https://my.leviton.com/home/residential-breakers/{breaker_id}/settings"
+        )
         data = {"remoteTrip": True}
         result = requests.put(
             url,
@@ -314,20 +333,23 @@ class LDATAService:
             _LOGGER.debug("Not authenticated yet!")
             self.auth()
         if self.auth_token is None or self.auth_token == "":
-            return
+            return None
         # Make sure we have a residential Account
         if self.account_id is None or self.account_id == "":
             _LOGGER.debug("Get Account ID!")
             self.get_residential_account()
         if self.account_id is None or self.account_id == "":
-            return
+            return None
         # Lookup the residential id from the account.
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
             _LOGGER.debug("Get Residence ID!")
-            self.get_residence()
+            self.get_residences()
+            if self.residence_id_list is None or len(self.residence_id_list) == 0:
+                # User does not have multiple residences, lets try just the single residence
+                self.get_residence()
             self.get_residencePermissions()
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
-            return
+            return None
         # Get the breaker panels.
         panels_json = self.get_ldata_panels()
         whems_panels_json = self.get_iotWhemsPanels()
