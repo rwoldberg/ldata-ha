@@ -80,8 +80,14 @@ class LDATAService:
             )
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
-                self.account_id = result_json[0]["residentialAccountId"]
-                return True
+                # Search for the residential account id
+                for item in result_json:
+                    if "residentialAccountId" in item:
+                        self.account_id = item["residentialAccountId"]
+                        if self.account_id is not None:
+                            break
+                if self.account_id is not None:
+                    return True
             _LOGGER.exception("Unable to get Residential Account!")
             self.clear_tokens()
         except Exception as ex:  # pylint: disable=broad-except
