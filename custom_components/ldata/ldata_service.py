@@ -378,7 +378,7 @@ class LDATAService:
             for panel in whems_panels_json:
                 panels_json.append(panel)
 
-        return self.parsePanels(panels_json)
+        return self.parse_panels(panels_json)
 
     def parse_panels(self, panels_json) -> object:
         """Parse the panel json data."""
