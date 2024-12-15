@@ -5,7 +5,7 @@ import logging
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import _LEG1_POSITIONS, DOMAIN, LOGGER_NAME, MANUFACTURER
-from .ldata_uppdate_coordinator import LDATAUpdateCoordinator
+from .coordinator import LDATAUpdateCoordinator
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -73,7 +73,7 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         if self._device_id is None:
             return None
 
-        info = {
+        return {
             "identifiers": {(DOMAIN, self.entity_data["serialNumber"])},
             "name": self.entity_data["name"],
             "model": self.entity_data["model"],
@@ -81,8 +81,6 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
             "sw_version": self.entity_data["firmware"],
             "manufacturer": MANUFACTURER,
         }
-
-        return info
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:

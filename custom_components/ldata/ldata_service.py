@@ -90,8 +90,8 @@ class LDATAService:
                     return True
             _LOGGER.exception("Unable to get Residential Account!")
             self.clear_tokens()
-        except Exception as ex:  # pylint: disable=broad-except
-            _LOGGER.exception("Unable to get Residential Account! %s", ex)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get Residential Account!")
             self.clear_tokens()
 
         return False
@@ -119,8 +119,8 @@ class LDATAService:
                         self.residence_id_list.append(account["residenceId"])
                 return True
             _LOGGER.exception("Unable to get Residence Permissions!")
-        except Exception as ex:  # pylint: disable=broad-except
-            _LOGGER.exception("Unable to get Residence Permissions! %s", ex)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get Residence Permissions!")
         return False
 
     def get_residences(self) -> bool:
@@ -142,8 +142,8 @@ class LDATAService:
                 self.residence_id_list.append(result_json[0]["id"])
                 return True
             _LOGGER.exception("Unable to get Residences!")
-        except Exception as ex:  # pylint: disable=broad-except
-            _LOGGER.exception("Unable to get Residences! %s", ex)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get Residences!")
         return False
 
     def get_residence(self) -> bool:
@@ -166,8 +166,8 @@ class LDATAService:
                 return True
             _LOGGER.exception("Unable to get Residence!")
             self.clear_tokens()
-        except Exception as ex:  # pylint: disable=broad-except
-            _LOGGER.exception("Unable to get Residence! %s", ex)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get Residence!")
             self.clear_tokens()
         return False
 
@@ -189,8 +189,8 @@ class LDATAService:
             if result.status_code == 200:
                 return result.json()
             _LOGGER.exception("Unable to WHEMS breakers!")
-        except Exception as ex:  # pylint: disable=broad-except
-            _LOGGER.exception("Unable to get WHEMS breakers! %s", ex)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get WHEMS breakers!")
             self.clear_tokens()
         return None
 
@@ -212,8 +212,8 @@ class LDATAService:
             if result.status_code == 200:
                 return result.json()
             _LOGGER.exception("Unable to WHEMS CTs!")
-        except Exception as ex:  # pylint: disable=broad-except
-            _LOGGER.exception("Unable to get WHEMS CTs! %s", ex)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.exception("Unable to get WHEMS CTs!")
             self.clear_tokens()
         return None
 
@@ -249,8 +249,8 @@ class LDATAService:
                         if allPanels is None:
                             allPanels = []
                         allPanels.append(panel)
-            except Exception as ex:  # pylint: disable=broad-except
-                _LOGGER.exception("Unable to get WHEMS Panels! %s", ex)
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unable to get WHEMS Panels!")
                 self.clear_tokens()
         return allPanels
 
@@ -278,8 +278,8 @@ class LDATAService:
                         if allPanels is None:
                             allPanels = []
                         allPanels.append(panel)
-            except Exception as ex:  # pylint: disable=broad-except
-                _LOGGER.exception("Unable to get Panels! %s", ex)
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unable to get Panels!")
                 self.clear_tokens()
         return allPanels
 
@@ -300,7 +300,7 @@ class LDATAService:
             timeout=15,
         )
 
-    def turn_off(self, breaker_id):
+    def remote_off(self, breaker_id):
         """Turn off a breaker."""
         # Call PUT on the ResidentialBreakerPanels/{breaker_id}.  The data is remoteTrip set to true, this will trip the breaker.
         url = f"https://my.leviton.com/api/ResidentialBreakers/{breaker_id}"
@@ -310,13 +310,29 @@ class LDATAService:
             f"https://my.leviton.com/home/residential-breakers/{breaker_id}/settings"
         )
         data = {"remoteTrip": True}
-        result = requests.put(
+        return requests.put(
             url,
             headers=headers,
             json=data,
             timeout=15,
         )
-        return result
+
+    def remote_on(self, breaker_id):
+        """Turn on a breaker."""
+        # Call PUT on the ResidentialBreakerPanels/{breaker_id}.  The data is remoteOn set to true, this will turn on the breaker if it has remote on capabailities
+        url = f"https://my.leviton.com/api/ResidentialBreakers/{breaker_id}"
+        headers = {**defaultHeaders}
+        headers["authorization"] = self.auth_token
+        headers["referer"] = (
+            f"https://my.leviton.com/home/residential-breakers/{breaker_id}/settings"
+        )
+        data = {"remoteOn": True}
+        return requests.put(
+            url,
+            headers=headers,
+            json=data,
+            timeout=15,
+        )
 
     def none_to_zero(self, value) -> float:
         """Convert a value to a float and replace None with 0.0."""
@@ -325,16 +341,13 @@ class LDATAService:
             return result
         try:
             result = float(value)
-        except Exception:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
             result = 0.0
         return result
 
     def status(self):
         """Get the breakers from the API."""
         # Make sure we are logged in.
-        three_phase = self.entry.options.get(
-            THREE_PHASE, self.entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
-        )
         if self.auth_token is None or self.auth_token == "":
             _LOGGER.debug("Not authenticated yet!")
             self.auth()
@@ -364,6 +377,14 @@ class LDATAService:
         elif whems_panels_json is not None:
             for panel in whems_panels_json:
                 panels_json.append(panel)
+
+        return self.parsePanels(panels_json)
+
+    def parse_panels(self, panels_json) -> object:
+        """Parse the panel json data."""
+        three_phase = self.entry.options.get(
+            THREE_PHASE, self.entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
+        )
         status_data = {}
         breakers = {}
         cts = {}
@@ -434,6 +455,16 @@ class LDATAService:
                         breaker_data["serialNumber"] = breaker["serialNumber"]
                         breaker_data["hardware"] = breaker["hwVersion"]
                         breaker_data["firmware"] = breaker["firmwareVersionMeter"]
+                        if breaker["canRemoteOn"] is not None:
+                            breaker_data["canRemoteOn"] = breaker["canRemoteOn"]
+                        else:
+                            breaker_data["canRemoteOn"] = False
+                        if breaker["remoteState"] is not None:
+                            breaker_data["remoteState"] = breaker["remoteState"]
+                            if breaker_data["remoteState"] == "":
+                                breaker_data["remoteState"] = "RemoteON"
+                        else:
+                            breaker_data["remoteState"] = "RemoteON"
                         breaker_data["power"] = self.none_to_zero(
                             breaker["power"]
                         ) + self.none_to_zero(breaker["power2"])

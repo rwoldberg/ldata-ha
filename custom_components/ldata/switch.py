@@ -1,4 +1,6 @@
 """Switch support for an LDATA devices."""
+
+import asyncio
 import logging
 from typing import Any
 
@@ -44,8 +46,13 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         self.breaker_data = data
         self._state = None
         if current_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
-            if current_data["state"] == "ManualON":
+            if (
+                current_data["state"] == "ManualON"
+                and current_data["remoteState"] == "RemoteON"
+            ):
                 self._state = True
+            else:
+                self._state = False
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
@@ -55,11 +62,14 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         try:
             if breakers := self.coordinator.data["breakers"]:
                 if new_data := breakers[self.breaker_data["id"]]:
-                    if new_data["state"] == "ManualON":
+                    if (
+                        new_data["state"] == "ManualON"
+                        and new_data["remoteState"] == "RemoteON"
+                    ):
                         self._state = True
                     else:
                         self._state = False
-        except Exception:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
             self._state = None
         self.async_write_ha_state()
 
@@ -78,12 +88,22 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Trip the breaker."""
         await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.turn_off, self.breaker_data["id"]
+            self.coordinator.service.remote_off, self.breaker_data["id"]
         )
+        self._state = False
+        self.async_write_ha_state()
+        await asyncio.sleep(2)
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Reset the breaker."""
-        _LOGGER.debug("turn_on is not supported!")
+        await self.coordinator.hass.async_add_executor_job(
+            self.coordinator.service.remote_on, self.breaker_data["id"]
+        )
+        self._state = True
+        self.async_write_ha_state()
+        await asyncio.sleep(2)
+        await self.coordinator.async_request_refresh()
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:

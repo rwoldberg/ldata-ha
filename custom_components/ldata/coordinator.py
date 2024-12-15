@@ -1,9 +1,8 @@
 """LDATAUpdateCoordinator class to handle fetching new data about the LDATA module."""
 
+import asyncio
 from datetime import timedelta
 import logging
-
-import async_timeout
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -25,31 +24,22 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self.user = user
         self._service = LDATAService(user, password, entry)
         self._available = True
-        self.service_data = None
 
-        # Set the update interval to half the input value, the update function will only refresh its data every other time.
-        # Hopefully this will help the interface from thinking the sensors are no longer present if for some reason
-        # It takes longer than expected to pull the data from the website.
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=update_interval / 2),
+            update_interval=timedelta(seconds=update_interval),
         )
 
     async def _async_update_data(self):
         """Fetch data from LDATA Controller."""
+        returnData = None
         try:
-            returnData = self.service_data
-            if self.service_data is None:
-                async with async_timeout.timeout(30):
-                    self.service_data = await self._hass.async_add_executor_job(
-                        self._service.status  # Fetch new status
-                    )
-                returnData = self.service_data
-            else:
-                self.service_data = None
-            return returnData
+            async with asyncio.timeout(30):
+                returnData = await self._hass.async_add_executor_job(
+                    self._service.status  # Fetch new status
+                )
         except Exception as ex:
             self._available = False  # Mark as unavailable
             _LOGGER.warning(
@@ -58,6 +48,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(
                 f"Error communicating with LDATA for {self.user}"
             ) from ex
+        return returnData
 
     @property
     def service(self) -> LDATAService:

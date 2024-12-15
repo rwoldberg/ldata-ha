@@ -1,4 +1,5 @@
 """Defines a binary sensor for an LDATA entity."""
+
 import logging
 
 from homeassistant.components.binary_sensor import BinarySensorEntity
@@ -36,8 +37,13 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         self.breaker_data = data
         self._state = None
         if current_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
-            if current_data["state"] == "ManualON":
+            if (
+                current_data["state"] == "ManualON"
+                and current_data["remoteState"] == "RemoteON"
+            ):
                 self._state = True
+            else:
+                self._state = False
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
@@ -47,11 +53,14 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         try:
             if breakers := self.coordinator.data["breakers"]:
                 if new_data := breakers[self.breaker_data["id"]]:
-                    if new_data["state"] == "ManualON":
+                    if (
+                        new_data["state"] == "ManualON"
+                        and new_data["remoteState"] == "RemoteON"
+                    ):
                         self._state = True
                     else:
                         self._state = False
-        except Exception:  # pylint: disable=broad-except
+        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
             self._state = None
         self.async_write_ha_state()
 
