@@ -1,6 +1,7 @@
 """The LDATAService object."""
 
 import logging
+import typing
 
 import requests
 
@@ -382,178 +383,181 @@ class LDATAService:
 
     def parse_panels(self, panels_json) -> object:
         """Parse the panel json data."""
+        status_data: dict[str, typing.Any] = dict[str, typing.Any]()
+        breakers: dict[str, typing.Any] = dict[str, typing.Any]()
+        cts: dict[str, typing.Any] = dict[str, typing.Any]()
+        panels: list[typing.Any] = list[typing.Any]()
+        status_data["breakers"] = breakers
+        status_data["cts"] = cts
+        status_data["panels"] = panels
+        if panels_json is None:
+            return status_data
         three_phase = self.entry.options.get(
             THREE_PHASE, self.entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
         )
-        status_data = {}
-        breakers = {}
-        cts = {}
-        panels = []
-        if panels_json is not None:
-            for panel in panels_json:
-                self.put_residential_breaker_panels(panel["id"], panel["ModuleType"])
-                panel_data = {}
-                panel_data["firmware"] = panel["updateVersion"]
-                panel_data["model"] = panel["model"]
-                panel_data["id"] = panel["id"]
-                panel_data["name"] = panel["name"]
-                panel_data["serialNumber"] = panel["id"]
-                if three_phase is False:
-                    panel_data["voltage"] = (
-                        float(panel["rmsVoltage"]) + float(panel["rmsVoltage2"])
-                    ) / 2.0
-                else:
-                    panel_data["voltage"] = (
-                        float(panel["rmsVoltage"]) * 0.866025403784439
-                    ) + (float(panel["rmsVoltage2"]) * 0.866025403784439)
-                panel_data["voltage1"] = float(panel["rmsVoltage"])
-                panel_data["voltage2"] = float(panel["rmsVoltage2"])
-                panels.append(panel_data)
-                # Setup the CT list.
-                if "CTs" in panel:
-                    for ct in panel["CTs"]:
-                        if ct["usageType"] != "NOT_USED":
-                            # Create the CT data
-                            ct_data = {}
-                            ct_data["name"] = ct["usageType"]
-                            ct_data["id"] = str(ct["id"])
-                            ct_data["panel_id"] = panel["id"]
-                            ct_data["channel"] = str(ct["channel"])
-                            ct_data["power"] = self.none_to_zero(
-                                ct["activePower"]
-                            ) + self.none_to_zero(ct["activePower2"])
-                            ct_data["consumption"] = self.none_to_zero(
-                                ct["energyConsumption"]
-                            ) + self.none_to_zero(ct["energyConsumption2"])
-                            ct_data["import"] = self.none_to_zero(
-                                ct["energyImport"]
-                            ) + self.none_to_zero(ct["energyImport2"])
-                            ct_data["current"] = (
-                                self.none_to_zero(ct["rmsCurrent"])
-                                + self.none_to_zero(ct["rmsCurrent2"])
-                            ) / 2
-                            ct_data["current1"] = self.none_to_zero(ct["rmsCurrent"])
-                            ct_data["current2"] = self.none_to_zero(ct["rmsCurrent2"])
-                            # Add the CT to the list.
-                            cts[ct_data["id"]] = ct_data
-                totalPower = 0
-                for breaker in panel["residentialBreakers"]:
-                    if (
-                        breaker["model"] is not None
-                        and breaker["model"] != "NONE-2"
-                        and breaker["model"] != "NONE-1"
-                    ):
-                        breaker_data = {}
-                        breaker_data["panel_id"] = panel["id"]
-                        breaker_data["rating"] = breaker["currentRating"]
-                        breaker_data["position"] = breaker["position"]
-                        breaker_data["name"] = breaker["name"]
-                        breaker_data["state"] = breaker["currentState"]
-                        breaker_data["id"] = breaker["id"]
-                        breaker_data["model"] = breaker["model"]
-                        breaker_data["poles"] = breaker["poles"]
-                        breaker_data["serialNumber"] = breaker["serialNumber"]
-                        breaker_data["hardware"] = breaker["hwVersion"]
-                        breaker_data["firmware"] = breaker["firmwareVersionMeter"]
-                        if breaker["canRemoteOn"] is not None:
-                            breaker_data["canRemoteOn"] = breaker["canRemoteOn"]
-                        else:
-                            breaker_data["canRemoteOn"] = False
-                        if breaker["remoteState"] is not None:
-                            breaker_data["remoteState"] = breaker["remoteState"]
-                            if breaker_data["remoteState"] == "":
-                                breaker_data["remoteState"] = "RemoteON"
-                        else:
+        for panel in panels_json:
+            self.put_residential_breaker_panels(panel["id"], panel["ModuleType"])
+            panel_data = {}
+            panel_data["firmware"] = panel["updateVersion"]
+            panel_data["model"] = panel["model"]
+            panel_data["id"] = panel["id"]
+            panel_data["name"] = panel["name"]
+            panel_data["serialNumber"] = panel["id"]
+            if three_phase is False:
+                panel_data["voltage"] = (
+                    float(panel["rmsVoltage"]) + float(panel["rmsVoltage2"])
+                ) / 2.0
+            else:
+                panel_data["voltage"] = (
+                    float(panel["rmsVoltage"]) * 0.866025403784439
+                ) + (float(panel["rmsVoltage2"]) * 0.866025403784439)
+            panel_data["voltage1"] = float(panel["rmsVoltage"])
+            panel_data["voltage2"] = float(panel["rmsVoltage2"])
+            panel_data["frequency1"] = float(panel["frequencyA"])
+            panel_data["frequency2"] = float(panel["frequencyB"])
+            panel_data["frequency"] = (
+                float(panel["frequencyA"]) + float(panel["frequencyB"])
+            ) / 2
+            panels.append(panel_data)
+            # Setup the CT list.
+            if "CTs" in panel:
+                for ct in panel["CTs"]:
+                    if ct["usageType"] != "NOT_USED":
+                        # Create the CT data
+                        ct_data = {}
+                        ct_data["name"] = ct["usageType"]
+                        ct_data["id"] = str(ct["id"])
+                        ct_data["panel_id"] = panel["id"]
+                        ct_data["channel"] = str(ct["channel"])
+                        ct_data["power"] = self.none_to_zero(
+                            ct["activePower"]
+                        ) + self.none_to_zero(ct["activePower2"])
+                        ct_data["consumption"] = self.none_to_zero(
+                            ct["energyConsumption"]
+                        ) + self.none_to_zero(ct["energyConsumption2"])
+                        ct_data["import"] = self.none_to_zero(
+                            ct["energyImport"]
+                        ) + self.none_to_zero(ct["energyImport2"])
+                        ct_data["current"] = (
+                            self.none_to_zero(ct["rmsCurrent"])
+                            + self.none_to_zero(ct["rmsCurrent2"])
+                        ) / 2
+                        ct_data["current1"] = self.none_to_zero(ct["rmsCurrent"])
+                        ct_data["current2"] = self.none_to_zero(ct["rmsCurrent2"])
+                        # Add the CT to the list.
+                        cts[ct_data["id"]] = ct_data
+            totalPower = 0.0
+            for breaker in panel["residentialBreakers"]:
+                if (
+                    breaker["model"] is not None
+                    and breaker["model"] != "NONE-2"
+                    and breaker["model"] != "NONE-1"
+                ):
+                    breaker_data = {}
+                    breaker_data["panel_id"] = panel["id"]
+                    breaker_data["rating"] = breaker["currentRating"]
+                    breaker_data["position"] = breaker["position"]
+                    breaker_data["name"] = breaker["name"]
+                    breaker_data["state"] = breaker["currentState"]
+                    breaker_data["id"] = breaker["id"]
+                    breaker_data["model"] = breaker["model"]
+                    breaker_data["poles"] = breaker["poles"]
+                    breaker_data["serialNumber"] = breaker["serialNumber"]
+                    breaker_data["hardware"] = breaker["hwVersion"]
+                    breaker_data["firmware"] = breaker["firmwareVersionMeter"]
+                    if breaker["canRemoteOn"] is not None:
+                        breaker_data["canRemoteOn"] = breaker["canRemoteOn"]
+                    else:
+                        breaker_data["canRemoteOn"] = False
+                    if breaker["remoteState"] is not None:
+                        breaker_data["remoteState"] = breaker["remoteState"]
+                        if breaker_data["remoteState"] == "":
                             breaker_data["remoteState"] = "RemoteON"
-                        breaker_data["power"] = self.none_to_zero(
-                            breaker["power"]
-                        ) + self.none_to_zero(breaker["power2"])
-                        if (three_phase is False) or (breaker["poles"] == 1):
-                            breaker_data["voltage"] = self.none_to_zero(
-                                breaker["rmsVoltage"]
-                            ) + self.none_to_zero(breaker["rmsVoltage2"])
-                        else:
-                            breaker_data["voltage"] = (
-                                self.none_to_zero(breaker["rmsVoltage"])
-                                * 0.866025403784439
-                            ) + (
-                                self.none_to_zero(breaker["rmsVoltage2"])
-                                * 0.866025403784439
-                            )
+                    else:
+                        breaker_data["remoteState"] = "RemoteON"
+                    breaker_data["power"] = self.none_to_zero(
+                        breaker["power"]
+                    ) + self.none_to_zero(breaker["power2"])
+                    if (three_phase is False) or (breaker["poles"] == 1):
+                        breaker_data["voltage"] = self.none_to_zero(
+                            breaker["rmsVoltage"]
+                        ) + self.none_to_zero(breaker["rmsVoltage2"])
+                    else:
+                        breaker_data["voltage"] = (
+                            self.none_to_zero(breaker["rmsVoltage"]) * 0.866025403784439
+                        ) + (
+                            self.none_to_zero(breaker["rmsVoltage2"])
+                            * 0.866025403784439
+                        )
 
-                        if breaker["poles"] == 2:
-                            breaker_data["frequency"] = (
-                                self.none_to_zero(breaker["lineFrequency"])
-                                + self.none_to_zero(breaker["lineFrequency2"])
-                            ) / 2.0
-                            breaker_data["current"] = (
-                                self.none_to_zero(breaker["rmsCurrent"])
-                                + self.none_to_zero(breaker["rmsCurrent2"])
-                            ) / 2
-                        else:
-                            breaker_data["frequency"] = self.none_to_zero(
-                                breaker["lineFrequency"]
-                            )
-                            breaker_data["current"] = self.none_to_zero(
-                                breaker["rmsCurrent"]
-                            ) + self.none_to_zero(breaker["rmsCurrent2"])
-                        if breaker["position"] in _LEG1_POSITIONS:
-                            breaker_data["leg"] = 1
-                            breaker_data["power1"] = self.none_to_zero(breaker["power"])
-                            breaker_data["power2"] = self.none_to_zero(
-                                breaker["power2"]
-                            )
-                            breaker_data["voltage1"] = self.none_to_zero(
-                                breaker["rmsVoltage"]
-                            )
-                            breaker_data["voltage2"] = self.none_to_zero(
-                                breaker["rmsVoltage2"]
-                            )
-                            breaker_data["current1"] = self.none_to_zero(
-                                breaker["rmsCurrent"]
-                            )
-                            breaker_data["current2"] = self.none_to_zero(
-                                breaker["rmsCurrent2"]
-                            )
-                            breaker_data["frequency1"] = self.none_to_zero(
-                                breaker["lineFrequency"]
-                            )
-                            breaker_data["frequency2"] = self.none_to_zero(
-                                breaker["lineFrequency2"]
-                            )
-                        else:
-                            breaker_data["leg"] = 2
-                            breaker_data["power1"] = self.none_to_zero(
-                                breaker["power2"]
-                            )
-                            breaker_data["power2"] = self.none_to_zero(breaker["power"])
-                            breaker_data["voltage1"] = self.none_to_zero(
-                                breaker["rmsVoltage2"]
-                            )
-                            breaker_data["voltage2"] = self.none_to_zero(
-                                breaker["rmsVoltage"]
-                            )
-                            breaker_data["current1"] = self.none_to_zero(
-                                breaker["rmsCurrent2"]
-                            )
-                            breaker_data["current2"] = self.none_to_zero(
-                                breaker["rmsCurrent"]
-                            )
-                            breaker_data["frequency1"] = self.none_to_zero(
-                                breaker["lineFrequency2"]
-                            )
-                            breaker_data["frequency2"] = self.none_to_zero(
-                                breaker["lineFrequency"]
-                            )
-                        # Add the breaker to the list.
-                        breakers[breaker["id"]] = breaker_data
-                        try:
-                            breaker_power = float(breaker_data["power"])
-                            totalPower += float(breaker_power)
-                        except ValueError:
-                            totalPower += 0
-                status_data[panel["id"] + "totalPower"] = totalPower
-
+                    if breaker["poles"] == 2:
+                        breaker_data["frequency"] = (
+                            self.none_to_zero(breaker["lineFrequency"])
+                            + self.none_to_zero(breaker["lineFrequency2"])
+                        ) / 2.0
+                        breaker_data["current"] = (
+                            self.none_to_zero(breaker["rmsCurrent"])
+                            + self.none_to_zero(breaker["rmsCurrent2"])
+                        ) / 2
+                    else:
+                        breaker_data["frequency"] = self.none_to_zero(
+                            breaker["lineFrequency"]
+                        )
+                        breaker_data["current"] = self.none_to_zero(
+                            breaker["rmsCurrent"]
+                        ) + self.none_to_zero(breaker["rmsCurrent2"])
+                    if breaker["position"] in _LEG1_POSITIONS:
+                        breaker_data["leg"] = 1
+                        breaker_data["power1"] = self.none_to_zero(breaker["power"])
+                        breaker_data["power2"] = self.none_to_zero(breaker["power2"])
+                        breaker_data["voltage1"] = self.none_to_zero(
+                            breaker["rmsVoltage"]
+                        )
+                        breaker_data["voltage2"] = self.none_to_zero(
+                            breaker["rmsVoltage2"]
+                        )
+                        breaker_data["current1"] = self.none_to_zero(
+                            breaker["rmsCurrent"]
+                        )
+                        breaker_data["current2"] = self.none_to_zero(
+                            breaker["rmsCurrent2"]
+                        )
+                        breaker_data["frequency1"] = self.none_to_zero(
+                            breaker["lineFrequency"]
+                        )
+                        breaker_data["frequency2"] = self.none_to_zero(
+                            breaker["lineFrequency2"]
+                        )
+                    else:
+                        breaker_data["leg"] = 2
+                        breaker_data["power1"] = self.none_to_zero(breaker["power2"])
+                        breaker_data["power2"] = self.none_to_zero(breaker["power"])
+                        breaker_data["voltage1"] = self.none_to_zero(
+                            breaker["rmsVoltage2"]
+                        )
+                        breaker_data["voltage2"] = self.none_to_zero(
+                            breaker["rmsVoltage"]
+                        )
+                        breaker_data["current1"] = self.none_to_zero(
+                            breaker["rmsCurrent2"]
+                        )
+                        breaker_data["current2"] = self.none_to_zero(
+                            breaker["rmsCurrent"]
+                        )
+                        breaker_data["frequency1"] = self.none_to_zero(
+                            breaker["lineFrequency2"]
+                        )
+                        breaker_data["frequency2"] = self.none_to_zero(
+                            breaker["lineFrequency"]
+                        )
+                    # Add the breaker to the list.
+                    breakers[breaker["id"]] = breaker_data
+                    try:
+                        breaker_power = float(breaker_data["power"])
+                        totalPower += float(breaker_power)
+                    except ValueError:
+                        totalPower += 0
+            status_data[panel["id"] + "totalPower"] = totalPower
         status_data["breakers"] = breakers
         status_data["cts"] = cts
         status_data["panels"] = panels

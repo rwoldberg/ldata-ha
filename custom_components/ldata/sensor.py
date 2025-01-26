@@ -27,9 +27,9 @@ from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, LOGGER_NAME
+from .coordinator import LDATAUpdateCoordinator
 from .ldata_ct_entity import LDATACTEntity
 from .ldata_entity import LDATAEntity
-from .coordinator import LDATAUpdateCoordinator
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -121,12 +121,12 @@ async def async_setup_entry(
         async_add_entities([usage_sensor])
         output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[0])
         async_add_entities([output_sensor])
-        output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[1])
-        async_add_entities([output_sensor])
+        # output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[1])
+        # async_add_entities([output_sensor])
         output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[2])
         async_add_entities([output_sensor])
-        output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[3])
-        async_add_entities([output_sensor])
+        # output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[3])
+        # async_add_entities([output_sensor])
     for panel in entry.data["panels"]:
         entity_data = {}
         entity_data["id"] = panel["serialNumber"]
@@ -136,6 +136,13 @@ async def async_setup_entry(
         entity_data["hardware"] = "LDATA"
         entity_data["firmware"] = panel["firmware"]
         entity_data["poles"] = 2
+        entity_data["voltage"] = panel["voltage"]
+        entity_data["voltage1"] = panel["voltage1"]
+        entity_data["voltage2"] = panel["voltage2"]
+        entity_data["frequency"] = panel["frequency"]
+        entity_data["frequency1"] = panel["frequency1"]
+        entity_data["frequency2"] = panel["frequency2"]
+        entity_data["data"] = panel
         usage_sensor = LDATADailyUsageSensor(
             entry, entity_data, True, which_panel=panel["id"]
         )
@@ -148,10 +155,14 @@ async def async_setup_entry(
             entry, entity_data, SENSOR_TYPES[2], average=False, which_leg="both"
         )
         async_add_entities([total_sensor])
-        total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[3], average=True, which_leg="both"
-        )
-        async_add_entities([total_sensor])
+        # total_sensor = LDATATotalUsageSensor(
+        #     entry, entity_data, SENSOR_TYPES[3], average=True, which_leg="both"
+        # )
+        # async_add_entities([total_sensor])
+        output_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[3])
+        async_add_entities([output_sensor])
+        output_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[1])
+        async_add_entities([output_sensor])
         entity_data = copy.deepcopy(entity_data)
         entity_data["poles"] = 1
         entity_data["position"] = 1
@@ -374,10 +385,11 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity):
                         self._state = 0
                     # Update our running total
                     try:
+                        value_diff = max(current_value - self.previous_value, 0)
                         if self._state is not None:
-                            self._state += current_value - self.previous_value
+                            self._state += value_diff
                         else:
-                            self._state = current_value - self.previous_value
+                            self._state = value_diff
                     except Exception:  # pylint: disable=broad-except
                         _LOGGER.exception(
                             "Error updating sensor! (%f %f)",
@@ -532,6 +544,54 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
         attributes["panel_id"] = self.breaker_data["panel_id"]
 
         return attributes
+
+
+class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
+    """Sensor that reads an output based on the passed in description from an LDATA device."""
+
+    entity_description: SensorDescription
+
+    def __init__(
+        self, coordinator: LDATAUpdateCoordinator, data, description: SensorDescription
+    ) -> None:
+        """Init sensor."""
+        self.entity_description = description
+        super().__init__(data=data, coordinator=coordinator)
+        self.panel_data = data
+        try:
+            self._state = float(self.panel_data["data"][self.entity_description.key])
+        except ValueError:
+            self._state = 0.0
+        # Subscribe to updates.
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            if panels := self.coordinator.data["panels"]:
+                if new_data := panels[self.panel_data["id"]]:
+                    self._state = new_data[self.entity_description.key]
+        except KeyError:
+            self._state = None
+        self.async_write_ha_state()
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's name."""
+        return self.entity_description.name
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's unique ID."""
+        return self.entity_description.unique_id_suffix
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the power value."""
+        if self._state is not None:
+            return round(self._state, 2)
+        return self._state
 
 
 class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
