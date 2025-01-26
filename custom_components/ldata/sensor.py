@@ -159,10 +159,10 @@ async def async_setup_entry(
         #     entry, entity_data, SENSOR_TYPES[3], average=True, which_leg="both"
         # )
         # async_add_entities([total_sensor])
-        output_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[3])
-        async_add_entities([output_sensor])
-        output_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[1])
-        async_add_entities([output_sensor])
+        paneloutput_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[3])
+        async_add_entities([paneloutput_sensor])
+        paneloutput_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[1])
+        async_add_entities([paneloutput_sensor])
         entity_data = copy.deepcopy(entity_data)
         entity_data["poles"] = 1
         entity_data["position"] = 1
