@@ -413,8 +413,24 @@ class LDATAService:
                 ) + (float(panel["rmsVoltage2"]) * 0.866025403784439)
             panel_data["voltage1"] = float(panel["rmsVoltage"])
             panel_data["voltage2"] = float(panel["rmsVoltage2"])
-            panel_data["frequency1"] = float(panel["frequencyA"])
-            panel_data["frequency2"] = float(panel["frequencyB"])
+            panel_data["frequency1"] = float(self.none_to_zero(panel["frequencyA"]))
+            panel_data["frequency2"] = float(self.none_to_zero(panel["frequencyB"]))
+            if panel_data["frequency1"] == 0:
+                panel_data["frequency1"] = 0
+                panel_data["frequency2"] = 0
+                for breaker in panel["residentialBreakers"]:
+                    if float(self.none_to_zero(breaker["lineFrequency"])) > 0:
+                        panel_data["frequency1"] = float(
+                            self.none_to_zero(breaker["lineFrequency"])
+                        )
+                    if float(self.none_to_zero(breaker["lineFrequency2"])) > 0:
+                        panel_data["frequency2"] = float(
+                            self.none_to_zero(breaker["lineFrequency2"])
+                        )
+                    if panel_data["frequency1"] != 0 and panel_data["frequency2"] != 0:
+                        break
+            if panel_data["frequency2"] == 0:
+                panel_data["frequency2"] = panel_data["frequency1"]
             panel_data["frequency"] = (
                 float(panel["frequencyA"]) + float(panel["frequencyB"])
             ) / 2
