@@ -335,10 +335,16 @@ class LDATAService:
             timeout=15,
         )
 
-    def none_to_zero(self, value) -> float:
+    def none_to_zero(self, dict, key) -> float:
         """Convert a value to a float and replace None with 0.0."""
         result = 0.0
+        try:
+            value = dict[key]
+        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
+            value = None
         if value is None:
+            return result
+        if value is KeyError:
             return result
         try:
             result = float(value)
@@ -413,19 +419,19 @@ class LDATAService:
                 ) + (float(panel["rmsVoltage2"]) * 0.866025403784439)
             panel_data["voltage1"] = float(panel["rmsVoltage"])
             panel_data["voltage2"] = float(panel["rmsVoltage2"])
-            panel_data["frequency1"] = float(self.none_to_zero(panel["frequencyA"]))
-            panel_data["frequency2"] = float(self.none_to_zero(panel["frequencyB"]))
+            panel_data["frequency1"] = float(self.none_to_zero(panel, "frequencyA"))
+            panel_data["frequency2"] = float(self.none_to_zero(panel, "frequencyB"))
             if panel_data["frequency1"] == 0:
                 panel_data["frequency1"] = 0
                 panel_data["frequency2"] = 0
                 for breaker in panel["residentialBreakers"]:
-                    if float(self.none_to_zero(breaker["lineFrequency"])) > 0:
+                    if float(self.none_to_zero(breaker, "lineFrequency")) > 0:
                         panel_data["frequency1"] = float(
-                            self.none_to_zero(breaker["lineFrequency"])
+                            self.none_to_zero(breaker, "lineFrequency")
                         )
-                    if float(self.none_to_zero(breaker["lineFrequency2"])) > 0:
+                    if float(self.none_to_zero(breaker, "lineFrequency2")) > 0:
                         panel_data["frequency2"] = float(
-                            self.none_to_zero(breaker["lineFrequency2"])
+                            self.none_to_zero(breake, "lineFrequency2")
                         )
                     if panel_data["frequency1"] != 0 and panel_data["frequency2"] != 0:
                         break
@@ -446,20 +452,20 @@ class LDATAService:
                         ct_data["panel_id"] = panel["id"]
                         ct_data["channel"] = str(ct["channel"])
                         ct_data["power"] = self.none_to_zero(
-                            ct["activePower"]
-                        ) + self.none_to_zero(ct["activePower2"])
+                            ct, "activePower"
+                        ) + self.none_to_zero(ct, "activePower2")
                         ct_data["consumption"] = self.none_to_zero(
-                            ct["energyConsumption"]
-                        ) + self.none_to_zero(ct["energyConsumption2"])
+                            ct, "energyConsumption"
+                        ) + self.none_to_zero(ct, "energyConsumption2")
                         ct_data["import"] = self.none_to_zero(
-                            ct["energyImport"]
-                        ) + self.none_to_zero(ct["energyImport2"])
+                            ct, "energyImport"
+                        ) + self.none_to_zero(ct, "energyImport2")
                         ct_data["current"] = (
-                            self.none_to_zero(ct["rmsCurrent"])
-                            + self.none_to_zero(ct["rmsCurrent2"])
+                            self.none_to_zero(ct, "rmsCurrent")
+                            + self.none_to_zero(ct, "rmsCurrent2")
                         ) / 2
-                        ct_data["current1"] = self.none_to_zero(ct["rmsCurrent"])
-                        ct_data["current2"] = self.none_to_zero(ct["rmsCurrent2"])
+                        ct_data["current1"] = self.none_to_zero(ct, "rmsCurrent")
+                        ct_data["current2"] = self.none_to_zero(ct, "rmsCurrent2")
                         # Add the CT to the list.
                         cts[ct_data["id"]] = ct_data
             totalPower = 0.0
@@ -492,79 +498,79 @@ class LDATAService:
                     else:
                         breaker_data["remoteState"] = "RemoteON"
                     breaker_data["power"] = self.none_to_zero(
-                        breaker["power"]
-                    ) + self.none_to_zero(breaker["power2"])
+                        breaker, "power"
+                    ) + self.none_to_zero(breaker, "power2")
                     if (three_phase is False) or (breaker["poles"] == 1):
                         breaker_data["voltage"] = self.none_to_zero(
-                            breaker["rmsVoltage"]
-                        ) + self.none_to_zero(breaker["rmsVoltage2"])
+                            breaker, "rmsVoltage"
+                        ) + self.none_to_zero(breaker, "rmsVoltage2")
                     else:
                         breaker_data["voltage"] = (
-                            self.none_to_zero(breaker["rmsVoltage"]) * 0.866025403784439
+                            self.none_to_zero(breaker, "rmsVoltage") * 0.866025403784439
                         ) + (
-                            self.none_to_zero(breaker["rmsVoltage2"])
+                            self.none_to_zero(breaker, "rmsVoltage2")
                             * 0.866025403784439
                         )
 
                     if breaker["poles"] == 2:
                         breaker_data["frequency"] = (
-                            self.none_to_zero(breaker["lineFrequency"])
-                            + self.none_to_zero(breaker["lineFrequency2"])
+                            self.none_to_zero(breaker, "lineFrequency")
+                            + self.none_to_zero(breaker, "lineFrequency2")
                         ) / 2.0
                         breaker_data["current"] = (
-                            self.none_to_zero(breaker["rmsCurrent"])
-                            + self.none_to_zero(breaker["rmsCurrent2"])
+                            self.none_to_zero(breaker, "rmsCurrent")
+                            + self.none_to_zero(breaker, "rmsCurrent2")
                         ) / 2
                     else:
                         breaker_data["frequency"] = self.none_to_zero(
-                            breaker["lineFrequency"]
+                            breaker, "lineFrequency"
                         )
                         breaker_data["current"] = self.none_to_zero(
-                            breaker["rmsCurrent"]
-                        ) + self.none_to_zero(breaker["rmsCurrent2"])
+                            breaker, "rmsCurrent"
+                        ) + self.none_to_zero(breaker, "rmsCurrent2")
                     if breaker["position"] in _LEG1_POSITIONS:
                         breaker_data["leg"] = 1
-                        breaker_data["power1"] = self.none_to_zero(breaker["power"])
-                        breaker_data["power2"] = self.none_to_zero(breaker["power2"])
+                        breaker_data["power1"] = self.none_to_zero(breaker, "power")
+                        breaker_data["power2"] = self.none_to_zero(breaker, "power2")
                         breaker_data["voltage1"] = self.none_to_zero(
-                            breaker["rmsVoltage"]
+                            breaker, "rmsVoltage"
                         )
                         breaker_data["voltage2"] = self.none_to_zero(
-                            breaker["rmsVoltage2"]
+                            breaker, "rmsVoltage2"
                         )
                         breaker_data["current1"] = self.none_to_zero(
-                            breaker["rmsCurrent"]
+                            breaker, "rmsCurrent"
                         )
                         breaker_data["current2"] = self.none_to_zero(
-                            breaker["rmsCurrent2"]
+                            breaker, "rmsCurrent2"
                         )
                         breaker_data["frequency1"] = self.none_to_zero(
-                            breaker["lineFrequency"]
+                            breaker, "lineFrequency"
                         )
                         breaker_data["frequency2"] = self.none_to_zero(
-                            breaker["lineFrequency2"]
+                            breaker, "lineFrequency2"
                         )
                     else:
                         breaker_data["leg"] = 2
-                        breaker_data["power1"] = self.none_to_zero(breaker["power2"])
-                        breaker_data["power2"] = self.none_to_zero(breaker["power"])
+                        breaker_data["power1"] = self.none_to_zero(breaker, "power2")
+                        breaker_data["power2"] = self.none_to_zero(breaker, "power")
                         breaker_data["voltage1"] = self.none_to_zero(
-                            breaker["rmsVoltage2"]
+                            breaker, "rmsVoltage2"
                         )
                         breaker_data["voltage2"] = self.none_to_zero(
-                            breaker["rmsVoltage"]
+                            breaker, "rmsVoltage"
                         )
                         breaker_data["current1"] = self.none_to_zero(
-                            breaker["rmsCurrent2"]
+                            breaker, "rmsCurrent2"
                         )
                         breaker_data["current2"] = self.none_to_zero(
-                            breaker["rmsCurrent"]
+                            breaker, "rmsCurrent"
                         )
                         breaker_data["frequency1"] = self.none_to_zero(
-                            breaker["lineFrequency2"]
+                            breaker, "lineFrequency2"
                         )
                         breaker_data["frequency2"] = self.none_to_zero(
-                            breaker["lineFrequency"]
+                            breaker, "lineFrequency"
                         )
                     # Add the breaker to the list.
                     breakers[breaker["id"]] = breaker_data
