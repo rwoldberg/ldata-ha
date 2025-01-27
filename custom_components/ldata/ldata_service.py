@@ -431,7 +431,7 @@ class LDATAService:
                         )
                     if float(self.none_to_zero(breaker, "lineFrequency2")) > 0:
                         panel_data["frequency2"] = float(
-                            self.none_to_zero(breake, "lineFrequency2")
+                            self.none_to_zero(breaker, "lineFrequency2")
                         )
                     if panel_data["frequency1"] != 0 and panel_data["frequency2"] != 0:
                         break
