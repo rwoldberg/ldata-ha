@@ -438,7 +438,7 @@ class LDATAService:
             if panel_data["frequency2"] == 0:
                 panel_data["frequency2"] = panel_data["frequency1"]
             panel_data["frequency"] = (
-                float(panel["frequencyA"]) + float(panel["frequencyB"])
+                float(panel_data["frequency1"]) + float(panel_data["frequency2"])
             ) / 2
             panels.append(panel_data)
             # Setup the CT list.

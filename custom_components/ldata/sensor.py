@@ -570,8 +570,10 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
         """Call when the coordinator has an update."""
         try:
             if panels := self.coordinator.data["panels"]:
-                if new_data := panels[self.panel_data["id"]]:
-                    self._state = new_data[self.entity_description.key]
+                for panel in panels:
+                    if panel["id"] == self.panel_data["id"]:
+                        self._state = panel[self.entity_description.key]
+                        break
         except KeyError:
             self._state = None
         self.async_write_ha_state()
