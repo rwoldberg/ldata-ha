@@ -121,12 +121,8 @@ async def async_setup_entry(
         async_add_entities([usage_sensor])
         output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[0])
         async_add_entities([output_sensor])
-        # output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[1])
-        # async_add_entities([output_sensor])
         output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[2])
         async_add_entities([output_sensor])
-        # output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[3])
-        # async_add_entities([output_sensor])
     for panel in entry.data["panels"]:
         entity_data = {}
         entity_data["id"] = panel["serialNumber"]
@@ -155,10 +151,6 @@ async def async_setup_entry(
             entry, entity_data, SENSOR_TYPES[2], average=False, which_leg="both"
         )
         async_add_entities([total_sensor])
-        # total_sensor = LDATATotalUsageSensor(
-        #     entry, entity_data, SENSOR_TYPES[3], average=True, which_leg="both"
-        # )
-        # async_add_entities([total_sensor])
         paneloutput_sensor = LDATAPanelOutputSensor(
             entry, entity_data, SENSOR_TYPES[3], which_leg="1"
         )
