@@ -20,6 +20,7 @@ from .const import (
     THREE_PHASE_DEFAULT,
     UPDATE_INTERVAL,
     UPDATE_INTERVAL_DEFAULT,
+    UPDATE_INTERVAL_MIN,
 )
 from .coordinator import LDATAUpdateCoordinator
 
@@ -48,8 +49,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         READ_ONLY, entry.data.get(READ_ONLY, READ_ONLY_DEFAULT)
     )
 
-    # Don't update more that every 30 seconds.
-    update_interval = max(update_interval, 30)
+    # Don't update more that every 10 seconds.
+    update_interval = max(update_interval, UPDATE_INTERVAL_MIN)
 
     _LOGGER.debug("LDATA update interval: %d", update_interval)
     _LOGGER.debug("LDATA three phase: %d", three_phase)

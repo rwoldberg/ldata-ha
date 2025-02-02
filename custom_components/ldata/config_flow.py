@@ -1,4 +1,5 @@
 """Config flow for Leviton LDATA integration."""
+
 from __future__ import annotations
 
 import logging
@@ -7,9 +8,9 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
@@ -62,9 +63,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    DOMAIN = DOMAIN
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -98,9 +101,8 @@ class OptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
 
-    async def async_step_init(self, user_input=None) -> FlowResult:
+    async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Return the options form."""
         # foo = self.config_entry.options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT)
         if user_input is not None:

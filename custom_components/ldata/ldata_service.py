@@ -425,14 +425,24 @@ class LDATAService:
                 panel_data["frequency1"] = 0
                 panel_data["frequency2"] = 0
                 for breaker in panel["residentialBreakers"]:
-                    if float(self.none_to_zero(breaker, "lineFrequency")) > 0:
-                        panel_data["frequency1"] = float(
-                            self.none_to_zero(breaker, "lineFrequency")
-                        )
-                    if float(self.none_to_zero(breaker, "lineFrequency2")) > 0:
-                        panel_data["frequency2"] = float(
-                            self.none_to_zero(breaker, "lineFrequency2")
-                        )
+                    if breaker["position"] in _LEG1_POSITIONS:
+                        if float(self.none_to_zero(breaker, "lineFrequency")) > 0:
+                            panel_data["frequency1"] = float(
+                                self.none_to_zero(breaker, "lineFrequency")
+                            )
+                        if float(self.none_to_zero(breaker, "lineFrequency2")) > 0:
+                            panel_data["frequency2"] = float(
+                                self.none_to_zero(breaker, "lineFrequency2")
+                            )
+                    else:
+                        if float(self.none_to_zero(breaker, "lineFrequency")) > 0:
+                            panel_data["frequency2"] = float(
+                                self.none_to_zero(breaker, "lineFrequency")
+                            )
+                        if float(self.none_to_zero(breaker, "lineFrequency2")) > 0:
+                            panel_data["frequency1"] = float(
+                                self.none_to_zero(breaker, "lineFrequency2")
+                            )
                     if panel_data["frequency1"] != 0 and panel_data["frequency2"] != 0:
                         break
             if panel_data["frequency2"] == 0:
