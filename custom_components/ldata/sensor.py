@@ -159,13 +159,21 @@ async def async_setup_entry(
         #     entry, entity_data, SENSOR_TYPES[3], average=True, which_leg="both"
         # )
         # async_add_entities([total_sensor])
-        paneloutput_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[3], which_leg="1")
+        paneloutput_sensor = LDATAPanelOutputSensor(
+            entry, entity_data, SENSOR_TYPES[3], which_leg="1"
+        )
         async_add_entities([paneloutput_sensor])
-        paneloutput_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[3], which_leg="2")
+        paneloutput_sensor = LDATAPanelOutputSensor(
+            entry, entity_data, SENSOR_TYPES[3], which_leg="2"
+        )
         async_add_entities([paneloutput_sensor])
-        paneloutput_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[1], which_leg="1")
+        paneloutput_sensor = LDATAPanelOutputSensor(
+            entry, entity_data, SENSOR_TYPES[1], which_leg="1"
+        )
         async_add_entities([paneloutput_sensor])
-        paneloutput_sensor = LDATAPanelOutputSensor(entry, entity_data, SENSOR_TYPES[1], which_leg="2")
+        paneloutput_sensor = LDATAPanelOutputSensor(
+            entry, entity_data, SENSOR_TYPES[1], which_leg="2"
+        )
         async_add_entities([paneloutput_sensor])
         entity_data = copy.deepcopy(entity_data)
         entity_data["poles"] = 1
@@ -556,11 +564,11 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
     entity_description: SensorDescription
 
     def __init__(
-        self, 
-        coordinator: LDATAUpdateCoordinator, 
-        data, 
+        self,
+        coordinator: LDATAUpdateCoordinator,
+        data,
         description: SensorDescription,
-        which_leg: str
+        which_leg: str,
     ) -> None:
         """Init sensor."""
         self.entity_description = description
@@ -568,7 +576,9 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.panel_data = data
         try:
-            self._state = float(self.panel_data["data"][self.entity_description.key + self.leg_to_total])
+            self._state = float(
+                self.panel_data["data"][self.entity_description.key + self.leg_to_total]
+            )
         except ValueError:
             self._state = 0.0
         # Subscribe to updates.
@@ -581,7 +591,9 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
             if panels := self.coordinator.data["panels"]:
                 for panel in panels:
                     if panel["id"] == self.panel_data["id"]:
-                        self._state = panel[self.entity_description.key + self.leg_to_total]
+                        self._state = panel[
+                            self.entity_description.key + self.leg_to_total
+                        ]
                         break
         except KeyError:
             self._state = None
@@ -596,10 +608,8 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
     def unique_id_suffix(self) -> str | None:
         """Suffix to append to the LDATA device's unique ID."""
         return (
-                "_leg_"
-                + self.leg_to_total
-                + str(self.entity_description.unique_id_suffix)
-            )
+            "_leg_" + self.leg_to_total + str(self.entity_description.unique_id_suffix)
+        )
 
     @property
     def native_value(self) -> StateType:
