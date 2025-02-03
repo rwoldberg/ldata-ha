@@ -454,6 +454,7 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
                         )
                     except ValueError:
                         current_value = 0.0
+                current_value = max(current_value, 0.0)
                 total += current_value
                 count += 1
         if self.is_average is True:
