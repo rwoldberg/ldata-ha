@@ -277,6 +277,8 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity):
                         self._state = 0
                     # Power usage is half the previous plus current power consumption in kilowatts
                     power = ((self.previous_value + current_value) / 2) / 1000
+                    if power < 0:
+                        power = -power
                     # How long has it been since the last update in hours
                     time_span = (current_time - self.last_update_time) / 3600
                     # Update our running total
