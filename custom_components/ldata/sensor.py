@@ -639,8 +639,35 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         try:
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
-                    self._state = new_data[self.entity_description.key]
-        except KeyError:
+                    new_value = float(new_data[self.entity_description.key])
+
+                    # Check for invalid values only if a previous state exists
+                    if self._state is not None:
+                        previous_state = float(self._state)
+
+                        # Case 1: Previous state was 0. Check for an extreme jump from a standstill.
+                        # You can adjust the 8000 threshold if needed.
+                        if previous_state == 0 and abs(new_value) > 8000:
+                            _LOGGER.warning(
+                                "Spike from 0 detected for %s. Ignoring new value of %s",
+                                self.entity_id,
+                                new_value,
+                            )
+                            return
+
+                        # Case 2: Previous state was not 0. Use dynamic checks for spikes.
+                        elif previous_state != 0 and abs(new_value) > (abs(previous_state) * 10) and abs(new_value - previous_state) > 2000:
+                            _LOGGER.warning(
+                                "Spike detected for %s. Ignoring new value of %s (previous was %s)",
+                                self.entity_id,
+                                new_value,
+                                previous_state,
+                            )
+                            return
+
+                    # If value is valid, update the state
+                    self._state = new_value
+        except (KeyError, ValueError, TypeError):
             self._state = None
         self.async_write_ha_state()
 
@@ -691,9 +718,37 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
         try:
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
-                    self._state = new_data[self.entity_description.key]
-        except KeyError:
-            self._state = None
+                    new_value = float(new_data[self.entity_description.key])
+
+                    # Check for invalid values if a previous state exists
+                    if self._state is not None:
+                        # Ignore if the new value is less than the old one (device reset)
+                        if new_value < float(self._state):
+                            _LOGGER.warning(
+                                "Ignoring decreasing value for %s: new=%s, old=%s",
+                                self.entity_id,
+                                new_value,
+                                self._state,
+                            )
+                            return # Exit without updating
+
+                        # Ignore unrealistic jumps (spike)
+                        if new_value > (float(self._state) * 1.5) and float(self._state) > 1:
+                             _LOGGER.warning(
+                                "Spike detected for %s: new=%s, old=%s",
+                                self.entity_id,
+                                new_value,
+                                self._state,
+                            )
+                             return # Exit without updating
+
+                    # If value is valid, update the state
+                    self._state = new_value
+        except (KeyError, ValueError, TypeError):
+            # Handle cases where the value isn't a valid number
+            _LOGGER.debug("Invalid value received for %s", self.entity_id)
+            return
+
         self.async_write_ha_state()
 
     @property
