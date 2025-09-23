@@ -639,9 +639,47 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         try:
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
-                    self._state = new_data[self.entity_description.key]
-        except KeyError:
+                    new_value = float(new_data[self.entity_description.key])
+                    self._is_spike = False # Reset spike flag
+
+                    # --- Spike Detection Logic ---
+                    if self._state is not None:
+                        previous_state = float(self._state)
+                        # Check for a jump from 0 that is unreasonably high
+                        if previous_state == 0 and abs(new_value) > 3000:
+                            self._is_spike = True
+                        # Check for a relative jump if not starting from 0
+                        elif previous_state != 0 and abs(new_value) > (abs(previous_state) * 10) and abs(new_value - previous_state) > 2000:
+                            self._is_spike = True
+                    # --- End of Spike Detection ---
+
+                    # --- Consistency Check Logic ---
+                    if self._is_spike:
+                        # A spike is detected. Check if it's consistent with a pending value.
+                        if self._pending_state is not None:
+                            # Check if the new value is within 15% of the pending spike value
+                            if abs(new_value - self._pending_state) / self._pending_state < 0.15:
+                                # Consistent spike, accept it as the new state
+                                _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
+                                self._state = new_value
+                                self._pending_state = None # Clear pending state
+                            else:
+                                # Not consistent, it was a transient spike. Discard and wait.
+                                _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
+                                self._pending_state = None # Clear pending state
+                        else:
+                            # This is the first time we see this spike. Store it for verification.
+                            _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
+                            self._pending_state = new_value
+                    else:
+                        # No spike detected, this is a normal value.
+                        self._pending_state = None # Clear any old pending state
+                        self._state = new_value
+
+        except (KeyError, ValueError, TypeError):
             self._state = None
+            self._pending_state = None
+
         self.async_write_ha_state()
 
     @property
@@ -678,6 +716,8 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
         self.entity_description = description
         super().__init__(data=data, coordinator=coordinator)
         self.ct_data = data
+        self._pending_state = None
+        self._is_spike = False
         try:
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
@@ -691,9 +731,37 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
         try:
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
-                    self._state = new_data[self.entity_description.key]
-        except KeyError:
-            self._state = None
+                    new_value = float(new_data[self.entity_description.key])
+
+                    # Check for invalid values if a previous state exists
+                    if self._state is not None:
+                        # Ignore if the new value is less than the old one (device reset)
+                        if new_value < float(self._state):
+                            _LOGGER.warning(
+                                "Ignoring decreasing value for %s: new=%s, old=%s",
+                                self.entity_id,
+                                new_value,
+                                self._state,
+                            )
+                            return # Exit without updating
+
+                        # Ignore unrealistic jumps (spike)
+                        if new_value > (float(self._state) * 1.5) and float(self._state) > 1:
+                             _LOGGER.warning(
+                                "Spike detected for %s: new=%s, old=%s",
+                                self.entity_id,
+                                new_value,
+                                self._state,
+                            )
+                             return # Exit without updating
+
+                    # If value is valid, update the state
+                    self._state = new_value
+        except (KeyError, ValueError, TypeError):
+            # Handle cases where the value isn't a valid number
+            _LOGGER.debug("Invalid value received for %s", self.entity_id)
+            return
+
         self.async_write_ha_state()
 
     @property
