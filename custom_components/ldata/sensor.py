@@ -377,6 +377,9 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity):
                     self.previous_value = float(self.previous_value)
                 except ValueError:
                     self.previous_value = 0
+                # Make sure the current value is at least equal to the previous value
+                if ( current_value < self.previous_value ):
+                    current_value = self.previous_value
                 # Save the current date and time
                 current_time = time.time()
                 current_date = dt_util.now()
@@ -747,13 +750,13 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
 
                         # Ignore unrealistic jumps (spike)
                         if new_value > (float(self._state) * 1.5) and float(self._state) > 1:
-                             _LOGGER.warning(
+                            _LOGGER.warning(
                                 "Spike detected for %s: new=%s, old=%s",
                                 self.entity_id,
                                 new_value,
                                 self._state,
                             )
-                             return # Exit without updating
+                            return # Exit without updating
 
                     # If value is valid, update the state
                     self._state = new_value
