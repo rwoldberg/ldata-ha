@@ -721,6 +721,8 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         self.ct_data = data
         self._pending_state = None
         self._is_spike = False
+        self._pending_reset_value = None
+        self._pending_reset_count = 0 
         try:
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
@@ -746,32 +748,55 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                 if new_data := cts[self.ct_data["id"]]:
                     new_value = float(new_data[self.entity_description.key])
 
-                    # Check for invalid values if a previous state exists
-                    if self._state is not None:
-                        # Ignore if the new value is less than the old one (device reset)
-                        if new_value < float(self._state):
+                    if self._state is not None and new_value < float(self._state):
+                        # --- Handle potential device reset (decreasing value) ---
+                        # Check if the new value is consistent with a reset we're already tracking.
+                        # We use a small tolerance (0.01 kWh) to account for minor fluctuations.
+                        if self._pending_reset_value is not None and abs(new_value - self._pending_reset_value) < 0.01:
+                            self._pending_reset_count += 1
+                            _LOGGER.debug("Consistent reset value for %s seen. Count: %d", self.entity_id, self._pending_reset_count)
+                        else:
+                            # This is a new potential reset. Start tracking it.
                             _LOGGER.warning(
-                                "Ignoring decreasing value for %s: new=%s, old=%s",
-                                self.entity_id,
-                                new_value,
-                                self._state,
+                                "Potential device reset for %s. New value %s is lower than %s. Monitoring for consistency.",
+                                self.entity_id, new_value, self._state
                             )
-                            return # Exit without updating
+                            self._pending_reset_value = new_value
+                            self._pending_reset_count = 1
+                        
+                        # If the count exceeds 10, accept the reset.
+                        if self._pending_reset_count > 10:
+                            _LOGGER.info(
+                                "Device reset for %s confirmed after %d consistent updates. Accepting new value %s.",
+                                self.entity_id, self._pending_reset_count, self._pending_reset_value
+                            )
+                            self._state = self._pending_reset_value
+                            self._pending_reset_value = None
+                            self._pending_reset_count = 0
+                        else:
+                            # Not confirmed yet, so reject this update by exiting.
+                            return
 
-                        # Ignore unrealistic jumps (spike)
-                        if new_value > (float(self._state) * 1.5) and float(self._state) > 1:
+                    else:
+                        # --- Handle normal operation (increasing value) ---
+                        # If we were tracking a reset but received a normal value, clear the tracking.
+                        if self._pending_reset_count > 0:
+                            _LOGGER.info("Device reset for %s was not confirmed. Resuming normal updates.", self.entity_id)
+                            self._pending_reset_value = None
+                            self._pending_reset_count = 0
+
+                        # Ignore unrealistic upward jumps (spike)
+                        if self._state is not None and new_value > (float(self._state) * 1.5) and float(self._state) > 1:
                             _LOGGER.warning(
                                 "Spike detected for %s: new=%s, old=%s",
-                                self.entity_id,
-                                new_value,
-                                self._state,
+                                self.entity_id, new_value, self._state
                             )
                             return # Exit without updating
 
-                    # If value is valid, update the state
-                    self._state = new_value
+                        # This is a valid, normal update.
+                        self._state = new_value
+
         except (KeyError, ValueError, TypeError):
-            # Handle cases where the value isn't a valid number
             _LOGGER.debug("Invalid value received for %s", self.entity_id)
             return
 
