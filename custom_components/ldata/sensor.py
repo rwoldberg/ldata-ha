@@ -191,7 +191,7 @@ async def async_setup_entry(
         async_add_entities([total_sensor])
 
 
-class LDATADailyUsageSensor(LDATAEntity, RestoreEntity):
+class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     """Sensor that tracks daily usage for an LDATA device."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -213,6 +213,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass."""
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
         if last_state := await self.async_get_last_state():
             try:
@@ -308,7 +309,7 @@ class LDATADailyUsageSensor(LDATAEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-class LDATACTDailyUsageSensor(LDATACTEntity, RestoreEntity):
+class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
     """Sensor that tracks daily usage for an LDATA device."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -330,6 +331,7 @@ class LDATACTDailyUsageSensor(LDATACTEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass."""
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
         if last_state := await self.async_get_last_state():
             try:
@@ -707,7 +709,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         return self._state
 
 
-class LDATAEnergyUsageSensor(LDATACTEntity, RestoreEntity):
+class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
     """Sensor that reads an output based on the passed in description from an LDATA CT device."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -734,6 +736,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass."""
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
         if last_state := await self.async_get_last_state():
             try:
