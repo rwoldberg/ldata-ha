@@ -213,8 +213,10 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass."""
+        # Subscribe to updates so the sensor gets live data.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
+        # Attempt to restore the last known state from the database.
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
@@ -280,6 +282,11 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                         or (self.last_update_date.year != current_date.year)
                     ):
                         self._state = 0
+                    
+                    if self._state is not None and current_value < self._state and self.panel_total is False:
+                         _LOGGER.warning("Ignoring decreasing value for %s: new=%s, old=%s", self.entity_id, current_value, self._state)
+                         return
+
                     # Power usage is half the previous plus current power consumption in kilowatts
                     power = ((self.previous_value + current_value) / 2) / 1000
                     if power < 0:
@@ -331,8 +338,10 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass."""
+        # Subscribe to updates so the sensor gets live data.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
+        # Attempt to restore the last known state from the database.
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
@@ -386,6 +395,11 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                     self.previous_value = float(self.previous_value)
                 except ValueError:
                     self.previous_value = 0
+                
+                if self._state is not None and current_value < self._state:
+                    _LOGGER.warning("Ignoring decreasing value for %s: new=%s, old=%s", self.entity_id, current_value, self._state)
+                    return
+
                 # Save the current date and time
                 current_time = time.time()
                 current_date = dt_util.now()
@@ -635,6 +649,8 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         self.entity_description = description
         super().__init__(data=data, coordinator=coordinator)
         self.ct_data = data
+        self._pending_state = None
+        self._is_spike = False
         try:
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
@@ -649,25 +665,29 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
                     new_value = float(new_data[self.entity_description.key])
-                    self._is_spike = False # Reset spike flag
+                    is_potential_spike = False # Reset spike flag
 
                     # --- Spike Detection Logic ---
-                    if self._state is not None:
+                    if self._state is None:
+                        # On the first update after a restart, check for an abnormally high initial value.
+                        if abs(new_value) > 3000: # You can adjust this initial threshold
+                            _LOGGER.warning("Potential spike on first update for %s: %s", self.entity_id, new_value)
+                            is_potential_spike = True
+                    else:
+                        # Normal operation: check for spikes relative to the previous state.
                         previous_state = float(self._state)
-                        # Check for a jump from 0 that is unreasonably high
                         if previous_state == 0 and abs(new_value) > 3000:
-                            self._is_spike = True
-                        # Check for a relative jump if not starting from 0
+                            is_potential_spike = True
                         elif previous_state != 0 and abs(new_value) > (abs(previous_state) * 10) and abs(new_value - previous_state) > 2000:
-                            self._is_spike = True
+                            is_potential_spike = True
                     # --- End of Spike Detection ---
 
                     # --- Consistency Check Logic ---
-                    if self._is_spike:
-                        # A spike is detected. Check if it's consistent with a pending value.
+                    if is_potential_spike:
+                        # A potential spike is detected. Check if it's consistent with a pending value.
                         if self._pending_state is not None:
                             # Check if the new value is within 15% of the pending spike value
-                            if abs(new_value - self._pending_state) / self._pending_state < 0.15:
+                            if self._pending_state != 0 and abs(new_value - self._pending_state) / abs(self._pending_state) < 0.15:
                                 # Consistent spike, accept it as the new state
                                 _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
                                 self._state = new_value
@@ -675,7 +695,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
                             else:
                                 # Not consistent, it was a transient spike. Discard and wait.
                                 _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
-                                self._pending_state = None # Clear pending state
+                                self._pending_state = new_value # Start a new pending check with the new value
                         else:
                             # This is the first time we see this spike. Store it for verification.
                             _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
@@ -685,7 +705,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
                         self._pending_state = None # Clear any old pending state
                         self._state = new_value
 
-        except (KeyError, ValueError, TypeError):
+        except (KeyError, ValueError, TypeError, ZeroDivisionError):
             self._state = None
             self._pending_state = None
 
@@ -725,8 +745,6 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         self.entity_description = description
         super().__init__(data=data, coordinator=coordinator)
         self.ct_data = data
-        self._pending_state = None
-        self._is_spike = False
         try:
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
@@ -758,16 +776,6 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                         if new_value < float(self._state):
                             _LOGGER.warning(
                                 "Ignoring decreasing value for %s: new=%s, old=%s",
-                                self.entity_id,
-                                new_value,
-                                self._state,
-                            )
-                            return # Exit without updating
-
-                        # Ignore unrealistic jumps (spike)
-                        if new_value > (float(self._state) * 1.5) and float(self._state) > 1:
-                            _LOGGER.warning(
-                                "Spike detected for %s: new=%s, old=%s",
                                 self.entity_id,
                                 new_value,
                                 self._state,
