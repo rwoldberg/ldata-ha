@@ -643,29 +643,25 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
                     new_value = float(new_data[self.entity_description.key])
-                    is_potential_spike = False # Reset spike flag
+                    self._is_spike = False # Reset spike flag
 
                     # --- Spike Detection Logic ---
-                    if self._state is None:
-                        # On the first update after a restart, check for an abnormally high initial value.
-                        if abs(new_value) > 3000: # You can adjust this initial threshold
-                            _LOGGER.warning("Potential spike on first update for %s: %s", self.entity_id, new_value)
-                            is_potential_spike = True
-                    else:
-                        # Normal operation: check for spikes relative to the previous state.
+                    if self._state is not None:
                         previous_state = float(self._state)
+                        # Check for a jump from 0 that is unreasonably high
                         if previous_state == 0 and abs(new_value) > 3000:
-                            is_potential_spike = True
+                            self._is_spike = True
+                        # Check for a relative jump if not starting from 0
                         elif previous_state != 0 and abs(new_value) > (abs(previous_state) * 10) and abs(new_value - previous_state) > 2000:
-                            is_potential_spike = True
+                            self._is_spike = True
                     # --- End of Spike Detection ---
 
                     # --- Consistency Check Logic ---
-                    if is_potential_spike:
-                        # A potential spike is detected. Check if it's consistent with a pending value.
+                    if self._is_spike:
+                        # A spike is detected. Check if it's consistent with a pending value.
                         if self._pending_state is not None:
                             # Check if the new value is within 15% of the pending spike value
-                            if self._pending_state != 0 and abs(new_value - self._pending_state) / abs(self._pending_state) < 0.15:
+                            if abs(new_value - self._pending_state) / self._pending_state < 0.15:
                                 # Consistent spike, accept it as the new state
                                 _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
                                 self._state = new_value
@@ -673,7 +669,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
                             else:
                                 # Not consistent, it was a transient spike. Discard and wait.
                                 _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
-                                self._pending_state = new_value # Start a new pending check with the new value
+                                self._pending_state = None # Clear pending state
                         else:
                             # This is the first time we see this spike. Store it for verification.
                             _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
@@ -683,7 +679,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
                         self._pending_state = None # Clear any old pending state
                         self._state = new_value
 
-        except (KeyError, ValueError, TypeError, ZeroDivisionError):
+        except (KeyError, ValueError, TypeError):
             self._state = None
             self._pending_state = None
 
@@ -726,8 +722,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         self._pending_state = None
         self._is_spike = False
         self._pending_reset_value = None
-        self._pending_reset_count = 0
-        self._just_reset = False
+        self._pending_reset_count = 0 
         try:
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
@@ -755,10 +750,13 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
                     if self._state is not None and new_value < float(self._state):
                         # --- Handle potential device reset (decreasing value) ---
+                        # Check if the new value is consistent with a reset we're already tracking.
+                        # We use a small tolerance (0.01 kWh) to account for minor fluctuations.
                         if self._pending_reset_value is not None and abs(new_value - self._pending_reset_value) < 0.01:
                             self._pending_reset_count += 1
                             _LOGGER.debug("Consistent reset value for %s seen. Count: %d", self.entity_id, self._pending_reset_count)
                         else:
+                            # This is a new potential reset. Start tracking it.
                             _LOGGER.warning(
                                 "Potential device reset for %s. New value %s is lower than %s. Monitoring for consistency.",
                                 self.entity_id, new_value, self._state
@@ -766,6 +764,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                             self._pending_reset_value = new_value
                             self._pending_reset_count = 1
                         
+                        # If the count exceeds 10, accept the reset.
                         if self._pending_reset_count > 10:
                             _LOGGER.info(
                                 "Device reset for %s confirmed after %d consistent updates. Accepting new value %s.",
@@ -774,41 +773,27 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                             self._state = self._pending_reset_value
                             self._pending_reset_value = None
                             self._pending_reset_count = 0
-                            self._just_reset = True
                         else:
+                            # Not confirmed yet, so reject this update by exiting.
                             return
 
                     else:
                         # --- Handle normal operation (increasing value) ---
+                        # If we were tracking a reset but received a normal value, clear the tracking.
                         if self._pending_reset_count > 0:
                             _LOGGER.info("Device reset for %s was not confirmed. Resuming normal updates.", self.entity_id)
                             self._pending_reset_value = None
                             self._pending_reset_count = 0
 
-                        if self._just_reset:
-                            _LOGGER.info("Accepting first value %s after a confirmed device reset.", new_value)
-                            self._state = new_value
-                            self._just_reset = False
-                        
-                        # --- CORRECTED SPIKE LOGIC ---
-                        elif self._state is not None:
-                            # Case 1: Check for an absolute spike if starting from a low value
-                            if float(self._state) <= 1 and new_value > 100:
-                                _LOGGER.warning(
-                                    "Spike from zero detected for %s: new=%s, old=%s",
-                                    self.entity_id, new_value, self._state
-                                )
-                                return
-                            # Case 2: Check for a relative spike during normal operation
-                            elif float(self._state) > 1 and new_value > (float(self._state) * 1.5):
-                                _LOGGER.warning(
-                                    "Spike detected for %s: new=%s, old=%s",
-                                    self.entity_id, new_value, self._state
-                                )
-                                return
-                        # --- END CORRECTION ---
+                        # Ignore unrealistic upward jumps (spike)
+                        if self._state is not None and new_value > (float(self._state) * 1.5) and float(self._state) > 1:
+                            _LOGGER.warning(
+                                "Spike detected for %s: new=%s, old=%s",
+                                self.entity_id, new_value, self._state
+                            )
+                            return # Exit without updating
 
-                        # If no spike is detected, this is a valid, normal update.
+                        # This is a valid, normal update.
                         self._state = new_value
 
         except (KeyError, ValueError, TypeError):
