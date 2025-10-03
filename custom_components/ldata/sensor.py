@@ -331,12 +331,11 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass."""
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
-                # Also restore previous_value to handle the first update correctly
-                self.previous_value = float(last_state.state)
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
 
@@ -365,53 +364,60 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            new_data = self.coordinator.data["cts"][self.breaker_data["id"]]
-            current_value = float(new_data["consumption"])
-            current_date = dt_util.now()
-
-            # Reset the daily total if the day has changed
-            if self._state is not None and self.last_update_date.day != current_date.day:
-                _LOGGER.info("New day detected for %s, resetting daily total.", self.entity_id)
-                self._state = 0.0
-                self.previous_value = 0.0
-
-            # --- Data Validation ---
-            if self.previous_value is not None:
-                # Check for device reset (value decreased)
-                if current_value < self.previous_value:
-                    _LOGGER.warning(
-                        "Ignoring decreasing value for %s: new=%s, old=%s",
-                        self.entity_id,
-                        current_value,
-                        self.previous_value,
-                    )
-                    return # Exit without updating
-
-                # Check for an unrealistic jump (e.g., more than 50 kWh in one update cycle)
-                if (current_value - self.previous_value) > 50:
-                     _LOGGER.warning(
-                        "Spike detected for %s: new=%s, old=%s",
-                        self.entity_id,
-                        current_value,
-                        self.previous_value,
-                    )
-                     return # Exit without updating
-            # --- End Validation ---
-
-            # Calculate the difference and add to the running total
-            value_diff = current_value - self.previous_value
-            if self._state is None:
-                self._state = 0.0
-            self._state += value_diff
-
-            # Save the current values for the next update
-            self.previous_value = current_value
-            self.last_update_date = current_date
-
-        except (KeyError, ValueError, TypeError):
-            _LOGGER.debug("Could not update %s, data missing or invalid.", self.entity_id)
-            return
-
+            have_values = False
+            new_data = None
+            if self.panel_total is True:
+                current_value = 0
+                current_value = self.coordinator.data[self.panel_id + "totalPower"]
+                have_values = True
+            else:
+                new_data = self.coordinator.data["cts"][self.breaker_data["id"]]
+            if ((self.panel_total is True) and (have_values is True)) or (
+                new_data is not None
+            ):
+                if new_data is not None:
+                    current_value = new_data["consumption"]
+                # Make sure values are floats
+                try:
+                    current_value = float(current_value)
+                except ValueError:
+                    current_value = 0
+                try:
+                    self.previous_value = float(self.previous_value)
+                except ValueError:
+                    self.previous_value = 0
+                # Save the current date and time
+                current_time = time.time()
+                current_date = dt_util.now()
+                # Only update if we have a previous update
+                if self.last_update_time > 0:
+                    # Clear the running total if the last update date and now are not the same day
+                    if (
+                        (self.last_update_date.day != current_date.day)
+                        or (self.last_update_date.month != current_date.month)
+                        or (self.last_update_date.year != current_date.year)
+                    ):
+                        self._state = 0
+                    # Update our running total
+                    try:
+                        value_diff = max(current_value - self.previous_value, 0)
+                        if self._state is not None:
+                            self._state += value_diff
+                        else:
+                            self._state = value_diff
+                    except Exception:  # pylint: disable=broad-except
+                        _LOGGER.exception(
+                            "Error updating sensor! (%f %f)",
+                            self._state,
+                            current_value,
+                        )
+                # Save the current values
+                self.last_update_time = current_time
+                self.previous_value = current_value
+                self.last_update_date = current_date
+        except Exception:  # pylint: disable=broad-except
+            # self._state = None
+            _LOGGER.exception("Error updating sensor!")
         self.async_write_ha_state()
 
 
