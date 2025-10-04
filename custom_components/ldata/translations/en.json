@@ -34,7 +34,7 @@
                     "log_fields": "Fields to Log"
                 },
                 "data_description": {
-                    "log_fields": "To find field names, enable 'Log All Raw API Data' and check Home Assistant logs. Enter here as comma separated."
+                    "log_fields": "To find field names, enable 'Log All Raw API Data' and check Home Assistant logs. Enter above as comma separated."
                 }
             }
         }
