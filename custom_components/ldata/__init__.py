@@ -1,7 +1,7 @@
 """The LDATA integration."""
 from __future__ import annotations
 
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
@@ -15,28 +15,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     
-    # --- START OF CHANGE ---
     # Handle backward compatibility for username/email field
-    # Try to get the new 'email' key, but fall back to the old 'username' key if it doesn't exist.
     username = entry.data.get("email", entry.data.get("username"))
-    # --- END OF CHANGE ---
 
     coordinator = LDATAUpdateCoordinator(
         hass,
-        username, # Use the resolved username
+        username,
         entry.data["password"],
         30, # Update interval in seconds
         entry,
     )
 
-    await coordinator.async_config_entry_first_refresh()
+    # --- START OF CHANGE ---
+    # Only perform the first refresh during initial setup.
+    if entry.state == ConfigEntryState.SETUP_IN_PROGRESS:
+        await coordinator.async_config_entry_first_refresh()
+    # --- END OF CHANGE ---
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Add a listener to reload the integration when options are changed
-    entry.add_update_listener(async_reload_entry)
+    #entry.add_update_listener(async_reload_entry)
 
     return True
 
