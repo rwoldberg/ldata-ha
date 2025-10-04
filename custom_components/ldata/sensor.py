@@ -325,11 +325,12 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state: float | None = None
-        self.last_update_time = 0.0
-        self.previous_value = 0.0
         self.last_update_date = dt_util.now()
-        self.panel_total = panelTotal
-        self.panel_id = which_panel
+        # Variables for reset/spike logic
+        self.previous_consumption = None
+        self._pending_reset_value = None
+        self._pending_reset_count = 0
+        self._just_reset = False
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass."""
@@ -338,14 +339,8 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
-                # Also restore previous_value to handle the first update correctly
-                self.previous_value = float(last_state.state)
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
-
-    @callback
-    def _schedule_immediate_update(self):
-        self.async_schedule_update_ha_state(True)
 
     @property
     def name_suffix(self) -> str | None:
@@ -369,49 +364,64 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         """Call when the coordinator has an update."""
         try:
             new_data = self.coordinator.data["cts"][self.breaker_data["id"]]
-            current_value = float(new_data["consumption"])
+            current_consumption = float(new_data["consumption"])
             current_date = dt_util.now()
 
+            # Initialize previous_consumption on first run
+            if self.previous_consumption is None:
+                self.previous_consumption = current_consumption
+                # If state is None on first run, initialize to 0
+                if self._state is None:
+                    self._state = 0.0
+
             # Reset the daily total if the day has changed
-            if self._state is not None and self.last_update_date.day != current_date.day:
+            if self.last_update_date.day != current_date.day:
                 if self.coordinator.config_entry.options.get("log_warnings", True):
                     _LOGGER.info("New day detected for %s, resetting daily total.", self.entity_id)
                 self._state = 0.0
-                self.previous_value = 0.0
+                # Don't reset previous_consumption, as it's a lifetime value
 
             # --- Data Validation ---
-            if self.previous_value is not None:
-                # Check for device reset (value decreased)
-                if current_value < self.previous_value:
+            # Check for device reset (value decreased)
+            if current_consumption < self.previous_consumption:
+                if self._pending_reset_value is not None and abs(current_consumption - self._pending_reset_value) < 0.01:
+                    self._pending_reset_count += 1
+                else:
+                    self._pending_reset_value = current_consumption
+                    self._pending_reset_count = 1
+                
+                if self._pending_reset_count > 10:
                     if self.coordinator.config_entry.options.get("log_warnings", True):
-                        _LOGGER.warning(
-                            "Ignoring decreasing value for %s: new=%s, old=%s",
-                            self.entity_id,
-                            current_value,
-                            self.previous_value,
-                        )
+                        _LOGGER.info("Device reset for %s confirmed. Accepting new value %s.", self.entity_id, self._pending_reset_value)
+                    self.previous_consumption = self._pending_reset_value
+                    self._pending_reset_value = None
+                    self._pending_reset_count = 0
+                    self._just_reset = True
+                else:
+                    return # Exit, wait for confirmation
+
+            else: # Increasing value
+                if self._pending_reset_count > 0:
+                    self._pending_reset_value = None
+                    self._pending_reset_count = 0
+
+                value_diff = current_consumption - self.previous_consumption
+                
+                # Check for unrealistic jump (spike)
+                if self._just_reset:
+                    if self.coordinator.config_entry.options.get("log_warnings", True):
+                        _LOGGER.info("Accepting first value difference %s after a confirmed reset.", value_diff)
+                    self._just_reset = False
+                elif value_diff > 50: # More than 50 kWh in one update is a spike
+                    if self.coordinator.config_entry.options.get("log_warnings", True):
+                        _LOGGER.warning("Spike detected for %s: change of %s is too large.", self.entity_id, value_diff)
                     return # Exit without updating
 
-                # Check for an unrealistic jump (e.g., more than 50 kWh in one update cycle)
-                if (current_value - self.previous_value) > 50:
-                    if self.coordinator.config_entry.options.get("log_warnings", True):
-                        _LOGGER.warning(
-                            "Spike detected for %s: new=%s, old=%s",
-                            self.entity_id,
-                            current_value,
-                            self.previous_value,
-                        )
-                    return # Exit without updating
+                self._state += value_diff
             # --- End Validation ---
 
-            # Calculate the difference and add to the running total
-            value_diff = current_value - self.previous_value
-            if self._state is None:
-                self._state = 0.0
-            self._state += value_diff
-
             # Save the current values for the next update
-            self.previous_value = current_value
+            self.previous_consumption = current_consumption
             self.last_update_date = current_date
 
         except (KeyError, ValueError, TypeError):
