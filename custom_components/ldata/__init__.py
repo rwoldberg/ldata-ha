@@ -15,9 +15,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
     
+    # --- START OF CHANGE ---
+    # Handle backward compatibility for username/email field
+    # Try to get the new 'email' key, but fall back to the old 'username' key if it doesn't exist.
+    username = entry.data.get("email", entry.data.get("username"))
+    # --- END OF CHANGE ---
+
     coordinator = LDATAUpdateCoordinator(
         hass,
-        entry.data["email"],
+        username, # Use the resolved username
         entry.data["password"],
         30, # Update interval in seconds
         entry,
