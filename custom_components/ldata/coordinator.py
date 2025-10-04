@@ -24,6 +24,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self.user = user
         self._service = LDATAService(user, password, entry)
         self._available = True
+        self.config_entry = entry  # Add this line to store the config entry
 
         super().__init__(
             hass,
@@ -40,6 +41,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 returnData = await self._hass.async_add_executor_job(
                     self._service.status  # Fetch new status
                 )
+                # Check the "log_raw_data" option before logging
+                if self.config_entry.options.get("log_raw_data", False):
+                    _LOGGER.warning("Leviton API Data: %s", returnData)
         except Exception as ex:
             self._available = False  # Mark as unavailable
             _LOGGER.warning(
