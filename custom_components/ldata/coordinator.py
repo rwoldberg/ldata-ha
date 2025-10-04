@@ -26,7 +26,6 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._available = True
         self.config_entry = entry
 
-        # The config_entry parameter is now passed to the parent class
         super().__init__(
             hass,
             _LOGGER,
@@ -44,23 +43,29 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                     self._service.status  # Fetch new status
                 )
 
+                # --- Start of selective debug logging ---
                 options = self.config_entry.options
                 
+                # Check if "Log All Raw Data" is enabled
                 if options.get("log_all_raw", False):
                     _LOGGER.warning("Leviton API Full Data: %s", returnData)
                 
-                elif fields_to_log_str := options.get("log_fields", ""):
-                    fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
-                    log_output = {}
+                # Else, check if specific field logging is enabled AND if fields have been provided
+                elif options.get("enable_specific_logging", False):
+                    if fields_to_log_str := options.get("log_fields", ""):
+                        fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
+                        log_output = {}
 
-                    for ct_id, ct_data in returnData.get('cts', {}).items():
-                        for field in fields_to_log:
-                            if field in ct_data:
-                                key_name = f"CT_{ct_id}_{field}"
-                                log_output[key_name] = ct_data[field]
-                    
-                    if log_output:
-                        _LOGGER.warning("Leviton Selected Raw Data: %s", log_output)
+                        # Search for requested fields in the data payload
+                        for ct_id, ct_data in returnData.get('cts', {}).items():
+                            for field in fields_to_log:
+                                if field in ct_data:
+                                    key_name = f"CT_{ct_id}_{field}"
+                                    log_output[key_name] = ct_data[field]
+                        
+                        if log_output:
+                            _LOGGER.warning("Leviton Selected Raw Data: %s", log_output)
+                # --- End of selective debug logging ---
 
         except Exception as ex:
             self._available = False  # Mark as unavailable
