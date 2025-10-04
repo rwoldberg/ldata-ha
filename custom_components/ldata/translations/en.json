@@ -23,12 +23,19 @@
     "options": {
         "step": {
             "init": {
+                "title": "Leviton LDATA Options",
                 "data": {
-                    "update_interval": "Interval to poll my.leviton.com (Seconds)",
-                    "three_phase": "Three phase power",
-                    "read_only": "Read only"
+                    "update_interval": "Update Interval (seconds)",
+                    "three_phase": "Three Phase System",
+                    "read_only": "Read Only Mode",
+                    "log_warnings": "Log Spike & Reset Warnings",
+                    "log_all_raw": "Log All Raw API Data",
+                    "enable_specific_logging": "Enable Specific Field Logging",
+                    "log_fields": "Fields to Log"
                 },
-                "description": "Configure Controller Options"
+                "data_description": {
+                    "log_fields": "To find field names, enable 'Log All Raw API Data' and check Home Assistant logs. Enter here as comma separated."
+                }
             }
         }
     }
