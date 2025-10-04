@@ -97,13 +97,11 @@ class OptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
 
-
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Return the options form."""
-        log_fields_note = "To find field names, enable 'Log All Raw' and check Home Assistant logs. Enter values as comma separated and submit."
-
         if user_input is not None:
-            if user_input.get("log_fields") == log_fields_note:
+            # If 'log_fields' is empty or just whitespace, ensure it's saved as an empty string.
+            if "log_fields" in user_input and not user_input["log_fields"].strip():
                 user_input["log_fields"] = ""
             return self.async_create_entry(title="", data=user_input)
         
@@ -132,9 +130,12 @@ class OptionsFlow(config_entries.OptionsFlow):
                 default=current_options.get("log_all_raw", False),
             ): bool,
             vol.Optional(
+                "enable_specific_logging",
+                default=current_options.get("enable_specific_logging", False),
+            ): bool,
+            vol.Optional(
                 "log_fields",
                 default=current_options.get("log_fields", ""),
-                description={"suggested_value": log_fields_note},
             ): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
         }
 
