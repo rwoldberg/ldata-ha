@@ -1,5 +1,4 @@
-"""Config flow for Leviton LDATA integration."""
-
+"""Config flow for LDATA."""
 from __future__ import annotations
 
 import logging
@@ -7,134 +6,79 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult
-from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.config_entries import ConfigFlow, ConfigEntry, OptionsFlow
+from homeassistant.core import callback
+from homeassistant.data_entry_flow import FlowResult
 
-from .const import (
-    DOMAIN,
-    LOGGER_NAME,
-    READ_ONLY,
-    READ_ONLY_DEFAULT,
-    THREE_PHASE,
-    THREE_PHASE_DEFAULT,
-    UPDATE_INTERVAL,
-    UPDATE_INTERVAL_DEFAULT,
-)
+from .const import DOMAIN
 from .ldata_service import LDATAService
 
-_LOGGER = logging.getLogger(LOGGER_NAME)
+_LOGGER = logging.getLogger(__name__)
 
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required("username"): str,
-        vol.Required("password"): str,
-        vol.Required("three_phase"): bool,
-        vol.Required("read_only"): bool,
-    }
-)
-
-
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from DATA_SCHEMA with values provided by the user.
-    """
-
-    service = LDATAService(data[CONF_USERNAME], data[CONF_PASSWORD], data[THREE_PHASE])
-
-    try:
-        result = await hass.async_add_executor_job(service.auth)
-    except Exception as ex:
-        raise InvalidAuth from ex
-
-    if not result:
-        _LOGGER.error("Failed to authenticate with Leviton API")
-        raise CannotConnect
-
-    # Return info that you want to store in the config entry.
-    return {"title": f"Leviton LDATA ({data[CONF_USERNAME]})"}
-
-
-class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Leviton LDATA."""
+class LDATAConfigFlow(ConfigFlow, domain=DOMAIN):
+    """LDATA config flow."""
 
     VERSION = 1
 
-    DOMAIN = DOMAIN
-
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Handle the initial step."""
+    ) -> FlowResult:
+        """Handle a flow initialized by the user."""
         errors: dict[str, str] = {}
         if user_input is not None:
-            try:
-                info = await validate_input(self.hass, user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                return self.async_create_entry(title=info["title"], data=user_input)
-
+            service = LDATAService(user_input["email"], user_input["password"], None)
+            if await self.hass.async_add_executor_job(service.login):
+                await self.async_set_unique_id(user_input["email"])
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title=user_input["email"], data=user_input
+                )
+            errors["base"] = "auth"
+        
         return self.async_show_form(
             step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
+            data_schema=vol.Schema(
+                {
+                    vol.Required("email"): str,
+                    vol.Required("password"): str,
+                }
+            ),
             errors=errors,
         )
-
+    
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> OptionsFlow:
-        """Get the options flow for this handler."""
-        return OptionsFlow(config_entry)
+    def async_get_options_flow(
+        config_entry: ConfigEntry,
+    ) -> OptionsFlow:
+        """Create the options flow."""
+        return OptionsFlowHandler(config_entry)
 
 
-class OptionsFlow(config_entries.OptionsFlow):
-    """Handle the options flow for Leviton LDATA."""
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+class OptionsFlowHandler(OptionsFlow):
+    def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
+        self.config_entry = config_entry
 
-    async def async_step_init(self, user_input=None) -> ConfigFlowResult:
-        """Return the options form."""
-        # foo = self.config_entry.options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT)
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Manage the options."""
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
-        options = {
-            vol.Optional(
-                UPDATE_INTERVAL,
-                default=self.config_entry.options.get(
-                    UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
-                ),
-            ): int,
-            vol.Optional(
-                THREE_PHASE,
-                default=self.config_entry.options.get(
-                    THREE_PHASE,
-                    self.config_entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT),
-                ),
-            ): bool,
-            vol.Optional(
-                READ_ONLY,
-                default=self.config_entry.options.get(
-                    READ_ONLY, self.config_entry.data.get(READ_ONLY, READ_ONLY_DEFAULT)
-                ),
-            ): bool,
-        }
 
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(options))
-
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
-
-
-class InvalidAuth(HomeAssistantError):
-    """Error to indicate there is invalid auth."""
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(
+                        "log_warnings",
+                        default=self.config_entry.options.get("log_warnings", True),
+                    ): bool,
+                    vol.Optional(
+                        "log_raw_data",
+                        default=self.config_entry.options.get("log_raw_data", False),
+                    ): bool,
+                }
+            ),
+        )
