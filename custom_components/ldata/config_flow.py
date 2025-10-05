@@ -125,6 +125,10 @@ class OptionsFlow(config_entries.OptionsFlow):
                 default=current_options.get("log_warnings", True),
             ): bool,
             vol.Optional(
+                "log_data_warnings",
+                default=current_options.get("log_data_warnings", True),
+            ): bool,
+            vol.Optional(
                 "log_all_raw",
                 default=current_options.get("log_all_raw", False),
             ): bool,
