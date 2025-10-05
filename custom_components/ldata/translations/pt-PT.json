@@ -25,13 +25,14 @@
             "init": {
                 "title": "Opções do Leviton LDATA",
                 "data": {
-                    "update_interval": "Intervalo de Atualização (segundos)",
-                    "three_phase": "Sistema Trifásico",
-                    "read_only": "Modo Apenas Leitura",
-                    "log_warnings": "Registar Avisos de Picos e Resets",
-                    "log_all_raw": "Registar Todos os Dados Brutos da API",
-                    "enable_specific_logging": "Ativar Registo de Campos Específicos",
-                    "log_fields": "Campos a Registar"
+                    "update_interval": "Intervalo de atualização (segundos)",
+                    "three_phase": "Sistema trifásico",
+                    "read_only": "Modo somente leitura",
+                    "log_warnings": "Registrar erros gerais do plugin",
+                    "log_data_warnings": "Registrar avisos de valor de dados (picos/reinicializações)",
+                    "log_all_raw": "Registrar todos os dados brutos da API",
+                    "enable_specific_logging": "Habilitar registro de campo específico",
+                    "log_fields": "Campos a serem registrados"
                 },
                 "data_description": {
                     "log_fields": "Para encontrar os nomes dos campos, ative 'Registar Todos os Dados Brutos da API' e verifique os registos do Home Assistant. Digite os dados acima separados por vírgula."
