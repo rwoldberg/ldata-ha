@@ -100,7 +100,6 @@ class OptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Return the options form."""
         if user_input is not None:
-            # If 'log_fields' is empty or just whitespace, ensure it's saved as an empty string.
             if "log_fields" in user_input and not user_input["log_fields"].strip():
                 user_input["log_fields"] = ""
             return self.async_create_entry(title="", data=user_input)
@@ -112,7 +111,7 @@ class OptionsFlow(config_entries.OptionsFlow):
             vol.Optional(
                 UPDATE_INTERVAL,
                 default=current_options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT),
-            ): int,
+            ): vol.All(vol.Coerce(int), vol.Range(min=30)),
             vol.Optional(
                 THREE_PHASE,
                 default=current_options.get(THREE_PHASE, current_data.get(THREE_PHASE, THREE_PHASE_DEFAULT)),
