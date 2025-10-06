@@ -296,9 +296,7 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                             self._state = power * time_span
                     except Exception:
                         if self.coordinator.config_entry.options.get("log_warnings", True):
-                            _LOGGER.exception(
-                                "Error updating daily usage sensor calculation for %s", self.entity_id
-                            )
+                            _LOGGER.exception("Error in daily usage calculation for %s", self.entity_id)
 
                 # Store current values for the next calculation.
                 self.last_update_time = current_time
@@ -371,6 +369,14 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             
             # Initialize the previous_consumption baseline on the first successful update.
             if self.previous_consumption is None:
+                if current_consumption < self._state:
+                    if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                        _LOGGER.warning(
+                            "Ignoring initial value for %s: API value (%s) is lower than restored daily total (%s). Waiting for valid data.",
+                            self.entity_id, current_consumption, self._state
+                        )
+                    return
+
                 self.previous_consumption = current_consumption
                 self.last_update_date = current_date
                 self.async_write_ha_state()
@@ -637,9 +643,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         self.entity_description = description
         super().__init__(data=data, coordinator=coordinator)
         self.ct_data = data
-        # Variables for the spike consistency check.
         self._pending_state = None
-        self._is_spike = False # This is kept for reference but new logic uses is_potential_spike
         try:
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
@@ -653,11 +657,9 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
                     new_value = float(new_data[self.entity_description.key])
-                    is_potential_spike = False # Reset spike flag for each update.
+                    is_potential_spike = False
 
-                    # --- Spike Detection Logic ---
                     if self._state is None:
-                        # On the first update after a restart, check for an abnormally high initial value.
                         if abs(new_value) > 3000:
                             if self.coordinator.config_entry.options.get("log_data_warnings", True):
                                 _LOGGER.warning("Potential spike on first update for %s: %s", self.entity_id, new_value)
@@ -702,7 +704,6 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
             # If any error occurs during parsing, set state to unavailable.
             self._state = None
             self._pending_state = None
-
         self.async_write_ha_state()
 
     @property
@@ -740,6 +741,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.ct_data = data
         self._state = None # Initialize state as None to be populated by restore or first update.
+        self._pending_state = None
     
     @property
     def available(self) -> bool:
@@ -765,6 +767,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
                     new_value = float(new_data[self.entity_description.key])
+                    is_potential_spike = False
                     ROUNDING_TOLERANCE = 0.01
 
                     # Initialize state on the very first update if not already set by restore.
@@ -786,25 +789,31 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                     # Check for unrealistic upward jumps (spikes).
                     # Case 1: A large absolute jump from a very low value.
                     if float(self._state) <= 1 and new_value > 100:
-                        if self.coordinator.config_entry.options.get("log_data_warnings", True):
-                            _LOGGER.warning(
-                                "Spike from zero detected for %s: new=%s, old=%s",
-                                self.entity_id, new_value, self._state
-                            )
-                        return # Exit without updating.
+                        is_potential_spike = True
                     # Case 2: A large relative jump during normal operation.
                     elif float(self._state) > 1 and new_value > (float(self._state) * 1.5):
-                        if self.coordinator.config_entry.options.get("log_data_warnings", True):
-                            _LOGGER.warning(
-                                "Spike detected for %s: new=%s, old=%s",
-                                self.entity_id, new_value, self._state
-                            )
-                        return # Exit without updating.
+                        is_potential_spike = True
+                    
+                    if is_potential_spike:
+                        if self._pending_state is not None:
+                            if self._pending_state != 0 and abs(new_value - self._pending_state) / abs(self._pending_state) < 0.15:
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
+                                self._state = new_value
+                                self._pending_state = None
+                            else:
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
+                                self._pending_state = new_value
+                        else:
+                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
+                            self._pending_state = new_value
+                    else:
+                        self._pending_state = None
+                        self._state = new_value
 
-                    # If all checks pass, update the state.
-                    self._state = new_value
-
-        except (KeyError, ValueError, TypeError):
+        except (KeyError, ValueError, TypeError, ZeroDivisionError):
             if self.coordinator.config_entry.options.get("log_warnings", True):
                 _LOGGER.debug("Invalid value received for %s", self.entity_id)
             return
