@@ -4,17 +4,17 @@
             "already_configured": "Conta já configurada"
         },
         "error": {
-            "cannot_connect": "Falha na ligação",
-            "invalid_auth": "Falha na autenticação",
-            "unknown": "Erro desconhecido"
+            "cannot_connect": "Falha na conexão",
+            "invalid_auth": "Autenticação inválida",
+            "unknown": "Erro inesperado"
         },
         "step": {
             "user": {
                 "data": {
-                    "username": "my.leviton.com Utilizador",
-                    "password": "my.leviton.com Password",
-                    "three_phase": "3 Fases?",
-                    "read_only": "Somente leitura"
+                    "username": "Utilizador my.leviton.com",
+                    "password": "Palavra-passe my.leviton.com",
+                    "three_phase": "Sistema trifásico",
+                    "read_only": "Apenas leitura"
                 },
                 "title": "Configurar LDATA"
             }
@@ -23,12 +23,20 @@
     "options": {
         "step": {
             "init": {
+                "title": "Opções do Leviton LDATA",
                 "data": {
-                    "update_interval": "Intervalo de pesquisa my.leviton.com (segundos)",
-                    "three_phase": "3 Fases?",
-                    "read_only": "Somente leitura"
+                    "update_interval": "Intervalo de atualização (segundos)",
+                    "three_phase": "Sistema trifásico",
+                    "read_only": "Modo somente leitura",
+                    "log_warnings": "Registrar erros gerais do plugin",
+                    "log_data_warnings": "Registrar avisos de valor de dados (picos/reinicializações)",
+                    "log_all_raw": "Registrar todos os dados brutos da API",
+                    "enable_specific_logging": "Habilitar registro de campo específico",
+                    "log_fields": "Campos a serem registrados"
                 },
-                "description": "Configurar o controlador"
+                "data_description": {
+                    "log_fields": "Para encontrar os nomes dos campos, ative 'Registar Todos os Dados Brutos da API' e verifique os registos do Home Assistant. Digite os dados acima separados por vírgula."
+                }
             }
         }
     }

@@ -23,6 +23,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
@@ -190,7 +191,7 @@ async def async_setup_entry(
         async_add_entities([total_sensor])
 
 
-class LDATADailyUsageSensor(LDATAEntity, SensorEntity):
+class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     """Sensor that tracks daily usage for an LDATA device."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -211,10 +212,14 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity):
         self.panel_id = which_panel
 
     async def async_added_to_hass(self) -> None:
-        """Handle entity which will be added."""
-        # Subscribe to updates.
+        """Handle entity which is added to hass to restore state on startup."""
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
+        if last_state := await self.async_get_last_state():
+            try:
+                self._state = float(last_state.state)
+            except (ValueError, TypeError):
+                pass # Ignore if the stored state is invalid
 
     @callback
     def _schedule_immediate_update(self):
@@ -254,7 +259,6 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity):
             ):
                 if new_data is not None:
                     current_value = new_data["power"]
-                # Make sure values are floats
                 try:
                     current_value = float(current_value)
                 except ValueError:
@@ -263,49 +267,50 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity):
                     self.previous_value = float(self.previous_value)
                 except ValueError:
                     self.previous_value = 0
-                # Save the current date and time
+                
                 current_time = time.time()
                 current_date = dt_util.now()
-                # Only update if we have a previous update
+                
                 if self.last_update_time > 0:
-                    # Clear the running total if the last update date and now are not the same day
+                    # Reset daily total at midnight.
                     if (
                         (self.last_update_date.day != current_date.day)
                         or (self.last_update_date.month != current_date.month)
                         or (self.last_update_date.year != current_date.year)
                     ):
                         self._state = 0
-                    # Power usage is half the previous plus current power consumption in kilowatts
+                    
+                    # Calculate power by averaging current and previous readings.
                     power = ((self.previous_value + current_value) / 2) / 1000
                     if power < 0:
                         power = -power
-                    # How long has it been since the last update in hours
+                    
+                    # Calculate time elapsed since last update in hours.
                     time_span = (current_time - self.last_update_time) / 3600
-                    # Update our running total
+                    
+                    # Update total energy by adding energy used in the time span (Power * Time).
                     try:
                         if self._state is not None:
                             self._state = self._state + (power * time_span)
                         else:
                             self._state = power * time_span
-                    except Exception:  # pylint: disable=broad-except
-                        _LOGGER.exception(
-                            "Error updating sensor! (%f %f %f)",
-                            self._state,
-                            power,
-                            time_span,
-                        )
-                # Save the current values
+                    except Exception:
+                        if self.coordinator.config_entry.options.get("log_warnings", True):
+                            _LOGGER.exception("Error in daily usage calculation for %s", self.entity_id)
+
+                # Store current values for the next calculation.
                 self.last_update_time = current_time
                 self.previous_value = current_value
                 self.last_update_date = current_date
-        except Exception:  # pylint: disable=broad-except
-            # self._state = None
-            _LOGGER.exception("Error updating sensor!")
+        except Exception:
+            # Catch all other errors to prevent crashes.
+            if self.coordinator.config_entry.options.get("log_warnings", True):
+                _LOGGER.exception("Error updating daily usage sensor for %s", self.entity_id)
         self.async_write_ha_state()
 
 
-class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity):
-    """Sensor that tracks daily usage for an LDATA device."""
+class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
+    """Sensor that tracks daily usage from a CT clamp's lifetime total."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -318,21 +323,20 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state: float | None = None
-        self.last_update_time = 0.0
-        self.previous_value = 0.0
         self.last_update_date = dt_util.now()
-        self.panel_total = panelTotal
-        self.panel_id = which_panel
+        # Stores the last known lifetime consumption value from the API.
+        self.previous_consumption = None
 
     async def async_added_to_hass(self) -> None:
-        """Handle entity which will be added."""
-        # Subscribe to updates.
+        """Handle entity which is added to hass to restore state on startup."""
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
-
-    @callback
-    def _schedule_immediate_update(self):
-        self.async_schedule_update_ha_state(True)
+        # Restore the last known daily total from the database.
+        if last_state := await self.async_get_last_state():
+            try:
+                self._state = float(last_state.state)
+            except (ValueError, TypeError):
+                pass # Ignore if the stored state is invalid
 
     @property
     def name_suffix(self) -> str | None:
@@ -355,63 +359,77 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            have_values = False
-            new_data = None
-            if self.panel_total is True:
-                current_value = 0
-                current_value = self.coordinator.data[self.panel_id + "totalPower"]
-                have_values = True
-            else:
-                new_data = self.coordinator.data["cts"][self.breaker_data["id"]]
-            if ((self.panel_total is True) and (have_values is True)) or (
-                new_data is not None
-            ):
-                if new_data is not None:
-                    current_value = new_data["consumption"]
-                # Make sure values are floats
-                try:
-                    current_value = float(current_value)
-                except ValueError:
-                    current_value = 0
-                try:
-                    self.previous_value = float(self.previous_value)
-                except ValueError:
-                    self.previous_value = 0
-                # Make sure the current value is at least equal to the previous value
-                if ( current_value < self.previous_value ):
-                    current_value = self.previous_value
-                # Save the current date and time
-                current_time = time.time()
-                current_date = dt_util.now()
-                # Only update if we have a previous update
-                if self.last_update_time > 0:
-                    # Clear the running total if the last update date and now are not the same day
-                    if (
-                        (self.last_update_date.day != current_date.day)
-                        or (self.last_update_date.month != current_date.month)
-                        or (self.last_update_date.year != current_date.year)
-                    ):
-                        self._state = 0
-                    # Update our running total
-                    try:
-                        value_diff = max(current_value - self.previous_value, 0)
-                        if self._state is not None:
-                            self._state += value_diff
-                        else:
-                            self._state = value_diff
-                    except Exception:  # pylint: disable=broad-except
-                        _LOGGER.exception(
-                            "Error updating sensor! (%f %f)",
-                            self._state,
-                            current_value,
+            new_data = self.coordinator.data["cts"][self.breaker_data["id"]]
+            current_consumption = float(new_data["consumption"])
+            current_date = dt_util.now()
+            
+            # Initialize the daily total on the very first run.
+            if self._state is None:
+                self._state = 0.0
+            
+            # Initialize the previous_consumption baseline on the first successful update.
+            if self.previous_consumption is None:
+                if current_consumption < self._state:
+                    if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                        _LOGGER.warning(
+                            "Ignoring initial value for %s: API value (%s) is lower than restored daily total (%s). Waiting for valid data.",
+                            self.entity_id, current_consumption, self._state
                         )
-                # Save the current values
-                self.last_update_time = current_time
-                self.previous_value = current_value
+                    return
+
+                self.previous_consumption = current_consumption
                 self.last_update_date = current_date
-        except Exception:  # pylint: disable=broad-except
-            # self._state = None
-            _LOGGER.exception("Error updating sensor!")
+                self.async_write_ha_state()
+                return
+
+            # Check if the day has rolled over to midnight.
+            if self.last_update_date.day != current_date.day:
+                # Log the daily reset if warnings are enabled.
+                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                    _LOGGER.info("New day detected for %s, resetting daily total.", self.entity_id)
+                # Reset the daily counter to zero.
+                self._state = 0.0
+                # Set the baseline for the new day's calculation to prevent a false spike report.
+                self.previous_consumption = current_consumption
+                self.last_update_date = current_date
+                self.async_write_ha_state()
+                return
+
+            # --- Normal operation within the same day ---
+            # Calculate the energy used since the last update.
+            value_diff = current_consumption - self.previous_consumption
+
+            # Validation: Check for a significant decrease (device reset), ignoring minor rounding errors.
+            if value_diff < -0.01:
+                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                    _LOGGER.warning(
+                        "Ignoring decreasing value for %s: new_total=%s, previous_total=%s",
+                        self.entity_id,
+                        current_consumption,
+                        self.previous_consumption
+                    )
+                return # Exit without updating state.
+            
+            # Validation: Check for an unrealistic jump (e.g., more than 50 kWh between updates).
+            if value_diff > 50: 
+                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                    _LOGGER.warning("Spike detected for %s: change of %s kWh is too large.", self.entity_id, value_diff)
+                return # Exit without updating state.
+
+            # If valid, add the positive difference to the daily total.
+            if value_diff > 0:
+                self._state += value_diff
+
+            # Store the current lifetime total for the next comparison.
+            self.previous_consumption = current_consumption
+            self.last_update_date = current_date
+
+        except (KeyError, ValueError, TypeError):
+            # Handle cases where data from the API is missing or invalid.
+            if self.coordinator.config_entry.options.get("log_warnings", True):
+                _LOGGER.debug("Could not update %s, data missing or invalid.", self.entity_id)
+            return
+
         self.async_write_ha_state()
 
 
@@ -434,7 +452,6 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.is_average = average
         self._state = self.total_values()
-        # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     def total_values(self) -> float:
@@ -516,7 +533,6 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
             self._state = float(self.breaker_data[self.entity_description.key])
         except ValueError:
             self._state = 0.0
-        # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
@@ -552,7 +568,6 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
         """Returns the extra attributes for the breaker."""
         attributes = super().extra_state_attributes
         attributes["panel_id"] = self.breaker_data["panel_id"]
-
         return attributes
 
 
@@ -579,7 +594,6 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
             )
         except ValueError:
             self._state = 0.0
-        # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
@@ -629,11 +643,11 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         self.entity_description = description
         super().__init__(data=data, coordinator=coordinator)
         self.ct_data = data
+        self._pending_state = None
         try:
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
             self._state = 0.0
-        # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
@@ -643,46 +657,53 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
                     new_value = float(new_data[self.entity_description.key])
-                    self._is_spike = False # Reset spike flag
+                    is_potential_spike = False
 
-                    # --- Spike Detection Logic ---
-                    if self._state is not None:
+                    if self._state is None:
+                        if abs(new_value) > 3000:
+                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                _LOGGER.warning("Potential spike on first update for %s: %s", self.entity_id, new_value)
+                            is_potential_spike = True
+                    else:
+                        # Normal operation: check for spikes relative to the previous state.
                         previous_state = float(self._state)
-                        # Check for a jump from 0 that is unreasonably high
+                        # Case 1: A large jump from zero.
                         if previous_state == 0 and abs(new_value) > 3000:
-                            self._is_spike = True
-                        # Check for a relative jump if not starting from 0
+                            is_potential_spike = True
+                        # Case 2: A large relative AND absolute jump from a non-zero value.
                         elif previous_state != 0 and abs(new_value) > (abs(previous_state) * 10) and abs(new_value - previous_state) > 2000:
-                            self._is_spike = True
-                    # --- End of Spike Detection ---
-
+                            is_potential_spike = True
+                    
                     # --- Consistency Check Logic ---
-                    if self._is_spike:
-                        # A spike is detected. Check if it's consistent with a pending value.
+                    if is_potential_spike:
+                        # A potential spike is detected. Check if it's consistent with a previous pending value.
                         if self._pending_state is not None:
-                            # Check if the new value is within 15% of the pending spike value
-                            if abs(new_value - self._pending_state) / self._pending_state < 0.15:
-                                # Consistent spike, accept it as the new state
-                                _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
+                            # Check if the new value is within 15% of the pending spike value.
+                            if self._pending_state != 0 and abs(new_value - self._pending_state) / abs(self._pending_state) < 0.15:
+                                # The spike is consistent, so accept it as the new state.
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
                                 self._state = new_value
-                                self._pending_state = None # Clear pending state
+                                self._pending_state = None # Clear pending state since it's confirmed.
                             else:
-                                # Not consistent, it was a transient spike. Discard and wait.
-                                _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
-                                self._pending_state = None # Clear pending state
+                                # The spike is not consistent with the last one. Discard the old and start a new check.
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
+                                self._pending_state = new_value # Start a new pending check with this new value.
                         else:
-                            # This is the first time we see this spike. Store it for verification.
-                            _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
+                            # This is the first time we've seen this potential spike. Store it for verification.
+                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
                             self._pending_state = new_value
                     else:
                         # No spike detected, this is a normal value.
-                        self._pending_state = None # Clear any old pending state
+                        self._pending_state = None # Clear any old pending state.
                         self._state = new_value
 
-        except (KeyError, ValueError, TypeError):
+        except (KeyError, ValueError, TypeError, ZeroDivisionError):
+            # If any error occurs during parsing, set state to unavailable.
             self._state = None
             self._pending_state = None
-
         self.async_write_ha_state()
 
     @property
@@ -703,7 +724,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         return self._state
 
 
-class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
+class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
     """Sensor that reads an output based on the passed in description from an LDATA CT device."""
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
@@ -719,14 +740,25 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
         self.entity_description = description
         super().__init__(data=data, coordinator=coordinator)
         self.ct_data = data
+        self._state = None # Initialize state as None to be populated by restore or first update.
         self._pending_state = None
-        self._is_spike = False
-        try:
-            self._state = float(self.ct_data[self.entity_description.key])
-        except ValueError:
-            self._state = 0.0
-        # Subscribe to updates.
+    
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        # The entity is available if the coordinator has data OR if the sensor has a valid state (from restore).
+        return self.coordinator.last_update_success or self._state is not None
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which is added to hass to restore state on startup."""
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        await super().async_added_to_hass()
+        # Restore the last known state from the database.
+        if last_state := await self.async_get_last_state():
+            try:
+                self._state = float(last_state.state)
+            except (ValueError, TypeError):
+                pass # Ignore if the stored state is invalid
 
     @callback
     def _state_update(self):
@@ -735,34 +767,55 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity):
             if cts := self.coordinator.data["cts"]:
                 if new_data := cts[self.ct_data["id"]]:
                     new_value = float(new_data[self.entity_description.key])
+                    is_potential_spike = False
+                    ROUNDING_TOLERANCE = 0.01
 
-                    # Check for invalid values if a previous state exists
-                    if self._state is not None:
-                        # Ignore if the new value is less than the old one (device reset)
-                        if new_value < float(self._state):
+                    # Initialize state on the very first update if not already set by restore.
+                    if self._state is None:
+                        self._state = new_value
+                        self.async_write_ha_state()
+                        return
+
+                    # --- Data Validation ---
+                    # Check for a significant decrease, ignoring minor rounding errors.
+                    if (float(self._state) - new_value) > ROUNDING_TOLERANCE:
+                        if self.coordinator.config_entry.options.get("log_data_warnings", True):
                             _LOGGER.warning(
                                 "Ignoring decreasing value for %s: new=%s, old=%s",
-                                self.entity_id,
-                                new_value,
-                                self._state,
+                                self.entity_id, new_value, self._state
                             )
-                            return # Exit without updating
+                        return # Exit without updating.
 
-                        # Ignore unrealistic jumps (spike)
-                        if new_value > (float(self._state) * 1.5) and float(self._state) > 1:
-                            _LOGGER.warning(
-                                "Spike detected for %s: new=%s, old=%s",
-                                self.entity_id,
-                                new_value,
-                                self._state,
-                            )
-                            return # Exit without updating
+                    # Check for unrealistic upward jumps (spikes).
+                    # Case 1: A large absolute jump from a very low value.
+                    if float(self._state) <= 1 and new_value > 100:
+                        is_potential_spike = True
+                    # Case 2: A large relative jump during normal operation.
+                    elif float(self._state) > 1 and new_value > (float(self._state) * 1.5):
+                        is_potential_spike = True
+                    
+                    if is_potential_spike:
+                        if self._pending_state is not None:
+                            if self._pending_state != 0 and abs(new_value - self._pending_state) / abs(self._pending_state) < 0.15:
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
+                                self._state = new_value
+                                self._pending_state = None
+                            else:
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
+                                self._pending_state = new_value
+                        else:
+                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
+                            self._pending_state = new_value
+                    else:
+                        self._pending_state = None
+                        self._state = new_value
 
-                    # If value is valid, update the state
-                    self._state = new_value
-        except (KeyError, ValueError, TypeError):
-            # Handle cases where the value isn't a valid number
-            _LOGGER.debug("Invalid value received for %s", self.entity_id)
+        except (KeyError, ValueError, TypeError, ZeroDivisionError):
+            if self.coordinator.config_entry.options.get("log_warnings", True):
+                _LOGGER.debug("Invalid value received for %s", self.entity_id)
             return
 
         self.async_write_ha_state()
