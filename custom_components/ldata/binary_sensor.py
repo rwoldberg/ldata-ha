@@ -18,14 +18,21 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Add the binary sensor for the breakers."""
+    """Add the binary sensor for the breakers and panels."""
 
     entry = hass.data[DOMAIN][config_entry.entry_id]
+    sensors_to_add = []
 
-    for breaker_id in entry.data["breakers"]:
-        breaker_data = entry.data["breakers"][breaker_id]
-        sensor = LDATABinarySensor(entry, breaker_data)
-        async_add_entities([sensor])
+    if "breakers" in entry.data:
+        for breaker_id in entry.data["breakers"]:
+            breaker_data = entry.data["breakers"][breaker_id]
+            sensors_to_add.append(LDATABinarySensor(entry, breaker_data))
+
+    if "panels" in entry.data:
+        for panel_data in entry.data["panels"]:
+            sensors_to_add.append(LdataCloudConnectedSensor(entry, panel_data))
+
+    async_add_entities(sensors_to_add)
 
 
 class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
@@ -34,6 +41,7 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     def __init__(self, coordinator, data) -> None:
         """Init LDATABinarySensor."""
         super().__init__(data=data, coordinator=coordinator)
+        self._attr_unique_id = f"{data['id']}_status"
         self.breaker_data = data
         self._state = None
         if current_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
@@ -89,3 +97,48 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     def name_suffix(self) -> str | None:
         """Suffix to append to the LDATA device's name."""
         return "Status"
+
+class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
+    """LDATA Cloud Connection binary sensor for a specific panel."""
+
+    def __init__(self, coordinator, data) -> None:
+        """Init LdataCloudConnectedSensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.panel_data = data
+        self._state = None
+        self._update_state() # Set initial state
+        # Subscribe to updates.
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        self._update_state()
+        self.async_write_ha_state()
+
+    def _update_state(self):
+        """Update the internal state of the sensor."""
+        try:
+            # Find the specific panel's data in the latest update
+            for panel in self.coordinator.data["panels"]:
+                if panel["id"] == self.panel_data["id"]:
+                    self._state = panel["connected"]
+                    return # Exit after finding the panel
+            self._state = None # Panel not found
+        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
+            self._state = None
+
+    @property
+    def is_on(self) -> bool | None:
+        """Returns true if the panel is connected to the cloud."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's name."""
+        return "Cloud Connected"
+
+    @property
+    def icon(self) -> str:
+        """Return the icon to use in the frontend."""
+        return "mdi:cloud-check" if self.is_on else "mdi:cloud-off-outline"
