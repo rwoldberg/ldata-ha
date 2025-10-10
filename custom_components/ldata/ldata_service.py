@@ -409,6 +409,7 @@ class LDATAService:
             panel_data["id"] = panel["id"]
             panel_data["name"] = panel["name"]
             panel_data["serialNumber"] = panel["id"]
+            panel_data["connected"] = panel.get("connected", False)
             if three_phase is False:
                 panel_data["voltage"] = (
                     float(panel["rmsVoltage"]) + float(panel["rmsVoltage2"])

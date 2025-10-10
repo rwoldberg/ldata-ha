@@ -77,7 +77,7 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
             "identifiers": {(DOMAIN, self.entity_data["serialNumber"])},
             "name": self.entity_data["name"],
             "model": self.entity_data["model"],
-            "hw_version": self.entity_data["hardware"],
+            "hw_version": self.entity_data.get("hardware"),
             "sw_version": self.entity_data["firmware"],
             "manufacturer": MANUFACTURER,
         }
