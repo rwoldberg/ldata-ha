@@ -45,6 +45,9 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = None
+        self._last_known_is_on: bool = False
+        self._consecutive_update_failures: int = 0
+
         if current_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
             if (
                 current_data["state"] == "ManualON"
@@ -53,6 +56,10 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
                 self._state = True
             else:
                 self._state = False
+            
+            # Set the initial "last known" state
+            self._last_known_is_on = self._state
+
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
@@ -60,17 +67,26 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            if breakers := self.coordinator.data["breakers"]:
-                if new_data := breakers[self.breaker_data["id"]]:
-                    if (
-                        new_data["state"] == "ManualON"
-                        and new_data["remoteState"] == "RemoteON"
-                    ):
-                        self._state = True
-                    else:
-                        self._state = False
-        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
+            new_data = self.coordinator.data["breakers"][self.breaker_data["id"]]
+            if (
+                new_data["state"] == "ManualON"
+                and new_data["remoteState"] == "RemoteON"
+            ):
+                self._state = True
+            else:
+                self._state = False
+            
+            self._last_known_is_on = self._state
+            self._consecutive_update_failures = 0
+
+        except (KeyError, TypeError):
+            self._consecutive_update_failures += 1
+
+        if self._consecutive_update_failures > 5:
             self._state = None
+        else:
+            self._state = self._last_known_is_on
+            
         self.async_write_ha_state()
 
     @property
