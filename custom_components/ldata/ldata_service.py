@@ -402,7 +402,12 @@ class LDATAService:
             THREE_PHASE, self.entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
         )
         for panel in panels_json:
-            self.put_residential_breaker_panels(panel["id"], panel["ModuleType"])
+            try:
+                # This call forces the panel to update ensure that if one panel fails to respond, it doesn't stop the update for all other panels.
+                self.put_residential_breaker_panels(panel["id"], panel["ModuleType"])
+            except requests.exceptions.RequestException as e:
+               _LOGGER.warning(f"Failed to request update from panel {panel.get('name', panel['id'])}: {e}")
+                # Continue to the next panel even if this one failed.
             panel_data = {}
             panel_data["firmware"] = panel["updateVersion"]
             panel_data["model"] = panel["model"]
