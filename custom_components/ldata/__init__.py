@@ -2,8 +2,8 @@
 from __future__ import annotations
 import logging
 
-from homeassistant.config_entries import ConfigEntry, ConfigEntryState
-from homeassistant.const import Platform
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, LOGGER_NAME, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
@@ -19,7 +19,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
     
     # Handle backward compatibility for username/email field
-    username = entry.data.get("email", entry.data.get("username"))
+    username = entry.data.get("email", entry.data.get(CONF_USERNAME))
 
     # Get the update interval from options and enforce a 30-second minimum.
     user_update_interval = entry.options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT)
@@ -35,16 +35,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = LDATAUpdateCoordinator(
         hass,
         username,
-        entry.data["password"],
+        entry.data[CONF_PASSWORD],
         update_interval, # Use the validated update_interval
         entry,
     )
 
-    if entry.state == ConfigEntryState.SETUP_IN_PROGRESS:
-        await coordinator.async_config_entry_first_refresh()
+    await coordinator.async_config_entry_first_refresh()
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # This line will now only be reached if the first refresh was successful.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Set up a listener for options updates
@@ -55,7 +55,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     # Use the built-in unload method
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    
+    # Also pop the coordinator from hass.data
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id)
+        
+    return unload_ok
 
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""

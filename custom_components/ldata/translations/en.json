@@ -6,6 +6,7 @@
         "error": {
             "cannot_connect": "Failed to connect",
             "invalid_auth": "Invalid authentication",
+            "invalid_2fa": "Invalid 2FA code, please try again",
             "unknown": "Unexpected error"
         },
         "step": {
@@ -17,6 +18,13 @@
                     "read_only": "Read only"
                 },
                 "title": "Configure LDATA"
+            },
+            "2fa": {
+                "title": "Two-Factor Authentication",
+                "description": "A two-factor authentication code is required for {username}. Please check your authenticator app or email and enter the code below.",
+                "data": {
+                    "2fa_code": "Authentication Code"
+                }
             }
         }
     },

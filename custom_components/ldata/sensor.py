@@ -102,29 +102,48 @@ async def async_setup_entry(
 ) -> None:
     """Add the power and kilowatt sensors for the breakers."""
 
-    entry = hass.data[DOMAIN][config_entry.entry_id]
+    # Get the coordinator from hass.data
+    coordinator: LDATAUpdateCoordinator = hass.data[DOMAIN][config_entry.entry_id]
 
-    for ct_id in entry.data["cts"]:
-        ct_data = entry.data["cts"][ct_id]
-        power_sensor = LDATAEnergyUsageSensor(entry, ct_data, SENSOR_TYPES[4])
-        async_add_entities([power_sensor])
-        power_sensor = LDATAEnergyUsageSensor(entry, ct_data, SENSOR_TYPES[5])
-        async_add_entities([power_sensor])
-        ctpower_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[2])
-        async_add_entities([ctpower_sensor])
-        ctpower_sensor = LDATACTOutputSensor(entry, ct_data, SENSOR_TYPES[0])
-        async_add_entities([ctpower_sensor])
-        ctusage_sensor = LDATACTDailyUsageSensor(entry, ct_data, False, "")
-        async_add_entities([ctusage_sensor])
-    for breaker_id in entry.data["breakers"]:
-        breaker_data = entry.data["breakers"][breaker_id]
-        usage_sensor = LDATADailyUsageSensor(entry, breaker_data, False, "")
-        async_add_entities([usage_sensor])
-        output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[0])
-        async_add_entities([output_sensor])
-        output_sensor = LDATAOutputSensor(entry, breaker_data, SENSOR_TYPES[2])
-        async_add_entities([output_sensor])
-    for panel in entry.data["panels"]:
+    # If the coordinator has no data (e.g., auth failed in __init__.py),
+    # stop setup here to prevent a crash.
+    if not coordinator.data:
+        _LOGGER.warning(
+            "Coordinator has no data, skipping sensor setup. "
+            "This may be due to an authentication error or network issue."
+        )
+        return
+
+    # Create a single list to add all entities at the end
+    entities_to_add: list[SensorEntity] = []
+
+    for ct_id, ct_data in coordinator.data.get("cts", {}).items():
+        entities_to_add.append(
+            LDATAEnergyUsageSensor(coordinator, ct_data, SENSOR_TYPES[4])
+        )
+        entities_to_add.append(
+            LDATAEnergyUsageSensor(coordinator, ct_data, SENSOR_TYPES[5])
+        )
+        entities_to_add.append(
+            LDATACTOutputSensor(coordinator, ct_data, SENSOR_TYPES[2])
+        )
+        entities_to_add.append(
+            LDATACTOutputSensor(coordinator, ct_data, SENSOR_TYPES[0])
+        )
+        entities_to_add.append(
+            LDATACTDailyUsageSensor(coordinator, ct_data, False, "")
+        )
+
+    for breaker_id, breaker_data in coordinator.data.get("breakers", {}).items():
+        entities_to_add.append(LDATADailyUsageSensor(coordinator, breaker_data, False, ""))
+        entities_to_add.append(
+            LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[0])
+        )
+        entities_to_add.append(
+            LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[2])
+        )
+
+    for panel in coordinator.data.get("panels", []):
         entity_data = {}
         entity_data["id"] = panel["serialNumber"]
         entity_data["name"] = panel["name"]
@@ -140,55 +159,74 @@ async def async_setup_entry(
         entity_data["frequency1"] = panel["frequency1"]
         entity_data["frequency2"] = panel["frequency2"]
         entity_data["data"] = panel
-        usage_sensor = LDATADailyUsageSensor(
-            entry, entity_data, True, which_panel=panel["id"]
+        
+        entities_to_add.append(
+            LDATADailyUsageSensor(
+                coordinator, entity_data, True, which_panel=panel["id"]
+            )
         )
-        async_add_entities([usage_sensor])
-        total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[0], average=False, which_leg="both"
+        entities_to_add.append(
+            LDATATotalUsageSensor(
+                coordinator, entity_data, SENSOR_TYPES[0], average=False, which_leg="both"
+            )
         )
-        async_add_entities([total_sensor])
-        total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[2], average=False, which_leg="both"
+        entities_to_add.append(
+            LDATATotalUsageSensor(
+                coordinator, entity_data, SENSOR_TYPES[2], average=False, which_leg="both"
+            )
         )
-        async_add_entities([total_sensor])
-        paneloutput_sensor = LDATAPanelOutputSensor(
-            entry, entity_data, SENSOR_TYPES[3], which_leg="1"
+        entities_to_add.append(
+            LDATAPanelOutputSensor(
+                coordinator, entity_data, SENSOR_TYPES[3], which_leg="1"
+            )
         )
-        async_add_entities([paneloutput_sensor])
-        paneloutput_sensor = LDATAPanelOutputSensor(
-            entry, entity_data, SENSOR_TYPES[3], which_leg="2"
+        entities_to_add.append(
+            LDATAPanelOutputSensor(
+                coordinator, entity_data, SENSOR_TYPES[3], which_leg="2"
+            )
         )
-        async_add_entities([paneloutput_sensor])
-        paneloutput_sensor = LDATAPanelOutputSensor(
-            entry, entity_data, SENSOR_TYPES[1], which_leg="1"
+        entities_to_add.append(
+            LDATAPanelOutputSensor(
+                coordinator, entity_data, SENSOR_TYPES[1], which_leg="1"
+            )
         )
-        async_add_entities([paneloutput_sensor])
-        paneloutput_sensor = LDATAPanelOutputSensor(
-            entry, entity_data, SENSOR_TYPES[1], which_leg="2"
+        entities_to_add.append(
+            LDATAPanelOutputSensor(
+                coordinator, entity_data, SENSOR_TYPES[1], which_leg="2"
+            )
         )
-        async_add_entities([paneloutput_sensor])
-        entity_data = copy.deepcopy(entity_data)
-        entity_data["poles"] = 1
-        entity_data["position"] = 1
-        total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[0], average=False, which_leg="1"
+        
+        entity_data_leg1 = copy.deepcopy(entity_data)
+        entity_data_leg1["poles"] = 1
+        entity_data_leg1["position"] = 1
+        entities_to_add.append(
+            LDATATotalUsageSensor(
+                coordinator, entity_data_leg1, SENSOR_TYPES[0], average=False, which_leg="1"
+            )
         )
-        async_add_entities([total_sensor])
-        total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[2], average=False, which_leg="1"
+        entities_to_add.append(
+            LDATATotalUsageSensor(
+                coordinator, entity_data_leg1, SENSOR_TYPES[2], average=False, which_leg="1"
+            )
         )
-        async_add_entities([total_sensor])
-        entity_data = copy.deepcopy(entity_data)
-        entity_data["position"] = 3
-        total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[0], average=False, which_leg="2"
+        
+        entity_data_leg2 = copy.deepcopy(entity_data)
+        entity_data_leg2["poles"] = 1
+        entity_data_leg2["position"] = 3
+        entities_to_add.append(
+            LDATATotalUsageSensor(
+                coordinator, entity_data_leg2, SENSOR_TYPES[0], average=False, which_leg="2"
+            )
         )
-        async_add_entities([total_sensor])
-        total_sensor = LDATATotalUsageSensor(
-            entry, entity_data, SENSOR_TYPES[2], average=False, which_leg="2"
+        entities_to_add.append(
+            LDATATotalUsageSensor(
+                coordinator, entity_data_leg2, SENSOR_TYPES[2], average=False, which_leg="2"
+            )
         )
-        async_add_entities([total_sensor])
+
+    # Add all entities in one go for efficiency
+    if entities_to_add:
+        async_add_entities(entities_to_add)
 
 
 class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
@@ -245,15 +283,22 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
+        # Add safety check for coordinator data
+        if not self.coordinator.data:
+            return
+
         try:
             have_values = False
             new_data = None
             if self.panel_total is True:
                 current_value = 0
-                current_value = self.coordinator.data[self.panel_id + "totalPower"]
-                have_values = True
+                if (self.panel_id + "totalPower") in self.coordinator.data:
+                    current_value = self.coordinator.data[self.panel_id + "totalPower"]
+                    have_values = True
             else:
-                new_data = self.coordinator.data["breakers"][self.breaker_data["id"]]
+                if "breakers" in self.coordinator.data and self.breaker_data["id"] in self.coordinator.data["breakers"]:
+                    new_data = self.coordinator.data["breakers"][self.breaker_data["id"]]
+            
             if ((self.panel_total is True) and (have_values is True)) or (
                 new_data is not None
             ):
@@ -359,6 +404,12 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
+            # Add safety checks for coordinator.data
+            if not self.coordinator.data or "cts" not in self.coordinator.data or self.breaker_data["id"] not in self.coordinator.data["cts"]:
+                if self.coordinator.config_entry.options.get("log_warnings", True):
+                    _LOGGER.debug("Could not update %s, data missing or invalid.", self.entity_id)
+                return
+                
             new_data = self.coordinator.data["cts"][self.breaker_data["id"]]
             current_consumption = float(new_data["consumption"])
             current_date = dt_util.now()
@@ -458,6 +509,11 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         """Total value for all breakers."""
         total = 0.0
         count = 0
+        
+        # Add safety check for coordinator.data
+        if not self.coordinator.data or "breakers" not in self.coordinator.data:
+            return 0.0
+
         for breaker in self.coordinator.data["breakers"].items():
             breaker_data = breaker[1]
             if breaker_data["panel_id"] == self.entity_data["serialNumber"]:
@@ -465,7 +521,7 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
                 if self.leg_to_total == "both":
                     try:
                         current_value = float(breaker_data[self.entity_description.key])
-                    except ValueError:
+                    except (ValueError, KeyError):
                         current_value = 0.0
                 else:
                     try:
@@ -474,7 +530,7 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
                                 self.entity_description.key + self.leg_to_total
                             ]
                         )
-                    except ValueError:
+                    except (ValueError, KeyError):
                         current_value = 0.0
                 current_value = max(current_value, 0.0)
                 total += current_value
@@ -539,9 +595,14 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            if breakers := self.coordinator.data["breakers"]:
-                if new_data := breakers[self.breaker_data["id"]]:
+            # Add safety check for coordinator.data
+            if breakers := self.coordinator.data.get("breakers"):
+                if new_data := breakers.get(self.breaker_data["id"]):
                     self._state = new_data[self.entity_description.key]
+                else:
+                    self._state = None # Breaker data not found
+            else:
+                self._state = None # No breaker data in coordinator
         except KeyError:
             self._state = None
         self.async_write_ha_state()
@@ -600,13 +661,16 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            if panels := self.coordinator.data["panels"]:
+            # Add safety check for coordinator.data
+            if panels := self.coordinator.data.get("panels"):
                 for panel in panels:
                     if panel["id"] == self.panel_data["id"]:
                         self._state = panel[
                             self.entity_description.key + self.leg_to_total
                         ]
                         break
+            else:
+                self._state = None # No panel data in coordinator
         except KeyError:
             self._state = None
         self.async_write_ha_state()
@@ -654,8 +718,9 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            if cts := self.coordinator.data["cts"]:
-                if new_data := cts[self.ct_data["id"]]:
+            # Add safety check for coordinator.data
+            if cts := self.coordinator.data.get("cts"):
+                if new_data := cts.get(self.ct_data["id"]):
                     new_value = float(new_data[self.entity_description.key])
                     is_potential_spike = False
 
@@ -699,6 +764,10 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
                         # No spike detected, this is a normal value.
                         self._pending_state = None # Clear any old pending state.
                         self._state = new_value
+                else:
+                    self._state = None # CT data not found
+            else:
+                self._state = None # No CT data in coordinator
 
         except (KeyError, ValueError, TypeError, ZeroDivisionError):
             # If any error occurs during parsing, set state to unavailable.
@@ -764,8 +833,9 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            if cts := self.coordinator.data["cts"]:
-                if new_data := cts[self.ct_data["id"]]:
+            # Add safety check for coordinator.data
+            if cts := self.coordinator.data.get("cts"):
+                if new_data := cts.get(self.ct_data["id"]):
                     new_value = float(new_data[self.entity_description.key])
                     is_potential_spike = False
                     ROUNDING_TOLERANCE = 0.01
@@ -812,6 +882,14 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                     else:
                         self._pending_state = None
                         self._state = new_value
+                else:
+                    # CT data not found, do not change state
+                    if self.coordinator.config_entry.options.get("log_warnings", True):
+                        _LOGGER.debug("Data for CT %s not found in update.", self.ct_data["id"])
+            else:
+                # No CT data in coordinator, do not change state
+                if self.coordinator.config_entry.options.get("log_warnings", True):
+                    _LOGGER.debug("No 'cts' data found in coordinator update.")
 
         except (KeyError, ValueError, TypeError, ZeroDivisionError):
             if self.coordinator.config_entry.options.get("log_warnings", True):
