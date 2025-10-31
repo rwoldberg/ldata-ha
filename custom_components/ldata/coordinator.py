@@ -3,12 +3,14 @@
 import asyncio
 from datetime import timedelta
 import logging
+import requests
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from .const import DOMAIN, LOGGER_NAME
-from .ldata_service import LDATAService
+from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -36,9 +38,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         """Fetch data from LDATA Controller."""
-        returnData = None
         try:
             async with asyncio.timeout(30):
+                # This will now either return data or raise an Exception
                 returnData = await self._hass.async_add_executor_job(
                     self._service.status  # Fetch new status
                 )
@@ -57,27 +59,39 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                         log_output = {}
 
                         # Search for requested fields in the data payload
-                        for ct_id, ct_data in returnData.get('cts', {}).items():
-                            for field in fields_to_log:
-                                if field in ct_data:
-                                    key_name = f"CT_{ct_id}_{field}"
-                                    log_output[key_name] = ct_data[field]
+                        if returnData and returnData.get('cts'): # Add check for data
+                            for ct_id, ct_data in returnData.get('cts', {}).items():
+                                for field in fields_to_log:
+                                    if field in ct_data:
+                                        key_name = f"CT_{ct_id}_{field}"
+                                        log_output[key_name] = ct_data[field]
                         
                         if log_output:
                             _LOGGER.warning("Leviton Selected Raw Data: %s", log_output)
                 # --- End of selective debug logging ---
+                
+                return returnData
+
+        except LDATAAuthError as ex:
+            # This is our specific auth failure
+            _LOGGER.warning("Authentication failed: %s. Please re-authenticate.", ex)
+            raise ConfigEntryAuthFailed(f"Authentication failed: {ex}") from ex
+        
+        except requests.exceptions.RequestException as ex:
+            # Handle connection errors
+            _LOGGER.warning("Connection error communicating with LDATA: %s", ex)
+            raise UpdateFailed(f"Connection error: {ex}") from ex
 
         except Exception as ex:
-            self._available = False  # Mark as unavailable
+            # This catches all other errors from ldata_service (e.g., "Could not get Account ID")
+            self._available = False
             _LOGGER.warning(
                 "Error communicating with LDATA for %s: %s", self.user, str(ex)
             )
-            raise UpdateFailed(
-                f"Error communicating with LDATA for {self.user}"
-            ) from ex
-        return returnData
+            # This will result in the "Failed setup, will retry" message
+            raise UpdateFailed(f"Error communicating with LDATA: {ex}") from ex
 
     @property
     def service(self) -> LDATAService:
         """Return the LDATA service."""
-        return self._service
+        return self.service
