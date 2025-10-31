@@ -4,38 +4,46 @@
             "already_configured": "Conta já configurada"
         },
         "error": {
-            "cannot_connect": "Falha na conexão",
+            "cannot_connect": "Falha ao conectar",
             "invalid_auth": "Autenticação inválida",
+            "invalid_2fa": "Código 2FA inválido, por favor tente novamente",
             "unknown": "Erro inesperado"
         },
         "step": {
             "user": {
                 "data": {
-                    "username": "Utilizador my.leviton.com",
-                    "password": "Palavra-passe my.leviton.com",
-                    "three_phase": "Sistema trifásico",
-                    "read_only": "Apenas leitura"
+                    "username": "Nome de usuário my.leviton.com",
+                    "password": "Senha my.leviton.com",
+                    "three_phase": "Energia trifásica",
+                    "read_only": "Somente leitura"
                 },
                 "title": "Configurar LDATA"
+            },
+            "2fa": {
+                "title": "Autenticação de Dois Fatores",
+                "description": "Um código de autenticação de dois fatores é necessário para {username}. Por favor, verifique seu aplicativo autenticador ou e-mail e insira o código abaixo.",
+                "data": {
+                    "2fa_code": "Código de Autenticação"
+                }
             }
         }
     },
     "options": {
         "step": {
             "init": {
-                "title": "Opções do Leviton LDATA",
+                "title": "Opções Leviton LDATA",
                 "data": {
-                    "update_interval": "Intervalo de atualização (segundos)",
-                    "three_phase": "Sistema trifásico",
-                    "read_only": "Modo somente leitura",
-                    "log_warnings": "Registrar erros gerais do plugin",
-                    "log_data_warnings": "Registrar avisos de valor de dados (picos/reinicializações)",
-                    "log_all_raw": "Registrar todos os dados brutos da API",
-                    "enable_specific_logging": "Habilitar registro de campo específico",
-                    "log_fields": "Campos a serem registrados"
+                    "update_interval": "Intervalo de Atualização (segundos)",
+                    "three_phase": "Sistema Trifásico",
+                    "read_only": "Modo Somente Leitura",
+                    "log_warnings": "Registrar Erros Gerais do Plugin",
+                    "log_data_warnings": "Registrar Avisos de Dados (Picos/Reinicializações)",
+                    "log_all_raw": "Registrar Todos os Dados Brutos da API",
+                    "enable_specific_logging": "Ativar Registro de Campos Específicos",
+                    "log_fields": "Campos para Registrar"
                 },
                 "data_description": {
-                    "log_fields": "Para encontrar os nomes dos campos, ative 'Registar Todos os Dados Brutos da API' e verifique os registos do Home Assistant. Digite os dados acima separados por vírgula."
+                    "log_fields": "Para encontrar nomes de campos, ative 'Registrar Todos os Dados Brutos da API' e verifique os logs do Home Assistant. Insira acima separados por vírgula."
                 }
             }
         }
