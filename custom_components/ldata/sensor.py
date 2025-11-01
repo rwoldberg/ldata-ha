@@ -371,17 +371,28 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         self.last_update_date = dt_util.now()
         # Stores the last known lifetime consumption value from the API.
         self.previous_consumption = None
+        # Flag to indicate the sensor has just reloaded and needs to establish a baseline.
+        self._just_reloaded = True
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass to restore state on startup."""
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
         await super().async_added_to_hass()
+        
         # Restore the last known daily total from the database.
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
+            
+            # This is critical to correctly calculate usage after a restart.
+            if last_state.attributes and "last_lifetime_consumption" in last_state.attributes:
+                try:
+                    self.previous_consumption = float(last_state.attributes["last_lifetime_consumption"])
+                    _LOGGER.debug("Restored last_lifetime_consumption for %s: %s", self.entity_id, self.previous_consumption)
+                except (ValueError, TypeError):
+                    self.previous_consumption = None # Reset if stored value is invalid
 
     @property
     def name_suffix(self) -> str | None:
@@ -400,9 +411,32 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             return round(self._state, 2)
         return 0.0
 
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        """Return the extra attributes for the sensor."""
+        attributes = super().extra_state_attributes
+        if self.previous_consumption is not None:
+            # Store the last known lifetime value so it can be restored.
+            attributes["last_lifetime_consumption"] = self.previous_consumption
+        return attributes
+
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
+        current_date = dt_util.now()
+
+        # --- Midnight Reset Logic ---
+        # Prioritize the midnight check. If the day has rolled over,
+        # reset the state and update the date immediately.
+        if self.last_update_date.day != current_date.day:
+            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                _LOGGER.info("New day detected for %s, resetting daily total.", self.entity_id)
+            self._state = 0.0
+            self.last_update_date = current_date
+            # We don't reset previous_consumption to None here,
+            # so the first update of the new day calculates correctly.
+
+        # --- Data Processing and Validation ---
         try:
             # Add safety checks for coordinator.data
             if not self.coordinator.data or "cts" not in self.coordinator.data or self.breaker_data["id"] not in self.coordinator.data["cts"]:
@@ -412,37 +446,16 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                 
             new_data = self.coordinator.data["cts"][self.breaker_data["id"]]
             current_consumption = float(new_data["consumption"])
-            current_date = dt_util.now()
-            
-            # Initialize the daily total on the very first run.
+
             if self._state is None:
                 self._state = 0.0
             
-            # Initialize the previous_consumption baseline on the first successful update.
+            # If previous_consumption is None (first run ever or after failed restore),
+            # set the baseline and wait for the next update.
             if self.previous_consumption is None:
-                if current_consumption < self._state:
-                    if self.coordinator.config_entry.options.get("log_data_warnings", True):
-                        _LOGGER.warning(
-                            "Ignoring initial value for %s: API value (%s) is lower than restored daily total (%s). Waiting for valid data.",
-                            self.entity_id, current_consumption, self._state
-                        )
-                    return
-
                 self.previous_consumption = current_consumption
                 self.last_update_date = current_date
-                self.async_write_ha_state()
-                return
-
-            # Check if the day has rolled over to midnight.
-            if self.last_update_date.day != current_date.day:
-                # Log the daily reset if warnings are enabled.
-                if self.coordinator.config_entry.options.get("log_data_warnings", True):
-                    _LOGGER.info("New day detected for %s, resetting daily total.", self.entity_id)
-                # Reset the daily counter to zero.
-                self._state = 0.0
-                # Set the baseline for the new day's calculation to prevent a false spike report.
-                self.previous_consumption = current_consumption
-                self.last_update_date = current_date
+                self._just_reloaded = False # Baseline is set
                 self.async_write_ha_state()
                 return
 
@@ -450,39 +463,49 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             # Calculate the energy used since the last update.
             value_diff = current_consumption - self.previous_consumption
 
-            # Validation: Check for a significant decrease (device reset), ignoring minor rounding errors.
+            # Validation: Check for a decrease (device reset).
             if value_diff < -0.01:
                 if self.coordinator.config_entry.options.get("log_data_warnings", True):
                     _LOGGER.warning(
                         "Ignoring decreasing value for %s: new_total=%s, previous_total=%s",
                         self.entity_id,
                         current_consumption,
-                        self.previous_consumption
+                        self.previous_consumption,
                     )
-                return # Exit without updating state.
-            
-            # Validation: Check for an unrealistic jump (e.g., more than 50 kWh between updates).
-            if value_diff > 50: 
-                if self.coordinator.config_entry.options.get("log_data_warnings", True):
-                    _LOGGER.warning("Spike detected for %s: change of %s kWh is too large.", self.entity_id, value_diff)
-                return # Exit without updating state.
+                # Don't update state, but DO update the baseline to the new low value
+                self.previous_consumption = current_consumption
+                self.last_update_date = current_date
+                self._just_reloaded = False
+                return
 
-            # If valid, add the positive difference to the daily total.
+            # Validation: Check for an unrealistic jump (e.g., more than 50 kWh).
+            if value_diff > 50:
+                if self._just_reloaded:
+                    # This is the first update after a reload.
+                    # The large 'value_diff' is the energy used while HA was off.
+                    _LOGGER.info("Accepting large value change for %s after reload: %s kWh", self.entity_id, value_diff)
+                    # We accept the change and proceed.
+                else:
+                    # This is a real-time spike during normal operation.
+                    if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                        _LOGGER.warning("Spike detected for %s: change of %s kWh is too large.", self.entity_id, value_diff)
+                    return # Exit without updating state.
+
+            # If valid (or an accepted reload catch-up), add the positive difference.
             if value_diff > 0:
                 self._state += value_diff
 
-            # Store the current lifetime total for the next comparison.
+            # Store the current values for the next comparison.
             self.previous_consumption = current_consumption
             self.last_update_date = current_date
+            self._just_reloaded = False # No longer in a post-reload state
 
         except (KeyError, ValueError, TypeError):
-            # Handle cases where data from the API is missing or invalid.
             if self.coordinator.config_entry.options.get("log_warnings", True):
                 _LOGGER.debug("Could not update %s, data missing or invalid.", self.entity_id)
             return
 
         self.async_write_ha_state()
-
 
 class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
     """Sensor that reads all outputs from all LDATA devices based on the passed in description."""
