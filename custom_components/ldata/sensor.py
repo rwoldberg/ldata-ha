@@ -472,8 +472,9 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                         current_consumption,
                         self.previous_consumption,
                     )
-                # Don't update state, but DO update the baseline to the new low value
-                self.previous_consumption = current_consumption
+                # DO NOT update the baseline to the new low value ---
+                # This prevents the "catch-up" spike from being calculated as the full lifetime value.
+                # We just log the error and wait for the value to recover.
                 self.last_update_date = current_date
                 self._just_reloaded = False
                 return
@@ -486,7 +487,7 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                     _LOGGER.info("Accepting large value change for %s after reload: %s kWh", self.entity_id, value_diff)
                     # We accept the change and proceed.
                 else:
-                    # This is a real-time spike during normal operation.
+                    # This is a real-time spike OR a device reset catch-up. Reject it.
                     if self.coordinator.config_entry.options.get("log_data_warnings", True):
                         _LOGGER.warning("Spike detected for %s: change of %s kWh is too large.", self.entity_id, value_diff)
                     return # Exit without updating state.
