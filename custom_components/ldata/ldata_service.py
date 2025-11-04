@@ -190,10 +190,24 @@ class LDATAService:
                                 break
                 return True
             else:
-                _LOGGER.warning("Stored token check failed with status %s", result.status_code)
-                self.clear_tokens()
-                raise LDATAAuthError("Token expired or invalid")
+                # Check if this is a *real* auth error
+                if result.status_code in (401, 403, 406):
+                    _LOGGER.warning("Stored token check failed with status %s", result.status_code)
+                    self.clear_tokens()
+                    raise LDATAAuthError("Token expired or invalid")
+                else:
+                    # This is some other server error, treat as temporary
+                    _LOGGER.warning("Token validation check failed with non-auth error: %s", result.status_code)
+                    raise requests.exceptions.RequestException(f"Server error: {result.status_code}")
+                
+        except requests.exceptions.RequestException as ex:
+            # This is a network/DNS/timeout error.
+            # We re-raise it so the coordinator can catch it as a *temporary* UpdateFailed
+            # instead of a *permanent* ConfigEntryAuthFailed.
+            _LOGGER.warning("Network error during token validation: %s", ex)
+            raise
         except Exception as ex:
+            # Catch any other unexpected error
             _LOGGER.warning("Error during token validation: %s", ex)
             self.clear_tokens()
             raise LDATAAuthError(f"Token validation error: {ex}") from ex
@@ -546,11 +560,8 @@ class LDATAService:
 
     def status(self):
         """Get the breakers from the API."""
-        
-        # The background coordinator should ONLY try to use its saved token.
-        # It should NEVER try to log in with username/password, as that
-        # would trigger a 2FA email to the user.
         try:
+            # First, try to validate our existing token
             if not self.refresh_auth():
                 # If no token, or it's invalid, we MUST fail.
                 _LOGGER.debug("Token validation failed. Forcing re-auth.")
@@ -559,6 +570,10 @@ class LDATAService:
         except LDATAAuthError:
             # Re-raise LDATAAuthError to be caught by the coordinator
             _LOGGER.warning("Authentication error in status().")
+            raise
+        except requests.exceptions.RequestException as ex:
+             # This is a network/DNS error, raise it for UpdateFailed
+            _LOGGER.warning("Network error in status(): %s", ex)
             raise
         except Exception as ex:
             _LOGGER.error("Unknown error during auth: %s", ex)

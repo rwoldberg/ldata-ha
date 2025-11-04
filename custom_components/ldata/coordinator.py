@@ -45,32 +45,32 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                     self._service.status  # Fetch new status
                 )
 
-                # --- Start of selective debug logging ---
-                options = self.config_entry.options
-                
-                # Check if "Log All Raw Data" is enabled
-                if options.get("log_all_raw", False):
-                    _LOGGER.warning("Leviton API Full Data: %s", returnData)
-                
-                # Else, check if specific field logging is enabled AND if fields have been provided
-                elif options.get("enable_specific_logging", False):
-                    if fields_to_log_str := options.get("log_fields", ""):
-                        fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
-                        log_output = {}
+            # --- Start of selective debug logging ---
+            options = self.config_entry.options
+            
+            # Check if "Log All Raw Data" is enabled
+            if options.get("log_all_raw", False):
+                _LOGGER.warning("Leviton API Full Data: %s", returnData)
+            
+            # Else, check if specific field logging is enabled AND if fields have been provided
+            elif options.get("enable_specific_logging", False):
+                if fields_to_log_str := options.get("log_fields", ""):
+                    fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
+                    log_output = {}
 
-                        # Search for requested fields in the data payload
-                        if returnData and returnData.get('cts'): # Add check for data
-                            for ct_id, ct_data in returnData.get('cts', {}).items():
-                                for field in fields_to_log:
-                                    if field in ct_data:
-                                        key_name = f"CT_{ct_id}_{field}"
-                                        log_output[key_name] = ct_data[field]
-                        
-                        if log_output:
-                            _LOGGER.warning("Leviton Selected Raw Data: %s", log_output)
-                # --- End of selective debug logging ---
-                
-                return returnData
+                    # Search for requested fields in the data payload
+                    if returnData and returnData.get('cts'): # Add check for data
+                        for ct_id, ct_data in returnData.get('cts', {}).items():
+                            for field in fields_to_log:
+                                if field in ct_data:
+                                    key_name = f"CT_{ct_id}_{field}"
+                                    log_output[key_name] = ct_data[field]
+                    
+                    if log_output:
+                        _LOGGER.warning("Leviton Selected Raw Data: %s", log_output)
+            # --- End of selective debug logging ---
+            
+            return returnData
 
         except LDATAAuthError as ex:
             # This is our specific auth failure
@@ -78,12 +78,13 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             raise ConfigEntryAuthFailed(f"Authentication failed: {ex}") from ex
         
         except requests.exceptions.RequestException as ex:
-            # Handle connection errors
+            # This is a network/DNS/timeout error from ldata_service.
+            # This is NOT an auth failure, just a temporary error.
             _LOGGER.warning("Connection error communicating with LDATA: %s", ex)
             raise UpdateFailed(f"Connection error: {ex}") from ex
 
         except Exception as ex:
-            # This catches all other errors from ldata_service (e.g., "Could not get Account ID")
+            # This catches all other errors (e.g., "Could not get Account ID")
             self._available = False
             _LOGGER.warning(
                 "Error communicating with LDATA for %s: %s", self.user, str(ex)
@@ -94,4 +95,4 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
     @property
     def service(self) -> LDATAService:
         """Return the LDATA service."""
-        return self.service
+        return self._service

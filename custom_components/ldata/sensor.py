@@ -6,6 +6,7 @@ import copy
 from dataclasses import dataclass
 import logging
 import time
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -386,6 +387,18 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
             
+            # Restore the last_update_date from attributes
+            if last_state.attributes and last_state.attributes.get("last_update_date"):
+                try:
+                    self.last_update_date = dt_util.parse_datetime(last_state.attributes["last_update_date"])
+                except (ValueError, TypeError, AttributeError):
+                    _LOGGER.warning("Could not parse restored last_update_date for %s, defaulting to now", self.entity_id)
+                    self.last_update_date = dt_util.now()
+            else:
+                # If the attribute doesn't exist, this is an older version
+                # We must reset the date to "now" to avoid midnight reset bugs
+                self.last_update_date = dt_util.now()
+            
             # This is critical to correctly calculate usage after a restart.
             if last_state.attributes and "last_lifetime_consumption" in last_state.attributes:
                 try:
@@ -412,12 +425,14 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         return 0.0
 
     @property
-    def extra_state_attributes(self) -> dict[str, str]:
+    def extra_state_attributes(self) -> dict[str, Any]:
         """Return the extra attributes for the sensor."""
         attributes = super().extra_state_attributes
         if self.previous_consumption is not None:
             # Store the last known lifetime value so it can be restored.
             attributes["last_lifetime_consumption"] = self.previous_consumption
+        
+        attributes["last_update_date"] = self.last_update_date.isoformat()
         return attributes
 
     @callback
