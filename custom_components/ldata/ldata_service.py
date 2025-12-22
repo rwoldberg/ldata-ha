@@ -415,13 +415,15 @@ class LDATAService:
                     headers=headers,
                     timeout=15,
                 )
-                _LOGGER.debug(
-                    "Get WHEMS Panels result %d: %s", result.status_code, result.text
-                )
+                
+                # Check specifically for Auth failure
                 if result.status_code in (401, 403, 406):
                     raise LDATAAuthError("Auth token invalid during API call")
 
                 if result.status_code == 200:
+                    _LOGGER.debug(
+                        "Get WHEMS Panels result %d: %s", result.status_code, result.text
+                    )
                     returnPanels = result.json()
                     for panel in returnPanels:
                         panel["ModuleType"] = "WHEMS"
@@ -436,11 +438,15 @@ class LDATAService:
                         if allPanels is None:
                             allPanels = []
                         allPanels.append(panel)
-            except Exception as e:  # pylint: disable=broad-except
+                else:
+                    _LOGGER.warning("Failed to get WHEMS panels (HTTP %s): %s", result.status_code, result.text)
+
+            except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
-                _LOGGER.exception("Exception while getting WHEMS Panels!")
-                self.clear_tokens()
+                
+                # STOP! Do not clear tokens for generic errors.
+                _LOGGER.exception("Exception while getting WHEMS Panels! Ignoring.")
         return allPanels
 
     def get_ldata_panels(self) -> object:
@@ -457,24 +463,30 @@ class LDATAService:
                     headers=headers,
                     timeout=15,
                 )
-                _LOGGER.debug(
-                    "Get Panels result %d: %s", result.status_code, result.text
-                )
+                
+                # Check specifically for Auth failure
                 if result.status_code in (401, 403, 406):
                     raise LDATAAuthError("Auth token invalid during API call")
 
                 if result.status_code == 200:
+                    _LOGGER.debug(
+                        "Get Panels result %d: %s", result.status_code, result.text
+                    )
                     returnPanels = result.json()
                     for panel in returnPanels:
                         panel["ModuleType"] = "LDATA"
                         if allPanels is None:
                             allPanels = []
                         allPanels.append(panel)
-            except Exception as e:  # pylint: disable=broad-except
+                else:
+                    _LOGGER.warning("Failed to get LDATA panels (HTTP %s): %s", result.status_code, result.text)
+
+            except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
-                _LOGGER.exception("Exception while getting Panels!")
-                self.clear_tokens()
+                
+                # STOP! Do not clear tokens for generic errors.
+                _LOGGER.exception("Exception while getting Panels! Ignoring.")
         return allPanels
 
     def put_residential_breaker_panels(self, panel_id: str, panel_type: str) -> None:
