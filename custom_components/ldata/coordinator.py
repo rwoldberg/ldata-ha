@@ -36,6 +36,23 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             config_entry=entry,
         )
 
+    def _redact_data(self, data):
+        """Redact sensitive fields from data for logging."""
+        if isinstance(data, dict):
+            # Create a new dict to avoid modifying the original data
+            redacted = {}
+            for key, value in data.items():
+                # Check for the specific keys requested
+                if key in ["IP", "Token", "residenceId", "mac", "residentialRoomId"]:
+                    redacted[key] = "***REDACTED***"
+                else:
+                    redacted[key] = self._redact_data(value)
+            return redacted
+        elif isinstance(data, list):
+            return [self._redact_data(item) for item in data]
+        else:
+            return data
+
     async def _async_update_data(self):
         """Fetch data from LDATA Controller."""
         try:
@@ -50,7 +67,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             
             # Check if "Log All Raw Data" is enabled
             if options.get("log_all_raw", False):
-                _LOGGER.warning("Leviton API Full Data: %s", returnData)
+                # Redact sensitive data before logging
+                redacted_data = self._redact_data(returnData)
+                _LOGGER.warning("Leviton API Full Data: %s", redacted_data)
             
             # Else, check if specific field logging is enabled AND if fields have been provided
             elif options.get("enable_specific_logging", False):
