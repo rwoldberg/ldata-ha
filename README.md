@@ -47,24 +47,27 @@ If you do not wish to use HACS, then please download the latest version from the
 You can set the update interval that the integration polls the cloud server (in seconds). The default is 60 seconds and the minimum is 30. Addon is reloading on submit.
 
 - Three phase
-  -For Three phase setups
-  
+  - For Three phase setups
+
 - Read only
- - HA can not trip/reset breakers
+  - HA can not trip/reset breakers
 
 - Log General Errors
   - App crashes or polling errors
-    
+
 - Log Data Validation Warning (Spikes/Resets)
   - Outpots Warnings of Data inconsistancies from Leviton to log
-    
+  
 - Log All Raw API Data
   - Outputs all data pulled via the API to log
-    
+
 - Enable Specific Field Logging
   - Outputs any specified field to log (field names can be seen by breifly enabling and looking at "og All Raw API Data")
 
 <img width="595" height="851" alt="image" src="https://github.com/user-attachments/assets/8133a0b1-4f45-4475-8129-2d5cde834de6" />
+
+
+
 
 
 This is a diy integration and is not supported or affiliated with Leviton in any way.
