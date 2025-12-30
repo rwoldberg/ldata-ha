@@ -255,6 +255,52 @@ class LDATAService:
         
         return False
 
+    def get_residential_account(self) -> bool:
+        """Get the Residential Account for the user."""
+        if self.account_id:
+            _LOGGER.debug("Account ID already known.")
+            return True
+
+        headers = {**defaultHeaders}
+        headers["authorization"] = self.auth_token
+        url = f"https://my.leviton.com/api/Person/{self.userid}/residentialPermissions"
+
+        try:
+            result = self.session.get(
+                url,
+                headers=headers,
+                timeout=15,
+            )
+            _LOGGER.debug(
+                "Get Residential Account result %d: %s", result.status_code, result.text
+            )
+            
+            if result.status_code in (401, 403, 406):
+                raise LDATAAuthError("Auth token invalid during API call")
+
+            result_json = result.json()
+            if result.status_code == 200 and len(result_json) > 0:
+                # Search for the residential account id
+                for item in result_json:
+                    if "residentialAccountId" in item:
+                        self.account_id = item["residentialAccountId"]
+                        if self.account_id is not None:
+                            break
+                if self.account_id is not None:
+                    # Save the userId if we just got it
+                    if "userId" in result_json[0]:
+                        self.userid = result_json[0]["userId"]
+                    return True
+            _LOGGER.error("Unable to get Residential Account!")
+            self.clear_tokens()
+        except Exception as e:  # pylint: disable=broad-except
+            if isinstance(e, LDATAAuthError):
+                raise # Re-raise auth errors
+            _LOGGER.exception("Exception while getting Residential Account!")
+            self.clear_tokens()
+
+        return False
+
     def get_residencePermissions(self) -> bool:
         """Get the additional residences for the user."""
         headers = {**defaultHeaders}
