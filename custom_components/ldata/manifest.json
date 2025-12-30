@@ -9,5 +9,5 @@
   "issue_tracker": "https://github.com/rwoldberg/ldata-ha/issues",
   "loggers": ["ldata"],
   "requirements": [],
-  "version": "1.1.31"
+  "version": "1.1.32"
 }
