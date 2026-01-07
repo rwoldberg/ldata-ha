@@ -276,7 +276,7 @@ class LDATAService:
             )
             
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError("Auth token invalid during API call get_residential_account")
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
@@ -318,7 +318,7 @@ class LDATAService:
                 result.text,
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError("Auth token invalid during API call get_residencePermissions. Status code: %s", results.status_code)
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
@@ -348,7 +348,7 @@ class LDATAService:
                 "Get Residences Account result %d: %s", result.status_code, result.text
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError("Auth token invalid during API call get_residences. Status code: %s", result.status_code)
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
@@ -376,7 +376,7 @@ class LDATAService:
                 "Get Residence Account result %d: %s", result.status_code, result.text
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError("Auth token invalid during API call get_residence")
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
@@ -407,7 +407,7 @@ class LDATAService:
                 "Get WHEMS breakers result %d: %s", result.status_code, result.text
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError("Auth token invalid during API call get_Whems_breakers")
 
             if result.status_code == 200:
                 return result.json()
@@ -435,7 +435,7 @@ class LDATAService:
                 "Get WHEMS CTs result %d: %s", result.status_code, result.text
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError("Auth token invalid during API call get_Whems_CT")
 
             if result.status_code == 200:
                 return result.json()
@@ -450,10 +450,12 @@ class LDATAService:
     def get_iotWhemsPanels(self) -> object:
         """Get the whemns modules for all the residences the user has access to."""
         allPanels = None
+        _LOGGER.debug("Getting LWHEM panels!")
         for residenceId in self.residence_id_list:
             headers = {**defaultHeaders}
             headers["authorization"] = self.auth_token
             headers["filter"] = "{}"
+            _LOGGER.debug("Getting panel for residence: %s",residenceId)
             url = f"https://my.leviton.com/api/Residences/{residenceId}/iotWhems"
             try:
                 result = self.session.get(
@@ -464,7 +466,7 @@ class LDATAService:
                 
                 # Check specifically for Auth failure
                 if result.status_code in (401, 403, 406):
-                    raise LDATAAuthError("Auth token invalid during API call")
+                    raise LDATAAuthError("Auth token invalid during API call get_iotWhemsPanels. Status code: %s", result.status_code)
 
                 if result.status_code == 200:
                     _LOGGER.debug(
@@ -498,10 +500,12 @@ class LDATAService:
     def get_ldata_panels(self) -> object:
         """Get the ldata modules for all the residences the user has access to."""
         allPanels = None
+        _LOGGER.debug("Getting LDATA Panels!")
         for residenceId in self.residence_id_list:
             headers = {**defaultHeaders}
             headers["authorization"] = self.auth_token
             headers["filter"] = '{"include":["residentialBreakers"]}'
+            _LOGGER.debug("Getting LDATA Panel for residence: %s", residenceId)
             url = f"https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels"
             try:
                 result = self.session.get(
@@ -512,7 +516,7 @@ class LDATAService:
                 
                 # Check specifically for Auth failure
                 if result.status_code in (401, 403, 406):
-                    raise LDATAAuthError("Auth token invalid during API call")
+                    raise LDATAAuthError("Auth token invalid during API call get_ldata_panels. Status code: %s", result.status_code)
 
                 if result.status_code == 200:
                     _LOGGER.debug(
@@ -552,7 +556,7 @@ class LDATAService:
             timeout=15,
         )
         if result.status_code in (401, 403, 406):
-            raise LDATAAuthError("Auth token invalid during API call")
+            raise LDATAAuthError("Auth token invalid during API call put_residential_breaker_panels")
 
 
     def remote_off(self, breaker_id):
@@ -572,7 +576,7 @@ class LDATAService:
             timeout=15,
         )
         if result.status_code in (401, 403, 406):
-            raise LDATAAuthError("Auth token invalid during API call")
+            raise LDATAAuthError("Auth token invalid during API call remote_off")
         return result
 
     def remote_on(self, breaker_id):
@@ -592,7 +596,7 @@ class LDATAService:
             timeout=15,
         )
         if result.status_code in (401, 403, 406):
-            raise LDATAAuthError("Auth token invalid during API call")
+            raise LDATAAuthError("Auth token invalid during API call remote_on")
         return result
 
     def none_to_zero(self, dict, key) -> float:
@@ -655,11 +659,14 @@ class LDATAService:
                 # User does not have multiple residences, lets try just the single residence
                 self.get_residence()
             self.get_residencePermissions()
+        # Clear out any items set to None
+        self.residence_id_list = [item for item in self.residence_id_list if item is not None]
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
             _LOGGER.error("Could not get Residence ID.")
             raise Exception("Could not get LDATA Residence ID.")
         
         # Get the breaker panels.
+        _LOGGER.debug("Found the following residences: %s", self.residence_id_list)
         panels_json = self.get_ldata_panels()
         whems_panels_json = self.get_iotWhemsPanels()
         if panels_json is None:
