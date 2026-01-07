@@ -276,7 +276,7 @@ class LDATAService:
             )
             
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError(f"Auth token invalid during API call get_residence. Status code: {result.status_code}")
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
@@ -318,7 +318,7 @@ class LDATAService:
                 result.text,
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError(f"Auth token invalid during API call get_residencePermissions. Status code: {result.status_code}")
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
@@ -348,7 +348,7 @@ class LDATAService:
                 "Get Residences Account result %d: %s", result.status_code, result.text
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError(f"Auth token invalid during API call get_residences. Status code: {result.status_code}")
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
@@ -376,7 +376,7 @@ class LDATAService:
                 "Get Residence Account result %d: %s", result.status_code, result.text
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError(f"Auth token invalid during API call get_residence. Status code: {result.status_code}")
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
@@ -407,7 +407,7 @@ class LDATAService:
                 "Get WHEMS breakers result %d: %s", result.status_code, result.text
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError(f"Auth token invalid during API call get_Whems_breakers. Status code: {result.status_code}")
 
             if result.status_code == 200:
                 return result.json()
@@ -435,7 +435,7 @@ class LDATAService:
                 "Get WHEMS CTs result %d: %s", result.status_code, result.text
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError("Auth token invalid during API call")
+                raise LDATAAuthError(f"Auth token invalid during API call get_Whems_CT. Status code: {result.status_code}")
 
             if result.status_code == 200:
                 return result.json()
@@ -463,7 +463,7 @@ class LDATAService:
                 )
                 
                 if result.status_code == 401:
-                    raise LDATAAuthError("Auth token invalid (401) during API call")
+                    raise LDATAAuthError("Auth token invalid (401) during API call get_whems_panels.")
                 
                 if result.status_code in (403, 406):
                      _LOGGER.warning(
@@ -518,7 +518,7 @@ class LDATAService:
                 )
                 
                 if result.status_code == 401:
-                    raise LDATAAuthError("Auth token invalid (401) during API call")
+                    raise LDATAAuthError("Auth token invalid (401) during API call get_ldata_panels.")
 
                 if result.status_code in (403, 406):
                      _LOGGER.warning(
@@ -566,7 +566,7 @@ class LDATAService:
             timeout=15,
         )
         if result.status_code in (401, 403, 406):
-            raise LDATAAuthError("Auth token invalid during API call")
+            raise LDATAAuthError("Auth token invalid during API call put_residential_breaker_panels")
 
 
     def remote_off(self, breaker_id):
@@ -586,7 +586,7 @@ class LDATAService:
             timeout=15,
         )
         if result.status_code in (401, 403, 406):
-            raise LDATAAuthError("Auth token invalid during API call")
+            raise LDATAAuthError("Auth token invalid during API call remote_off")
         return result
 
     def remote_on(self, breaker_id):
@@ -606,7 +606,7 @@ class LDATAService:
             timeout=15,
         )
         if result.status_code in (401, 403, 406):
-            raise LDATAAuthError("Auth token invalid during API call")
+            raise LDATAAuthError("Auth token invalid during API callremote_on")
         return result
 
     def none_to_zero(self, dict, key) -> float:
@@ -920,3 +920,4 @@ class LDATAService:
         status_data["panels"] = panels
 
         return status_data
+        
