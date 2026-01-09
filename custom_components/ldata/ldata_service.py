@@ -4,7 +4,7 @@ import logging
 import typing
 import time
 import socket
-
+import re
 import requests
 
 from .const import _LEG1_POSITIONS, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT
@@ -492,7 +492,9 @@ class LDATAService:
                             allPanels = []
                         allPanels.append(panel)
                 else:
-                    _LOGGER.warning("Failed to get WHEMS panels (HTTP %s): %s", result.status_code, result.text)
+                    clean_msg = re.sub('<[^<]+?>', '', result.text)
+                    clean_msg = re.sub(r'\s+', ' ', clean_msg).strip()
+                    _LOGGER.warning("Failed to get WHEMS panels (HTTP %s): %s", result.status_code, clean_msg)
 
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
@@ -539,7 +541,9 @@ class LDATAService:
                             allPanels = []
                         allPanels.append(panel)
                 else:
-                    _LOGGER.warning("Failed to get LDATA panels (HTTP %s): %s", result.status_code, result.text)
+                    clean_msg = re.sub('<[^<]+?>', '', result.text)
+                    clean_msg = re.sub(r'\s+', ' ', clean_msg).strip()
+                    _LOGGER.warning("Failed to get LDATA panels (HTTP %s): %s", result.status_code, clean_msg)
 
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
