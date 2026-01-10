@@ -106,6 +106,8 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.panel_data = data
         self._state = None
+        self._consecutive_update_failures = 0
+        
         self._update_state() # Set initial state
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
@@ -120,11 +122,21 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         """Update the internal state of the sensor."""
         try:
             # Find the specific panel's data in the latest update
+            found = False
             for panel in self.coordinator.data["panels"]:
                 if panel["id"] == self.panel_data["id"]:
                     self._state = panel["connected"]
+                    self._consecutive_update_failures = 0 # Reset failure count
+                    found = True
                     return # Exit after finding the panel
-            self._state = None # Panel not found
+            
+            # Only set to None after multiple failures to prevent flickering
+            if not found:
+                self._consecutive_update_failures += 1
+                if self._consecutive_update_failures > 5:
+                    self._state = None
+                # Else: keep the last known self._state
+                
         except Exception:  # pylint: disable=broad-except  # noqa: BLE001
             self._state = None
 
