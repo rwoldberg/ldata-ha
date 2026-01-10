@@ -317,15 +317,20 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 current_time = time.time()
                 current_date = dt_util.now()
                 
+                if (
+                    (self.last_update_date.day != current_date.day)
+                    or (self.last_update_date.month != current_date.month)
+                    or (self.last_update_date.year != current_date.year)
+                ):
+                    self._state = 0
+                    # Reset the baseline immediately to prevent calculating a phantom spike from the "gap" time across midnight. We treat the new day as starting from "now".
+                    self.last_update_time = current_time
+                    self.previous_value = current_value
+                    self.last_update_date = current_date
+                    self.async_write_ha_state()
+                    return
+
                 if self.last_update_time > 0:
-                    # Reset daily total at midnight.
-                    if (
-                        (self.last_update_date.day != current_date.day)
-                        or (self.last_update_date.month != current_date.month)
-                        or (self.last_update_date.year != current_date.year)
-                    ):
-                        self._state = 0
-                    
                     # Calculate power by averaging current and previous readings.
                     power = ((self.previous_value + current_value) / 2) / 1000
                     if power < 0:
