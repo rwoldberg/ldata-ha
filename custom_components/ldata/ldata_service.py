@@ -527,6 +527,10 @@ class LDATAService:
                 else:
                     clean_msg = re.sub('<[^<]+?>', '', result.text)
                     clean_msg = re.sub(r'\s+', ' ', clean_msg).strip()
+                    if "504 Gateway Time-out" in clean_msg:
+                        clean_msg = "504 Gateway Time-out"
+                    elif "502 Bad Gateway" in clean_msg:
+                        clean_msg = "502 Bad Gateway"
                     _LOGGER.warning("Failed to get %s panels (HTTP %s): %s", panel_type, result.status_code, clean_msg)
 
             except Exception as e:
