@@ -103,23 +103,39 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Trip the breaker."""
-        await self.coordinator.hass.async_add_executor_job(
+        # Capture result to verify success before updating state
+        result = await self.coordinator.hass.async_add_executor_job(
             self.coordinator.service.remote_off, self.breaker_data["id"]
         )
-        self._state = False
-        self.async_write_ha_state()
-        await asyncio.sleep(2)
-        await self.coordinator.async_request_refresh()
+
+        if result:
+            self._state = False
+            self.async_write_ha_state()
+            # Wait for the physical device to react before refreshing
+            await asyncio.sleep(2)
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to turn off breaker %s", self.name)
+            # Write state immediately to revert the UI toggle to its previous position
+            self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Reset the breaker."""
-        await self.coordinator.hass.async_add_executor_job(
+        # Capture result to verify success before updating state
+        result = await self.coordinator.hass.async_add_executor_job(
             self.coordinator.service.remote_on, self.breaker_data["id"]
         )
-        self._state = True
-        self.async_write_ha_state()
-        await asyncio.sleep(2)
-        await self.coordinator.async_request_refresh()
+
+        if result:
+            self._state = True
+            self.async_write_ha_state()
+            # Wait for the physical device to react before refreshing
+            await asyncio.sleep(2)
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to turn on breaker %s", self.name)
+            # Write state immediately to revert the UI toggle to its previous position
+            self.async_write_ha_state()
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
