@@ -77,6 +77,21 @@ class LDATAService:
         
         LDATAService._last_login_attempt_time = time.time()
 
+    def _get_clean_error_msg(self, response_text: str) -> str:
+        """Helper to strip HTML and deduplicate common gateway errors."""
+        # Strip HTML tags
+        msg = re.sub('<[^<]+?>', '', response_text)
+        # Collapse multiple spaces into one
+        msg = re.sub(r'\s+', ' ', msg).strip()
+        
+        # Deduplicate common Nginx/Gateway error strings that appear twice
+        if "502 Bad Gateway" in msg:
+            return "502 Bad Gateway"
+        if "504 Gateway Time-out" in msg:
+            return "504 Gateway Time-out"
+            
+        return msg
+
     def _test_internet_connectivity(self) -> str:
         """Helper to check if google.com is resolvable."""
         try:
@@ -420,9 +435,8 @@ class LDATAService:
 
             if result.status_code == 200:
                 return result.json()
-            clean_msg = re.sub('<[^<]+?>', '', result.text)
-            clean_msg = re.sub(r'\s+', ' ', clean_msg).strip()
-            _LOGGER.error(f"[v{self.version}] Unable to get WHEMS breakers! HTTP {result.status_code}: {clean_msg}")
+            clean_msg = self._get_clean_error_msg(result.text)
+            _LOGGER.error(f"[v{self.version}] Unable to get WHEMS breakers! (HTTP {result.status_code}): {clean_msg}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
@@ -450,9 +464,8 @@ class LDATAService:
 
             if result.status_code == 200:
                 return result.json()
-            clean_msg = re.sub('<[^<]+?>', '', result.text)
-            clean_msg = re.sub(r'\s+', ' ', clean_msg).strip()
-            _LOGGER.error(f"[v{self.version}] Unable to get WHEMS CTs! HTTP {result.status_code}: {clean_msg}")
+            clean_msg = self._get_clean_error_msg(result.text)
+            _LOGGER.error(f"[v{self.version}] Unable to get WHEMS CTs! (HTTP {result.status_code}): {clean_msg}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
@@ -525,12 +538,7 @@ class LDATAService:
                         allPanels.append(panel)
                 
                 else:
-                    clean_msg = re.sub('<[^<]+?>', '', result.text)
-                    clean_msg = re.sub(r'\s+', ' ', clean_msg).strip()
-                    if "504 Gateway Time-out" in clean_msg:
-                        clean_msg = "504 Gateway Time-out"
-                    elif "502 Bad Gateway" in clean_msg:
-                        clean_msg = "502 Bad Gateway"
+                    clean_msg = self._get_clean_error_msg(result.text)
                     _LOGGER.warning("Failed to get %s panels (HTTP %s): %s", panel_type, result.status_code, clean_msg)
 
             except Exception as e:
@@ -571,9 +579,8 @@ class LDATAService:
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid (HTTP {result.status_code}) during {context_str}")
 
-            clean_msg = re.sub('<[^<]+?>', '', result.text)
-            clean_msg = re.sub(r'\s+', ' ', clean_msg).strip()
-            _LOGGER.error(f"[v{self.version}] Failed to execute {context_str}! HTTP {result.status_code}: {clean_msg}")
+            clean_msg = self._get_clean_error_msg(result.text)
+            _LOGGER.error(f"[v{self.version}] Failed to execute {context_str}! (HTTP {result.status_code}): {clean_msg}")
         
         except Exception as e:
             if isinstance(e, LDATAAuthError):
