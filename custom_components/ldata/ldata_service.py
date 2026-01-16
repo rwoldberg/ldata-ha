@@ -71,12 +71,20 @@ class LDATAService:
         
         if time_since_last_attempt < 10.0:
             wait_time = 10.0 - time_since_last_attempt
-            _LOGGER.warning("Rate limiting login. Waiting for %.1f seconds.", wait_time)
+            _LOGGER.warning(f"[v{self.version}] Rate limiting login. Waiting for {wait_time:.1f} seconds.")
             # This is running in an executor job, so time.sleep is OK.
             time.sleep(wait_time)
         
         LDATAService._last_login_attempt_time = time.time()
 
+    def _test_internet_connectivity(self) -> str:
+        """Helper to check if google.com is resolvable."""
+        try:
+            socket.gethostbyname("google.com")
+            return "ACTIVE"
+        except socket.error:
+            return "DOWN"
+            
     def _get_clean_error_msg(self, response_text: str) -> str:
         """Helper to strip HTML and deduplicate common gateway errors."""
         # Strip HTML tags
@@ -91,14 +99,6 @@ class LDATAService:
             return "504 Gateway Time-out"
             
         return msg
-
-    def _test_internet_connectivity(self) -> str:
-        """Helper to check if google.com is resolvable."""
-        try:
-            socket.gethostbyname("google.com")
-            return "ACTIVE"
-        except socket.error:
-            return "DOWN"
 
     def clear_tokens(self) -> None:
         """Clear the tokens to force a re-login."""
@@ -123,7 +123,7 @@ class LDATAService:
         )
         
         _LOGGER.debug(
-            "Authorization attempt result %d: %s", result.status_code, result.text
+            f"[v{self.version}] Authorization attempt result {result.status_code}: {result.text}"
         )
 
         if result.status_code == 200:
@@ -131,35 +131,33 @@ class LDATAService:
             self.auth_token = json_data["id"]
             self.userid = json_data["userId"]
             self.refresh_token = json_data["id"] # Store the auth token
-            _LOGGER.debug("Login successful. Storing auth token.")
+            _LOGGER.debug(f"[v{self.version}] Login successful. Storing auth token.")
             return True
 
         # Treat both 401 and 406 as potential auth failures
         if result.status_code == 401 or result.status_code == 406:
-            # We got an auth error. Log the full response text.
+            clean_msg = self._get_clean_error_msg(result.text)
+            
             _LOGGER.warning(
-                "Authentication failed (HTTP %s). Check this log for the 2FA string. "
-                "Response text: %s",
-                result.status_code,
-                result.text
+                f"[v{self.version}] Authentication failed (HTTP {result.status_code}). Check this log for the 2FA string. "
+                f"Response text: {clean_msg}"
             )
             
             if "InsufficientData:Personusestwofactorauthentication.Requirescode." in result.text:
-                _LOGGER.debug("Found 2FA string, raising TwoFactorRequired.")
+                _LOGGER.debug(f"[v{self.version}] Found 2FA string, raising TwoFactorRequired.")
                 raise TwoFactorRequired
             else:
-                _LOGGER.warning("2FA string not found, assuming invalid credentials.")
+                _LOGGER.warning(f"[v{self.version}] 2FA string not found, assuming invalid credentials.")
                 raise LDATAAuthError(f"[v{self.version}] Invalid username or password")
 
         # Handle other non-200, non-401/406 errors
         raise LDATAAuthError(f"[v{self.version}] Login failed with status code: {result.status_code}")
 
-
     def complete_2fa(self, code: str) -> bool:
         """Complete the 2FA authentication step."""
         self._check_rate_limit()
 
-        _LOGGER.debug("Attempting 2FA completion with code.")
+        _LOGGER.debug(f"[v{self.version}] Attempting 2FA completion with code.")
         
         headers = {**defaultHeaders}
         data = {
@@ -175,33 +173,34 @@ class LDATAService:
             timeout=15,
         )
 
-        _LOGGER.debug("2FA completion result %d: %s", result.status_code, result.text)
+        _LOGGER.debug(f"[v{self.version}] 2FA completion result {result.status_code}: {result.text}")
 
         if result.status_code == 200:
             json_data = result.json()
             self.auth_token = json_data["id"]
             self.userid = json_data["userId"]
             self.refresh_token = json_data["id"] # Store the auth token
-            _LOGGER.debug("2FA login successful. Storing auth token.")
+            _LOGGER.debug(f"[v{self.version}] 2FA login successful. Storing auth token.")
             return True
         
         # Failed 2FA
-        _LOGGER.warning("2FA completion failed. Response: %s", result.text)
+        clean_msg = self._get_clean_error_msg(result.text)
+        _LOGGER.warning(f"[v{self.version}] 2FA completion failed. Response: {clean_msg}")
         raise LDATAAuthError(f"[v{self.version}] Invalid 2FA code")
 
     def refresh_auth(self) -> bool:
         """Validate the stored auth token with retries."""
         if not self.refresh_token:
-            _LOGGER.debug("No stored token available.")
+            _LOGGER.debug(f"[v{self.version}] No stored token available.")
             return False # This will trigger credential login
 
         # We need the userId to check. If we don't have it, we must fail.
         if not self.userid:
-             _LOGGER.warning("No userId found, cannot validate token. Forcing re-auth.")
+             _LOGGER.warning(f"[v{self.version}] No userId found, cannot validate token. Forcing re-auth.")
              self.clear_tokens()
              return False # Force re-login
              
-        _LOGGER.debug("Validating stored auth token.")
+        _LOGGER.debug(f"[v{self.version}] Validating stored auth token.")
         self.auth_token = self.refresh_token
         
         headers = {**defaultHeaders}
@@ -220,7 +219,7 @@ class LDATAService:
                 result = requests.get(url, headers=headers, timeout=15)
                 
                 if result.status_code == 200:
-                    _LOGGER.debug("Stored token is still valid.")
+                    _LOGGER.debug(f"[v{self.version}] Stored token is still valid.")
                     if not self.account_id:
                         json_data = result.json()
                         if len(json_data) > 0:
@@ -233,36 +232,39 @@ class LDATAService:
                 # Handle Auth Errors (401, 403, 406)
                 if result.status_code in (401, 403, 406):
                     _LOGGER.warning(
-                        "Token check failed (Attempt %s/%s) with status %s. Waiting...", 
-                        attempts, max_attempts, result.status_code
+                        f"[v{self.version}] Token check failed (Attempt {attempts}/{max_attempts}) with status {result.status_code}. Waiting..."
                     )
                     if attempts < max_attempts:
                         time.sleep(5) # Wait 5 seconds before retrying
                         continue # Try again
                     else:
                         # STRIKE 3: The token is truly dead.
-                        _LOGGER.error("Token invalid after %s attempts. Forcing re-auth.", max_attempts)
+                        _LOGGER.error(f"[v{self.version}] Token invalid after {max_attempts} attempts. Forcing re-auth.")
                         self.clear_tokens()
                         raise LDATAAuthError(f"[v{self.version}] Token expired or invalid")
                 
                 # Handle Server Errors (500, 502, 503, etc)
                 else:
+                    clean_msg = self._get_clean_error_msg(result.text)
                     _LOGGER.warning(
-                        "Server error during token check (Attempt %s/%s): with status %s. Waiting...", 
-                        attempts, max_attempts, result.status_code
+                        f"[v{self.version}] Server error during token check (Attempt {attempts}/{max_attempts}): {result.status_code} {result.reason} - {clean_msg}. Waiting..."
                     )
                     # We do NOT clear tokens for server errors.
                     if attempts < max_attempts:
                         time.sleep(5)
                         continue
                     else:
-                        raise requests.exceptions.RequestException(f"Server error: {result.status_code}")
+                        raise requests.exceptions.RequestException(f"Server error: {result.status_code} {result.reason}")
 
             except requests.exceptions.RequestException as ex:
                 # Handle Network Errors (DNS, Timeout, etc)
+                msg = str(ex)
+                if hasattr(ex, "response") and ex.response is not None:
+                     clean_msg = self._get_clean_error_msg(ex.response.text)
+                     msg = f"{ex.response.status_code} {ex.response.reason} - {clean_msg}"
+
                 _LOGGER.warning(
-                    "Network error during token check (Attempt %s/%s): with status %s. Waiting...",
-                    attempts, max_attempts, ex
+                    f"[v{self.version}] Network error during token check (Attempt {attempts}/{max_attempts}): {msg}. Waiting..."
                 )
                 if attempts < max_attempts:
                     time.sleep(5)
@@ -273,7 +275,7 @@ class LDATAService:
                     # self._test_internet_connectivity() 
                     raise
             except Exception as ex:
-                _LOGGER.error("Unexpected error during token check: %s", ex)
+                _LOGGER.error(f"[v{self.version}] Unexpected error during token check: {ex}")
                 self.clear_tokens()
                 raise LDATAAuthError(f"[v{self.version}] Token validation error: {ex}") from ex
         
@@ -282,7 +284,7 @@ class LDATAService:
     def get_residential_account(self) -> bool:
         """Get the Residential Account for the user."""
         if self.account_id:
-            _LOGGER.debug("Account ID already known.")
+            _LOGGER.debug(f"[v{self.version}] Account ID already known.")
             return True
 
         headers = {**defaultHeaders}
@@ -296,7 +298,7 @@ class LDATAService:
                 timeout=15,
             )
             _LOGGER.debug(
-                "Get Residential Account result %d: %s", result.status_code, result.text
+                f"[v{self.version}] Get Residential Account result {result.status_code}: {result.text}"
             )
             
             if result.status_code in (401, 403, 406):
@@ -315,12 +317,12 @@ class LDATAService:
                     if "userId" in result_json[0]:
                         self.userid = result_json[0]["userId"]
                     return True
-            _LOGGER.error("Unable to get Residential Account!")
+            _LOGGER.error(f"[v{self.version}] Unable to get Residential Account!")
             self.clear_tokens()
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise # Re-raise auth errors
-            _LOGGER.exception("Exception while getting Residential Account!")
+            _LOGGER.exception(f"[v{self.version}] Exception while getting Residential Account!")
             self.clear_tokens()
 
         return False
@@ -337,9 +339,7 @@ class LDATAService:
                 timeout=15,
             )
             _LOGGER.debug(
-                "Get Residence Permissions result %d: %s",
-                result.status_code,
-                result.text,
+                f"[v{self.version}] Get Residence Permissions result {result.status_code}: {result.text}"
             )
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_residencePermissions. Status code: {result.status_code}")
@@ -350,11 +350,11 @@ class LDATAService:
                     if account["residenceId"] is not None:
                         self.residence_id_list.append(account["residenceId"])
                 return True
-            _LOGGER.error("Unable to get Residence Permissions!")
+            _LOGGER.error(f"[v{self.version}] Unable to get Residence Permissions!")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception("Exception while getting Residence Permissions!")
+            _LOGGER.exception(f"[v{self.version}] Exception while getting Residence Permissions!")
         return False
 
     def get_residences(self) -> bool:
@@ -369,7 +369,7 @@ class LDATAService:
                 timeout=15,
             )
             _LOGGER.debug(
-                "Get Residences Account result %d: %s", result.status_code, result.text
+                f"[v{self.version}] Get Residences Account result {result.status_code}: {result.text}"
             )
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_residences. Status code: {result.status_code}")
@@ -378,11 +378,11 @@ class LDATAService:
             if result.status_code == 200 and len(result_json) > 0:
                 self.residence_id_list.append(result_json[0]["id"])
                 return True
-            _LOGGER.error("Unable to get Residences!")
+            _LOGGER.error(f"[v{self.version}] Unable to get Residences!")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception("Exception while getting Residences!")
+            _LOGGER.exception(f"[v{self.version}] Exception while getting Residences!")
         return False
 
     def get_residence(self) -> bool:
@@ -397,7 +397,7 @@ class LDATAService:
                 timeout=15,
             )
             _LOGGER.debug(
-                "Get Residence Account result %d: %s", result.status_code, result.text
+                f"[v{self.version}] Get Residence Account result {result.status_code}: {result.text}"
             )
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_residence. Status code: {result.status_code}")
@@ -406,12 +406,12 @@ class LDATAService:
             if result.status_code == 200 and len(result_json) > 0:
                 self.residence_id_list.append(result_json["primaryResidenceId"])
                 return True
-            _LOGGER.error("Unable to get Residence!")
+            _LOGGER.error(f"[v{self.version}] Unable to get Residence!")
             self.clear_tokens()
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception("Exception while getting Residence!")
+            _LOGGER.exception(f"[v{self.version}] Exception while getting Residence!")
             self.clear_tokens()
         return False
 
@@ -428,19 +428,20 @@ class LDATAService:
                 timeout=15,
             )
             _LOGGER.debug(
-                "Get WHEMS breakers result %d: %s", result.status_code, result.text
+                f"[v{self.version}] Get WHEMS breakers result {result.status_code}: {result.text}"
             )
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_Whems_breakers. Status code: {result.status_code}")
 
             if result.status_code == 200:
                 return result.json()
+            
             clean_msg = self._get_clean_error_msg(result.text)
             _LOGGER.error(f"[v{self.version}] Unable to get WHEMS breakers! (HTTP {result.status_code}): {clean_msg}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception("Exception while getting WHEMS breakers!")
+            _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS breakers!")
             self.clear_tokens()
         return None
 
@@ -457,19 +458,20 @@ class LDATAService:
                 timeout=15,
             )
             _LOGGER.debug(
-                "Get WHEMS CTs result %d: %s", result.status_code, result.text
+                f"[v{self.version}] Get WHEMS CTs result {result.status_code}: {result.text}"
             )
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_Whems_CT. Status code: {result.status_code}")
 
             if result.status_code == 200:
                 return result.json()
+            
             clean_msg = self._get_clean_error_msg(result.text)
             _LOGGER.error(f"[v{self.version}] Unable to get WHEMS CTs! (HTTP {result.status_code}): {clean_msg}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception("Exception while getting WHEMS CTs!")
+            _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS CTs!")
             self.clear_tokens()
         return None
 
@@ -500,25 +502,21 @@ class LDATAService:
                 
                 if result.status_code in (403, 406):
                      _LOGGER.warning(
-                        "Access forbidden or not acceptable (HTTP %s) when getting %s panels for residence %s. "
-                        "This may be a permission issue. Skipping.", 
-                        result.status_code, panel_type, residenceId
+                        f"[v{self.version}] Access forbidden or not acceptable (HTTP {result.status_code}) when getting {panel_type} panels for residence {residenceId}. "
+                        "This may be a permission issue. Skipping."
                     )
                      continue 
 
                 if result.status_code == 200:
                     _LOGGER.debug(
-                        "Get %s Panels result %d: %s", panel_type, result.status_code, result.text
+                        f"[v{self.version}] Get {panel_type} Panels result {result.status_code}: {result.text}"
                     )
                     
-                    # CHANGED: Wrap JSON parsing in try/except to handle non-JSON 200 responses
                     try:
                         returnPanels = result.json()
                     except json.JSONDecodeError:
                         _LOGGER.warning(
-                            "API returned invalid JSON for %s panels despite 200 OK. Response starts with: %s...", 
-                            panel_type, 
-                            result.text[:100]
+                            f"[v{self.version}] API returned invalid JSON for {panel_type} panels despite 200 OK. Response starts with: {result.text[:100]}..."
                         )
                         continue # Skip this residence/attempt and try the next one
                         
@@ -539,14 +537,14 @@ class LDATAService:
                 
                 else:
                     clean_msg = self._get_clean_error_msg(result.text)
-                    _LOGGER.warning("Failed to get %s panels (HTTP %s): %s", panel_type, result.status_code, clean_msg)
+                    _LOGGER.warning(f"[v{self.version}] Failed to get {panel_type} panels (HTTP {result.status_code}): {clean_msg}")
 
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
                 
                 # STOP! Do not clear tokens for generic errors.
-                _LOGGER.exception("Exception while getting %s Panels! Ignoring.", panel_type)
+                _LOGGER.exception(f"[v{self.version}] Exception while getting {panel_type} Panels! Ignoring.")
         
         return allPanels
 
@@ -638,38 +636,43 @@ class LDATAService:
             # First, try to validate our existing token
             if not self.refresh_auth():
                 # If no token, or it's invalid, we MUST fail.
-                _LOGGER.debug("Token validation failed. Forcing re-auth.")
+                _LOGGER.debug(f"[v{self.version}] Token validation failed. Forcing re-auth.")
                 raise LDATAAuthError(f"[v{self.version}] Token validation failed. Please re-authenticate.")
 
         except LDATAAuthError:
             # Re-raise LDATAAuthError to be caught by the coordinator
-            _LOGGER.warning("Authentication error in status().")
+            _LOGGER.warning(f"[v{self.version}] Authentication error in status().")
             raise
         except requests.exceptions.RequestException as ex:
              # This is a network/DNS error, raise it for UpdateFailed
-            _LOGGER.warning("Network error in status(): %s", ex)
+            msg = str(ex)
+            if hasattr(ex, "response") and ex.response is not None:
+                 clean_msg = self._get_clean_error_msg(ex.response.text)
+                 msg = f"{ex.response.status_code} {ex.response.reason} - {clean_msg}"
+            
+            _LOGGER.warning(f"[v{self.version}] Network error in status(): {msg}")
             raise
         except Exception as ex:
-            _LOGGER.error("Unknown error during auth: %s", ex)
+            _LOGGER.error(f"[v{self.version}] Unknown error during auth: {ex}")
             # Wrap unknown error
             raise Exception(f"Unknown error during auth: {ex}") from ex
 
         if self.auth_token is None or self.auth_token == "":
-            _LOGGER.error("Still no auth token after all attempts.")
+            _LOGGER.error(f"[v{self.version}] Still no auth token after all attempts.")
             raise Exception("Authentication failed, no auth token.")
         
         # We now have a valid auth_token (either from refresh or new login)
         
         # Make sure we have a residential Account
         if self.account_id is None or self.account_id == "":
-            _LOGGER.debug("Get Account ID!")
+            _LOGGER.debug(f"[v{self.version}] Get Account ID!")
             if not self.get_residential_account():
-                 _LOGGER.error("Could not get Account ID.")
+                 _LOGGER.error(f"[v{self.version}] Could not get Account ID.")
                  raise Exception("Could not get LDATA Account ID.")
         
         # Lookup the residential id from the account.
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
-            _LOGGER.debug("Get Residence ID!")
+            _LOGGER.debug(f"[v{self.version}] Get Residence ID!")
             self.get_residences()
             if self.residence_id_list is None or len(self.residence_id_list) == 0:
                 # User does not have multiple residences, lets try just the single residence
@@ -681,7 +684,7 @@ class LDATAService:
             self.residence_id_list = list(set(self.residence_id_list))
 
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
-            _LOGGER.error("Could not get Residence ID.")
+            _LOGGER.error(f"[v{self.version}] Could not get Residence ID.")
             raise Exception("Could not get LDATA Residence ID.")
         
         # Get the breaker panels.
@@ -694,7 +697,7 @@ class LDATAService:
                 panels_json.append(panel)
         
         if panels_json is None:
-            _LOGGER.warning("No panels found or API returned no panel data.")
+            _LOGGER.warning(f"[v{self.version}] No panels found or API returned no panel data.")
             # Return empty structure
             return self.parse_panels(panels_json)
 
@@ -724,10 +727,10 @@ class LDATAService:
                 # This call forces the panel to update ensure that if one panel fails to respond, it doesn't stop the update for all other panels.
                 self.put_residential_breaker_panels(panel["id"], panel["ModuleType"])
             except requests.exceptions.RequestException as e:
-               _LOGGER.warning(f"Failed to request update from panel {panel.get('name', panel['id'])}: {e}")
+               _LOGGER.warning(f"[v{self.version}] Failed to request update from panel {panel.get('name', panel['id'])}: {e}")
                 # Continue to the next panel even if this one failed.
             except LDATAAuthError as e:
-                _LOGGER.warning(f"Auth failed during panel update for {panel.get('name', panel['id'])}: {e}")
+                _LOGGER.warning(f"[v{self.version}] Auth failed during panel update for {panel.get('name', panel['id'])}: {e}")
                 # Re-raise the auth error to stop the update
                 raise
             panel_data = {}
