@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, LOGGER_NAME, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT
+from .const import DOMAIN, LOGGER_NAME, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT, UPDATE_INTERVAL_MIN
 from .coordinator import LDATAUpdateCoordinator
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
@@ -23,13 +23,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Get the update interval from options and enforce a 30-second minimum.
     user_update_interval = entry.options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT)
-    update_interval = max(user_update_interval, 30)
+    update_interval = max(user_update_interval, UPDATE_INTERVAL_MIN)
 
-    if user_update_interval < 30:
+    if user_update_interval < UPDATE_INTERVAL_MIN:
         _LOGGER.warning(
             "Update interval was set to %s seconds, which is too frequent. "
-            "Forcing a minimum interval of 30 seconds to avoid API rate limiting.",
-            user_update_interval,
+            "Forcing a minimum interval of %d seconds to avoid API rate limiting.",
+            user_update_interval, UPDATE_INTERVAL_MIN
         )
 
     coordinator = LDATAUpdateCoordinator(
