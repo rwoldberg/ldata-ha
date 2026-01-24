@@ -523,7 +523,25 @@ class LDATAService:
                     for panel in returnPanels:
                         panel["ModuleType"] = panel_type
                         
-                        # Apply WHEMS specific mapping and fetching
+                        # Determine connection status BEFORE sending commands
+                        is_connected = panel.get("connected", False)
+                        # Special handling for DAU models
+                        if panel.get("model") == "DAU" and panel.get("status") == "READY":
+                            is_connected = True
+
+                        # Only force an update if the panel is actually online.
+                        if is_connected:
+                            try:
+                                self.put_residential_breaker_panels(panel["id"], panel["ModuleType"])
+                            except requests.exceptions.RequestException as e:
+                               _LOGGER.warning(f"[v{self.version}] Failed to request update from panel {panel.get('name', panel['id'])}: {e}")
+                            except LDATAAuthError as e:
+                                _LOGGER.warning(f"[v{self.version}] Auth failed during panel update for {panel.get('name', panel['id'])}: {e}")
+                                raise
+                        else:
+                             _LOGGER.debug(f"[v{self.version}] Skipping force update for offline panel {panel.get('name', panel['id'])}")
+                        
+                        # Apply WHEMS specific mapping
                         if panel_type == "WHEMS":
                             panel["rmsVoltage"] = panel["rmsVoltageA"]
                             panel["rmsVoltage2"] = panel["rmsVoltageB"]
@@ -723,16 +741,6 @@ class LDATAService:
             )
 
         for panel in panels_json:
-            try:
-                # This call forces the panel to update ensure that if one panel fails to respond, it doesn't stop the update for all other panels.
-                self.put_residential_breaker_panels(panel["id"], panel["ModuleType"])
-            except requests.exceptions.RequestException as e:
-               _LOGGER.warning(f"[v{self.version}] Failed to request update from panel {panel.get('name', panel['id'])}: {e}")
-                # Continue to the next panel even if this one failed.
-            except LDATAAuthError as e:
-                _LOGGER.warning(f"[v{self.version}] Auth failed during panel update for {panel.get('name', panel['id'])}: {e}")
-                # Re-raise the auth error to stop the update
-                raise
             panel_data = {}
             panel_data["firmware"] = panel["updateVersion"]
             panel_data["model"] = panel["model"]
