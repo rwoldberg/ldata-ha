@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Attach release asset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get version from manifest
+        id: version
+        run: |
+          version=$(jq -r '.version' custom_components/ldata/manifest.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create zip asset
+        run: |
+          cd custom_components/ldata
+          zip -r ../../ldata.zip .
+          cd ../..
+
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ldata.zip
