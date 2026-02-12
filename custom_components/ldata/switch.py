@@ -9,7 +9,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, LOGGER_NAME, READ_ONLY, READ_ONLY_DEFAULT
+from .const import DOMAIN, LOGGER_NAME, ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT
 from .ldata_entity import LDATAEntity
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -24,13 +24,11 @@ async def async_setup_entry(
 
     entry = hass.data[DOMAIN][config_entry.entry_id]
 
-    read_only = config_entry.options.get(
-        READ_ONLY,
-        config_entry.data.get(
-            READ_ONLY, config_entry.data.get(READ_ONLY, READ_ONLY_DEFAULT)
-        ),
+    allow_breaker_control = config_entry.options.get(
+        ALLOW_BREAKER_CONTROL,
+        config_entry.data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT),
     )
-    if read_only is False:
+    if allow_breaker_control is True:
         for breaker_id in entry.data["breakers"]:
             breaker_data = entry.data["breakers"][breaker_id]
             switch = LDATASwitch(entry, breaker_data)
@@ -81,11 +79,9 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
 
         except (KeyError, TypeError):
             self._consecutive_update_failures += 1
-
-        if self._consecutive_update_failures > 5:
-            self._state = None
-        else:
-            self._state = self._last_known_is_on
+            if self._consecutive_update_failures > 5:
+                self._state = None
+            # else: keep self._state as last known value
             
         self.async_write_ha_state()
 

@@ -16,13 +16,14 @@ from homeassistant.helpers import selector
 from .const import (
     DOMAIN,
     LOGGER_NAME,
-    READ_ONLY,
-    READ_ONLY_DEFAULT,
+    ALLOW_BREAKER_CONTROL,
+    ALLOW_BREAKER_CONTROL_DEFAULT,
     THREE_PHASE,
     THREE_PHASE_DEFAULT,
-    UPDATE_INTERVAL,
-    UPDATE_INTERVAL_DEFAULT,
-    UPDATE_INTERVAL_MIN
+    HA_INFORM_RATE,
+    HA_INFORM_RATE_DEFAULT,
+    HA_INFORM_RATE_MIN,
+    HA_INFORM_RATE_MAX,
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 
@@ -33,7 +34,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required("username"): str,
         vol.Required("password"): str,
         vol.Required("three_phase"): bool,
-        vol.Required("read_only"): bool,
+        vol.Required("allow_breaker_control"): bool,
     }
 )
 
@@ -98,7 +99,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             
             # If this is a reauth, user_data is pre-filled.
             # We merge the new user_input (username/password)
-            # with the old data (three_phase, read_only).
+            # with the old data (three_phase, allow_breaker_control).
             if self.user_data:
                 self.user_data.update(user_input)
                 input_to_validate = self.user_data
@@ -153,7 +154,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_USERNAME, default=self.user_data.get(CONF_USERNAME)): str,
                 vol.Required(CONF_PASSWORD): str,
                 vol.Required(THREE_PHASE, default=self.user_data.get(THREE_PHASE, THREE_PHASE_DEFAULT)): bool,
-                vol.Required(READ_ONLY, default=self.user_data.get(READ_ONLY, READ_ONLY_DEFAULT)): bool,
+                vol.Required(ALLOW_BREAKER_CONTROL, default=self.user_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)): bool,
             })
 
         return self.async_show_form(
@@ -249,16 +250,19 @@ class OptionsFlow(config_entries.OptionsFlow):
 
         options_schema = {
             vol.Optional(
-                UPDATE_INTERVAL,
-                default=current_options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT),
-            ): vol.All(vol.Coerce(int), vol.Range(min=UPDATE_INTERVAL_MIN)),
+                HA_INFORM_RATE,
+                default=current_options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT),
+            ): vol.All(
+                vol.Coerce(float),
+                vol.Range(min=HA_INFORM_RATE_MIN, max=HA_INFORM_RATE_MAX)
+            ),
             vol.Optional(
                 THREE_PHASE,
                 default=current_options.get(THREE_PHASE, current_data.get(THREE_PHASE, THREE_PHASE_DEFAULT)),
             ): bool,
             vol.Optional(
-                READ_ONLY,
-                default=current_options.get(READ_ONLY, current_data.get(READ_ONLY, READ_ONLY_DEFAULT)),
+                ALLOW_BREAKER_CONTROL,
+                default=current_options.get(ALLOW_BREAKER_CONTROL, current_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)),
             ): bool,
             vol.Optional(
                 "log_warnings",

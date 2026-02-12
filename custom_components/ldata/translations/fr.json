@@ -1,0 +1,59 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Le compte est déjà configuré",
+            "reauth_successful": "Réauthentification réussie"
+        },
+        "error": {
+            "cannot_connect": "Échec de la connexion",
+            "invalid_auth": "Authentification invalide",
+            "invalid_2fa": "Code 2FA invalide, veuillez réessayer",
+            "unknown": "Erreur inattendue"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Nom d'utilisateur my.leviton.com",
+                    "password": "Mot de passe my.leviton.com",
+                    "three_phase": "Alimentation triphasée",
+                    "allow_breaker_control": "Autoriser le contrôle des disjoncteurs"
+                },
+                "title": "Configurer LDATA"
+            },
+            "2fa": {
+                "title": "Authentification à deux facteurs",
+                "description": "Un code d'authentification à deux facteurs est requis pour {username}. Veuillez vérifier votre application d'authentification ou votre e-mail et saisir le code ci-dessous.",
+                "data": {
+                    "2fa_code": "Code d'authentification"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Options Leviton LDATA",
+                "data": {
+                    "three_phase": "Système triphasé",
+                    "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
+                    "ha_inform_rate": "Taux d'information HA (secondes)",
+                    "log_warnings": "Journaliser les erreurs générales d'intégration",
+                    "log_data_warnings": "Journaliser les avertissements de données (pics/réinitialisations)",
+                    "log_all_raw": "Journaliser les données WebSocket complètes",
+                    "enable_specific_logging": "Activer la journalisation de champs spécifiques",
+                    "log_fields": "Champs à journaliser"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Fréquence de mise à jour des capteurs dans Home Assistant (2-600 secondes). Des valeurs plus basses = plus réactif mais charge système et écritures BD plus élevées.",
+                    "three_phase": "Activer pour les installations électriques triphasées.",
+                    "allow_breaker_control": "Lorsqu'activé, HA créera des entités interrupteur permettant de déclencher/réarmer les disjoncteurs. Lorsque désactivé, les disjoncteurs sont uniquement traités comme des capteurs.",
+                    "log_warnings": "Journaliser les plantages d'intégration ou les erreurs web.",
+                    "log_data_warnings": "Journaliser les avertissements d'incohérences de données de Leviton (pics/réinitialisations).",
+                    "log_all_raw": "Journaliser toutes les données fournies via WebSocket.",
+                    "enable_specific_logging": "Journaliser tout champ spécifié. Les noms de champs peuvent être trouvés en activant brièvement 'Journaliser les données WebSocket complètes'.",
+                    "log_fields": "Pour trouver les noms des champs, activez 'Journaliser toutes les données brutes de l'API' et vérifiez les journaux de Home Assistant. Saisissez-les ci-dessus en les séparant par des virgules."
+                }
+            }
+        }
+    }
+}

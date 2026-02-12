@@ -1,7 +1,11 @@
 # ldata-ha
 # leviton LDATA and LWHEM integration for Home Assistant (https://my.leviton.com/)
 
+# **-Starting with v2 this integration now uses Websockets!-**
+
 This is a home assistant integration for the LDATA and LWHEM hubs for levitons smart breakers.
+
+<br>
 
 If this integration has been useful to you, please consider chipping in and buying me a coffee!
 
@@ -13,6 +17,7 @@ Use HACS and add as a custom repo. Once the integration is installed go to your 
 
 - Username (my.leviton.com Username)
 - Password (my.leviton.com Password)
+- 2FA (If Enabled)
 
 ## Installation
 
@@ -44,31 +49,32 @@ If you do not wish to use HACS, then please download the latest version from the
 
 ## Options
 
-You can set the update interval that the integration polls the cloud server (in seconds). The default is 60 seconds and the minimum is 30. Addon is reloading on submit.
+Addon is auto reloading on submit.
+- HA Inform Rate (Seconds)
+  - How often to update sensors in Home Assistant (2-600 seconds). Lower values = more responsive but higher system load and DB writes.
 
-- Three phase
+- Three phase (default off)
   - For Three phase setups
 
-- Read only
-  - HA can not trip/reset breakers
+- Allow Breaker Control (default off)
+  - HA will not create Switch entities for breaker control (Breakers are only treated as Sensors)
 
-- Log General Errors
-  - App crashes or polling errors
+- Log General Integration Errors
+  - Integration crashes or web errors
 
 - Log Data Validation Warning (Spikes/Resets)
-  - Outpots Warnings of Data inconsistancies from Leviton to log
+  - Outputs Warnings of Data inconsistancies from Leviton to log
   
-- Log All Raw API Data
-  - Outputs all data pulled via the API to log
+- Log Full WebSocket Data
+  - Outputs all data provided
 
 - Enable Specific Field Logging
-  - Outputs any specified field to log (field names can be seen by breifly enabling and looking at "og All Raw API Data")
+  - Outputs any specified field to log (field names can be seen by breifly enabling and looking at "Log Full WebSocket Data")
 
-<img width="595" height="851" alt="image" src="https://github.com/user-attachments/assets/8133a0b1-4f45-4475-8129-2d5cde834de6" />
+<img width="586" height="873" alt="image" src="https://github.com/user-attachments/assets/3c563e92-ca67-432b-a7c1-01ec247001cf" />
 
-
-
-
-
-This is a diy integration and is not supported or affiliated with Leviton in any way.
+<br>
+<br>
+<br>
+This is a DIY integration and is not supported or affiliated with Leviton in any way.
 

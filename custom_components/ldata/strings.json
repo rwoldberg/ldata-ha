@@ -6,28 +6,51 @@
           "username": "[%key:common::config_flow::data::username%]",
           "password": "[%key:common::config_flow::data::password%]",
           "three_phase": "Three phase power",
-          "read_only": "Read only"
+          "allow_breaker_control": "Allow breaker control"
+        }
+      },
+      "2fa": {
+        "title": "Two-Factor Authentication",
+        "description": "A two-factor authentication code is required for {username}. Please check your authenticator app or email and enter the code below.",
+        "data": {
+          "2fa_code": "Authentication Code"
         }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "invalid_2fa": "Invalid 2FA code, please try again",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "Re-authentication successful"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "LDATA Options",
-        "description": "Configure Controller Options",
+        "title": "Leviton LDATA Options",
         "data": {
-          "update_interval": "Interval to poll my.leviton.com (Seconds)",
-          "three_phase": "Three phase power",
-          "read_only": "Read only"
+          "three_phase": "Three Phase System",
+          "allow_breaker_control": "Allow Breaker Control",
+          "ha_inform_rate": "HA Inform Rate (seconds)",
+          "log_warnings": "Log General Integration Errors",
+          "log_data_warnings": "Log Data Value Warnings (Spikes/Resets)",
+          "log_all_raw": "Log Full WebSocket Data",
+          "enable_specific_logging": "Enable Specific Field Logging",
+          "log_fields": "Fields to Log"
+        },
+        "data_description": {
+          "ha_inform_rate": "How often to update sensors in Home Assistant (2-600 seconds). Lower values = more responsive but higher system load and DB writes.",
+          "three_phase": "Enable for three phase electrical setups.",
+          "allow_breaker_control": "When enabled, HA will create switch entities allowing you to trip/reset breakers. When disabled, breakers are only treated as sensors.",
+          "log_warnings": "Log integration crashes or web errors.",
+          "log_data_warnings": "Log warnings of data inconsistencies from Leviton (spikes/resets).",
+          "log_all_raw": "Log all data provided via WebSocket.",
+          "enable_specific_logging": "Log any specified field. Field names can be found by briefly enabling 'Log Full WebSocket Data'.",
+          "log_fields": "To find field names, enable 'Log Full WebSocket Data' and check Home Assistant logs. Enter above as comma separated."
         }
       }
     }

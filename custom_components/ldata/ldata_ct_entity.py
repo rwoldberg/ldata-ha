@@ -25,7 +25,6 @@ class LDATACTEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
             self._name = self.entity_data["name"] + " " + suffix
         else:
             self._name = self.entity_data["name"]
-        # Required for HA 2022.7
         self.coordinator_context = object()
 
     async def async_added_to_hass(self) -> None:
@@ -36,7 +35,7 @@ class LDATACTEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     @property
     def device_id(self):
         """Returns the device id of the entity."""
-        return self.device_id
+        return self._device_id
 
     @property
     def name(self):
@@ -53,6 +52,11 @@ class LDATACTEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     @property
     def name_suffix(self) -> str | None:
         """Return the name suffix of the entity."""
+        return None
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Return the unique id suffix of the entity."""
         return None
 
     @property

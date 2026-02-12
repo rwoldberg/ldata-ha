@@ -32,7 +32,6 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
                 self.leg = "2"
         else:
             self.leg = "both"
-        # Required for HA 2022.7
         self.coordinator_context = object()
 
     async def async_added_to_hass(self) -> None:
@@ -43,7 +42,7 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     @property
     def device_id(self):
         """Returns the device id of the entity."""
-        return self.device_id
+        return self._device_id
 
     @property
     def name(self):

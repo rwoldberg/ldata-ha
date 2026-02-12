@@ -68,7 +68,7 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
                         self._state = True
                     else:
                         self._state = False
-        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
+        except (KeyError, TypeError, AttributeError):
             self._state = None
         self.async_write_ha_state()
 
@@ -137,7 +137,7 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
                     self._state = None
                 # Else: keep the last known self._state
                 
-        except Exception:  # pylint: disable=broad-except  # noqa: BLE001
+        except (KeyError, TypeError, AttributeError):
             self._state = None
 
     @property

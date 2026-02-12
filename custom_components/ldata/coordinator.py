@@ -1,7 +1,6 @@
 """LDATAUpdateCoordinator class to handle fetching new data about the LDATA module."""
 
 import asyncio
-from datetime import timedelta
 import logging
 import requests
 
@@ -9,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import DOMAIN, LOGGER_NAME
+from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN
 from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -19,7 +18,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
     """LDATAUpdateCoordinator to handle fetching new data about the LDATA module."""
 
     def __init__(
-        self, hass: HomeAssistant, user, password, update_interval, entry
+        self, hass: HomeAssistant, user, password, entry
     ) -> None:
         """Initialize the coordinator and set up the Controller object."""
         self._hass = hass
@@ -27,14 +26,130 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._service = LDATAService(user, password, entry)
         self._available = True
         self.config_entry = entry
+        self._websocket_task = None
+        self._debounce_timer = None
+        self._websocket_connected = False
+        self._websocket_ever_connected = False
 
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=timedelta(seconds=update_interval),
+            # No polling - WebSocket is the primary data source
+            update_interval=None,
             config_entry=entry,
         )
+        
+        # Start the WebSocket Listener in the background
+        self._websocket_task = self.config_entry.async_create_background_task(
+            self._hass, 
+            self._service.async_run_websocket(
+                self._handle_websocket_update,
+                self._handle_connection_change
+            ),
+            "ldata_websocket"
+        )
+
+    def _handle_connection_change(self, connected: bool):
+        """Handle WebSocket connection state changes."""
+        was_connected = self._websocket_connected
+        self._websocket_connected = connected
+        
+        if connected and not was_connected:
+            if self._websocket_ever_connected:
+                _LOGGER.debug(f"[v{self._service.version}] WebSocket reconnected")
+            else:
+                _LOGGER.debug(f"[v{self._service.version}] WebSocket connected")
+                self._websocket_ever_connected = True
+        elif not connected and was_connected:
+            _LOGGER.debug(f"[v{self._service.version}] WebSocket disconnected")
+
+    async def async_shutdown(self):
+        """Gracefully shutdown the WebSocket connection."""
+        _LOGGER.debug("Shutting down LDATA coordinator")
+        
+        # Signal the WebSocket to stop
+        self._service._shutdown_requested = True
+        
+        # Cancel the WebSocket task if it exists
+        if self._websocket_task:
+            self._websocket_task.cancel()
+            try:
+                await self._websocket_task
+            except asyncio.CancelledError:
+                pass
+        
+        # Cancel any pending debounce timer
+        if self._debounce_timer:
+            self._debounce_timer.cancel()
+            self._debounce_timer = None
+
+    def _handle_websocket_update(self):
+        """Callback for when WebSocket receives new data."""
+
+        # Only start a timer if one isn't already running
+        if self._debounce_timer is None:
+            inform_rate = max(
+                HA_INFORM_RATE_MIN,
+                self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
+            )
+            
+            self._debounce_timer = self._hass.loop.call_later(
+                inform_rate, 
+                self._apply_debounced_update
+            )
+
+    def _apply_debounced_update(self):
+        """Apply the aggregated data update to Home Assistant."""
+        self._debounce_timer = None
+        
+        data = self._service.status_data
+        
+        # Skip update if data hasn't changed (reduces DB writes and recorder warnings)
+        if data == self.data:
+            return
+        
+        # Log data if enabled
+        self._log_data_if_enabled(data, "WebSocket")
+        
+        # Retrieve the current inform rate for logging
+        inform_rate = max(
+            HA_INFORM_RATE_MIN,
+            self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
+        )
+        
+        # Log the update with useful context
+        breaker_count = len(data.get("breakers", {})) if data else 0
+        ct_count = len(data.get("cts", {})) if data else 0
+        _LOGGER.debug(
+            f"[v{self._service.version}] Pushing ({inform_rate}s) update to HA: {breaker_count} breakers, {ct_count} CTs"
+        )
+        
+        # This notifies all sensors to refresh from the cache
+        self.async_set_updated_data(data)
+
+    def _log_data_if_enabled(self, data, source: str = ""):
+        """Log data based on user options."""
+        options = self.config_entry.options
+        
+        # Check if "Log All Raw Data" is enabled
+        if options.get("log_all_raw", False):
+            redacted_data = self._redact_data(data)
+            _LOGGER.warning("Leviton %s Full Data: %s", source, redacted_data)
+        
+        # Check if specific field logging is enabled
+        elif options.get("enable_specific_logging", False):
+            if fields_to_log_str := options.get("log_fields", ""):
+                fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
+                log_output = {}
+                if data and data.get('cts'):
+                    for ct_id, ct_data in data.get('cts', {}).items():
+                        for field in fields_to_log:
+                            if field in ct_data:
+                                log_output[f"CT_{ct_id}_{field}"] = ct_data[field]
+                
+                if log_output:
+                    _LOGGER.warning("Leviton %s Selected Data: %s", source, log_output)
 
     def _redact_data(self, data):
         """Redact sensitive fields from data for logging."""
@@ -54,7 +169,18 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             return data
 
     async def _async_update_data(self):
-        """Fetch data from LDATA Controller."""
+        """Fetch data from LDATA Controller.
+        
+        WebSocket is the primary data source. This method is only called for
+        initial data fetch at startup. After that, WebSocket handles all updates.
+        """
+        # If WebSocket is connected and we have data, skip - WebSocket handles updates
+        if self._websocket_connected and self.data is not None:
+            return self.data
+        
+        # Initial fetch or WebSocket not yet connected
+        _LOGGER.debug("Fetching initial LDATA data")
+        
         try:
             async with asyncio.timeout(30):
                 # This will now either return data or raise an Exception
@@ -62,32 +188,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                     self._service.status  # Fetch new status
                 )
 
-            # --- Start of selective debug logging ---
-            options = self.config_entry.options
-            
-            # Check if "Log All Raw Data" is enabled
-            if options.get("log_all_raw", False):
-                # Redact sensitive data before logging
-                redacted_data = self._redact_data(returnData)
-                _LOGGER.warning("Leviton API Full Data: %s", redacted_data)
-            
-            # Else, check if specific field logging is enabled AND if fields have been provided
-            elif options.get("enable_specific_logging", False):
-                if fields_to_log_str := options.get("log_fields", ""):
-                    fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
-                    log_output = {}
-
-                    # Search for requested fields in the data payload
-                    if returnData and returnData.get('cts'): # Add check for data
-                        for ct_id, ct_data in returnData.get('cts', {}).items():
-                            for field in fields_to_log:
-                                if field in ct_data:
-                                    key_name = f"CT_{ct_id}_{field}"
-                                    log_output[key_name] = ct_data[field]
-                    
-                    if log_output:
-                        _LOGGER.warning("Leviton Selected Raw Data: %s", log_output)
-            # --- End of selective debug logging ---
+            # Log data if enabled
+            self._log_data_if_enabled(returnData, "API")
             
             return returnData
 
@@ -106,7 +208,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             # This catches all other errors (e.g., "Could not get Account ID")
             self._available = False
             _LOGGER.warning(
-                "Error communicating with LDATA for %s: %s", self.user, str(ex)
+                "Unexpected error communicating with LDATA for %s: %s", self.user, ex
             )
             # This will result in the "Failed setup, will retry" message
             raise UpdateFailed(f"Error communicating with LDATA: {ex}") from ex

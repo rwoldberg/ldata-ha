@@ -6,7 +6,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN, LOGGER_NAME, UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT, UPDATE_INTERVAL_MIN
+from .const import DOMAIN, LOGGER_NAME
 from .coordinator import LDATAUpdateCoordinator
 
 PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
@@ -21,22 +21,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Handle backward compatibility for username/email field
     username = entry.data.get("email", entry.data.get(CONF_USERNAME))
 
-    # Get the update interval from options and enforce a 30-second minimum.
-    user_update_interval = entry.options.get(UPDATE_INTERVAL, UPDATE_INTERVAL_DEFAULT)
-    update_interval = max(user_update_interval, UPDATE_INTERVAL_MIN)
-
-    if user_update_interval < UPDATE_INTERVAL_MIN:
-        _LOGGER.warning(
-            "Update interval was set to %s seconds, which is too frequent. "
-            "Forcing a minimum interval of %d seconds to avoid API rate limiting.",
-            user_update_interval, UPDATE_INTERVAL_MIN
-        )
-
     coordinator = LDATAUpdateCoordinator(
         hass,
         username,
         entry.data[CONF_PASSWORD],
-        update_interval, # Use the validated update_interval
         entry,
     )
 
@@ -54,6 +42,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    # Gracefully shutdown WebSocket before unloading
+    coordinator = hass.data[DOMAIN].get(entry.entry_id)
+    if coordinator:
+        await coordinator.async_shutdown()
+    
     # Use the built-in unload method
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     

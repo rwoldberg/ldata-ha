@@ -1,10 +1,11 @@
 {
     "config": {
         "abort": {
-            "already_configured": "Conta já configurada"
+            "already_configured": "A conta já se encontra configurada",
+            "reauth_successful": "Reautenticação bem-sucedida"
         },
         "error": {
-            "cannot_connect": "Falha ao conectar",
+            "cannot_connect": "Falha na ligação",
             "invalid_auth": "Autenticação inválida",
             "invalid_2fa": "Código 2FA inválido, por favor tente novamente",
             "unknown": "Erro inesperado"
@@ -12,16 +13,16 @@
         "step": {
             "user": {
                 "data": {
-                    "username": "Nome de usuário my.leviton.com",
-                    "password": "Senha my.leviton.com",
+                    "username": "Utilizador my.leviton.com",
+                    "password": "Palavra-passe my.leviton.com",
                     "three_phase": "Energia trifásica",
-                    "read_only": "Somente leitura"
+                    "allow_breaker_control": "Permitir controlo dos disjuntores"
                 },
                 "title": "Configurar LDATA"
             },
             "2fa": {
                 "title": "Autenticação de Dois Fatores",
-                "description": "Um código de autenticação de dois fatores é necessário para {username}. Por favor, verifique seu aplicativo autenticador ou e-mail e insira o código abaixo.",
+                "description": "É necessário um código de autenticação de dois fatores para {username}. Por favor, verifique a sua aplicação de autenticação ou e-mail e introduza o código abaixo.",
                 "data": {
                     "2fa_code": "Código de Autenticação"
                 }
@@ -33,17 +34,24 @@
             "init": {
                 "title": "Opções Leviton LDATA",
                 "data": {
-                    "update_interval": "Intervalo de Atualização (segundos)",
                     "three_phase": "Sistema Trifásico",
-                    "read_only": "Modo Somente Leitura",
-                    "log_warnings": "Registrar Erros Gerais do Plugin",
-                    "log_data_warnings": "Registrar Avisos de Dados (Picos/Reinicializações)",
-                    "log_all_raw": "Registrar Todos os Dados Brutos da API",
-                    "enable_specific_logging": "Ativar Registro de Campos Específicos",
-                    "log_fields": "Campos para Registrar"
+                    "allow_breaker_control": "Permitir Controlo dos Disjuntores",
+                    "ha_inform_rate": "Taxa de Informação HA (segundos)",
+                    "log_warnings": "Registar Erros Gerais de Integração",
+                    "log_data_warnings": "Registar Avisos de Valores de Dados (Picos/Resets)",
+                    "log_all_raw": "Registar Dados Completos de WebSocket",
+                    "enable_specific_logging": "Ativar Registo de Campos Específicos",
+                    "log_fields": "Campos a Registar"
                 },
                 "data_description": {
-                    "log_fields": "Para encontrar nomes de campos, ative 'Registrar Todos os Dados Brutos da API' e verifique os logs do Home Assistant. Insira acima separados por vírgula."
+                    "ha_inform_rate": "Com que frequência atualizar sensores no Home Assistant (2-600 segundos). Valores mais baixos = mais responsivo mas maior carga no sistema e escritas na BD.",
+                    "three_phase": "Ativar para instalações elétricas trifásicas.",
+                    "allow_breaker_control": "Quando ativado, o HA criará entidades interruptor permitindo disparar/rearmar disjuntores. Quando desativado, os disjuntores são tratados apenas como sensores.",
+                    "log_warnings": "Registar falhas de integração ou erros web.",
+                    "log_data_warnings": "Registar avisos de inconsistências de dados da Leviton (picos/resets).",
+                    "log_all_raw": "Registar todos os dados fornecidos via WebSocket.",
+                    "enable_specific_logging": "Registar qualquer campo especificado. Os nomes dos campos podem ser encontrados ativando brevemente 'Registar Dados Completos de WebSocket'.",
+                    "log_fields": "Para encontrar nomes de campos, ative 'Registar Todos os Dados Brutos da API' e verifique os registos do Home Assistant. Introduza acima separados por vírgulas."
                 }
             }
         }

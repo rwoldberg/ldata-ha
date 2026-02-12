@@ -1,7 +1,8 @@
 {
     "config": {
         "abort": {
-            "already_configured": "Account is already configured"
+            "already_configured": "Account is already configured",
+            "reauth_successful": "Re-authentication successful"
         },
         "error": {
             "cannot_connect": "Failed to connect",
@@ -15,7 +16,7 @@
                     "username": "my.leviton.com Username",
                     "password": "my.leviton.com Password",
                     "three_phase": "Three phase power",
-                    "read_only": "Read only"
+                    "allow_breaker_control": "Allow breaker control"
                 },
                 "title": "Configure LDATA"
             },
@@ -33,17 +34,24 @@
             "init": {
                 "title": "Leviton LDATA Options",
                 "data": {
-                    "update_interval": "Update Interval (seconds)",
                     "three_phase": "Three Phase System",
-                    "read_only": "Read Only Mode",
-                    "log_warnings": "Log General Plugin Errors",
+                    "allow_breaker_control": "Allow Breaker Control",
+                    "ha_inform_rate": "HA Inform Rate (seconds)",
+                    "log_warnings": "Log General Integration Errors",
                     "log_data_warnings": "Log Data Value Warnings (Spikes/Resets)",
-                    "log_all_raw": "Log All Raw API Data",
+                    "log_all_raw": "Log Full WebSocket Data",
                     "enable_specific_logging": "Enable Specific Field Logging",
                     "log_fields": "Fields to Log"
                 },
                 "data_description": {
-                    "log_fields": "To find field names, enable 'Log All Raw API Data' and check Home Assistant logs. Enter above as comma separated."
+                    "ha_inform_rate": "How often to update sensors in Home Assistant (2-600 seconds). Lower values = more responsive but higher system load and DB writes.",
+                    "three_phase": "Enable for three phase electrical setups.",
+                    "allow_breaker_control": "When enabled, HA will create switch entities allowing you to trip/reset breakers. When disabled, breakers are only treated as sensors.",
+                    "log_warnings": "Log integration crashes or web errors.",
+                    "log_data_warnings": "Log warnings of data inconsistencies from Leviton (spikes/resets).",
+                    "log_all_raw": "Log all data provided via WebSocket.",
+                    "enable_specific_logging": "Log any specified field. Field names can be found by briefly enabling 'Log Full WebSocket Data'.",
+                    "log_fields": "To find field names, enable 'Log Full WebSocket Data' and check Home Assistant logs. Enter above as comma separated."
                 }
             }
         }
