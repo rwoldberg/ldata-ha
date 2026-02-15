@@ -1862,7 +1862,7 @@ class LDATAService:
                                                 _LOGGER.error(f"[v{self.version}] Callback error: {e}")
                                 except (ValueError, json.JSONDecodeError) as e:
                                     _LOGGER.warning(f"[v{self.version}] Invalid JSON: {e}")
-                                    
+                            
                             elif msg.type == aiohttp.WSMsgType.ERROR:
                                 _LOGGER.error(f"[v{self.version}] WS error: {ws.exception()}")
                                 break
