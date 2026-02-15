@@ -63,6 +63,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 self._websocket_ever_connected = True
         elif not connected and was_connected:
             _LOGGER.debug(f"[v{self._service.version}] WebSocket disconnected")
+            # Stop the self-re-arming timer so we don't push stale data
+            if self._debounce_timer:
+                self._debounce_timer.cancel()
+                self._debounce_timer = None
 
     async def async_shutdown(self):
         """Gracefully shutdown the WebSocket connection."""
@@ -85,9 +89,12 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._debounce_timer = None
 
     def _handle_websocket_update(self):
-        """Callback for when WebSocket receives new data."""
-
-        # Only start a timer if one isn't already running
+        """Callback for when WebSocket receives new data.
+        
+        Starts the debounce timer if not already running. Once started, the
+        timer self-re-arms in _apply_debounced_update, so this only needs to
+        kick-start the first cycle (or restart after a disconnect).
+        """
         if self._debounce_timer is None:
             inform_rate = max(
                 HA_INFORM_RATE_MIN,
@@ -100,33 +107,53 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             )
 
     def _apply_debounced_update(self):
-        """Apply the aggregated data update to Home Assistant."""
+        """Apply the aggregated data update to Home Assistant.
+        
+        This runs on a steady cadence (every ha_inform_rate seconds) once the
+        first WebSocket message is received. The debounce timer self-re-arms
+        so updates continue even if no new WS messages arrive during a cycle.
+        """
         self._debounce_timer = None
         
-        data = self._service.status_data
+        try:
+            data = self._service.status_data
+            
+            if not data:
+                return
+            
+            # Log data if enabled
+            self._log_data_if_enabled(data, "WebSocket")
+            
+            # Retrieve the current inform rate
+            inform_rate = max(
+                HA_INFORM_RATE_MIN,
+                self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
+            )
+            
+            # Log the update with useful context
+            breaker_count = len(data.get("breakers", {})) if data else 0
+            ct_count = len(data.get("cts", {})) if data else 0
+            _LOGGER.debug(
+                f"[v{self._service.version}] Pushing ({inform_rate}s) update to HA: {breaker_count} breakers, {ct_count} CTs"
+            )
+            
+            # This notifies all sensors to refresh from the cache
+            self.async_set_updated_data(data)
         
-        # Skip update if data hasn't changed (reduces DB writes and recorder warnings)
-        if data == self.data:
-            return
+        except Exception as e:
+            _LOGGER.error(f"[v{self._service.version}] Error in debounced update: {e}")
         
-        # Log data if enabled
-        self._log_data_if_enabled(data, "WebSocket")
-        
-        # Retrieve the current inform rate for logging
-        inform_rate = max(
-            HA_INFORM_RATE_MIN,
-            self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
-        )
-        
-        # Log the update with useful context
-        breaker_count = len(data.get("breakers", {})) if data else 0
-        ct_count = len(data.get("cts", {})) if data else 0
-        _LOGGER.debug(
-            f"[v{self._service.version}] Pushing ({inform_rate}s) update to HA: {breaker_count} breakers, {ct_count} CTs"
-        )
-        
-        # This notifies all sensors to refresh from the cache
-        self.async_set_updated_data(data)
+        finally:
+            # ALWAYS re-arm the timer so updates never stall
+            if self._websocket_connected:
+                inform_rate = max(
+                    HA_INFORM_RATE_MIN,
+                    self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
+                )
+                self._debounce_timer = self._hass.loop.call_later(
+                    inform_rate,
+                    self._apply_debounced_update
+                )
 
     def _log_data_if_enabled(self, data, source: str = ""):
         """Log data based on user options."""

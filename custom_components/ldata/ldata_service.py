@@ -760,6 +760,7 @@ class LDATAService:
             panel_data["id"] = panel["id"]
             panel_data["name"] = panel["name"]
             panel_data["serialNumber"] = panel["id"]
+            panel_data["panel_type"] = panel.get("ModuleType", "WHEMS")
             panel_data["connected"] = panel.get("connected", False)
             if panel.get("model") == "DAU" and panel.get("status") == "READY":
                 panel_data["connected"] = True
@@ -808,6 +809,7 @@ class LDATAService:
             panels.append(panel_data)
             # Setup the CT list.
             if "CTs" in panel and panel["CTs"]: # Add check if CTs exist and is not None
+                _LOGGER.debug(f"[v{self.version}] Panel {panel.get('name', panel['id'])}: Found {len(panel['CTs'])} CTs in API response")
                 for ct in panel["CTs"]:
                     if ct["usageType"] != "NOT_USED":
                         # Create the CT data
@@ -836,6 +838,8 @@ class LDATAService:
                         ct_data["current2"] = self.none_to_zero(ct, "rmsCurrent2")
                         # Add the CT to the list.
                         cts[ct_data["id"]] = ct_data
+            else:
+                _LOGGER.debug(f"[v{self.version}] Panel {panel.get('name', panel['id'])} ({panel.get('ModuleType', 'unknown')}): No CTs key or empty CTs (CTs key present: {'CTs' in panel}, value: {type(panel.get('CTs')).__name__})")
             totalPower = 0.0
             if "residentialBreakers" in panel and panel["residentialBreakers"]: # Add check
                 for breaker in panel["residentialBreakers"]:
@@ -955,6 +959,8 @@ class LDATAService:
         status_data["breakers"] = breakers
         status_data["cts"] = cts
         status_data["panels"] = panels
+
+        _LOGGER.debug(f"[v{self.version}] parse_panels complete: {len(panels)} panels, {len(breakers)} breakers, {len(cts)} CTs")
 
         return status_data
 
@@ -1589,43 +1595,51 @@ class LDATAService:
                     }
                 ) as session:
                     
-                    # Get first panel ID
-                    first_panel_id = None
+                    # Get ALL panels with their types for bandwidth keepalive
+                    panel_info = []
                     if self.status_data and self.status_data.get("panels"):
-                        first_panel_id = self.status_data["panels"][0].get("id")
+                        panel_info = [
+                            (p.get("id"), p.get("panel_type", "WHEMS"))
+                            for p in self.status_data["panels"]
+                            if p.get("id")
+                        ]
                     
                     # Bandwidth PUT function - this is what keeps the WebSocket alive
+                    # Must PUT to EVERY panel using the correct endpoint for its type
                     async def bandwidth_put():
-                        if not first_panel_id:
+                        if not panel_info:
                             return
-                        try:
-                            headers = {
-                                "Authorization": self.auth_token,
-                                "Content-Type": "application/json",
-                                "Origin": "https://myapp.leviton.com",
-                                "Referer": "https://myapp.leviton.com/",
-                                "Sec-Fetch-Dest": "empty",
-                                "Sec-Fetch-Mode": "cors",
-                                "Sec-Fetch-Site": "same-site",
-                                "DNT": "1",
-                                "Sec-GPC": "1",
-                                "Priority": "u=0",
-                            }
-                            async with session.put(
-                                f"https://my.leviton.com/api/IotWhems/{first_panel_id}",
-                                headers=headers,
-                                json={"bandwidth": 1},
-                                timeout=aiohttp.ClientTimeout(total=10)
-                            ) as resp:
-                                _LOGGER.debug(f"[v{self.version}] Bandwidth PUT: {resp.status}")
-                        except aiohttp.ClientConnectionResetError:
-                            # Connection closed, this is expected during shutdown/reconnect
-                            _LOGGER.debug(f"[v{self.version}] Bandwidth PUT: connection reset (expected)")
-                        except asyncio.CancelledError:
-                            # Task was cancelled, this is expected during shutdown
-                            pass
-                        except Exception as e:
-                            _LOGGER.debug(f"[v{self.version}] Bandwidth PUT failed: {e}")
+                        headers = {
+                            "Authorization": self.auth_token,
+                            "Content-Type": "application/json",
+                            "Origin": "https://myapp.leviton.com",
+                            "Referer": "https://myapp.leviton.com/",
+                            "Sec-Fetch-Dest": "empty",
+                            "Sec-Fetch-Mode": "cors",
+                            "Sec-Fetch-Site": "same-site",
+                            "DNT": "1",
+                            "Sec-GPC": "1",
+                            "Priority": "u=0",
+                        }
+                        for panel_id, panel_type in panel_info:
+                            try:
+                                if panel_type == "LDATA":
+                                    url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
+                                else:
+                                    url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
+                                async with session.put(
+                                    url,
+                                    headers=headers,
+                                    json={"bandwidth": 1},
+                                    timeout=aiohttp.ClientTimeout(total=10)
+                                ) as resp:
+                                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id}: {resp.status}")
+                            except aiohttp.ClientConnectionResetError:
+                                _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: connection reset (expected)")
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as e:
+                                _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id} failed: {e}")
                     
                     # Initial bandwidth PUT
                     await bandwidth_put()
@@ -1800,7 +1814,7 @@ class LDATAService:
                                     except Exception:
                                         pass  # Suppress any exception
                                 task.add_done_callback(handle_task_exception)
-                                _LOGGER.debug(f"[v{self.version}] Bandwidth PUT #{bandwidth_put_count}")
+                                _LOGGER.debug(f"[v{self.version}] Bandwidth PUT #{bandwidth_put_count} ({len(panel_info)} panels)")
                             
                             # Re-subscribe if no data for 60 seconds
                             if current_time - last_data_time >= STALE_DATA_THRESHOLD:
