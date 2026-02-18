@@ -882,7 +882,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                 if new_data := cts.get(self.ct_data["id"]):
                     new_value = float(new_data[self.entity_description.key])
                     is_potential_spike = False
-                    ROUNDING_TOLERANCE = 0.01
+                    ROUNDING_TOLERANCE = 0.05
 
                     # Initialize state on the very first update if not already set by restore.
                     if self._state is None:
@@ -891,7 +891,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                         return
 
                     # --- Data Validation ---
-                    # Check for a significant decrease, ignoring minor rounding errors.
+                    # Check for a significant decrease, ignoring minor rounding/jitter.
                     if (float(self._state) - new_value) > ROUNDING_TOLERANCE:
                         if self.coordinator.config_entry.options.get("log_data_warnings", True):
                             _LOGGER.warning(
@@ -899,6 +899,11 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                                 self.entity_id, new_value, self._state
                             )
                         return # Exit without updating.
+                    
+                    # For minor decreases within tolerance, hold the previous value
+                    # to maintain TOTAL_INCREASING contract with HA.
+                    if new_value < float(self._state):
+                        new_value = float(self._state)
 
                     # Check for unrealistic upward jumps (spikes).
                     # Case 1: A large absolute jump from a very low value.

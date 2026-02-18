@@ -28,7 +28,7 @@ defaultHeaders = {
     "Content-Type": "application/json",
     "cache-control": "no-cache",
     "pragma": "no-cache",
-    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:144.0) Gecko/20100101 Firefox/144.0",
+    "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:147.0) Gecko/20100101 Firefox/147.0",
     "host": "my.leviton.com",
     "Origin": "https://myapp.leviton.com",
     "Referer": "https://myapp.leviton.com/",
@@ -75,6 +75,45 @@ class LDATAService:
         self.full_auth_response = None
         # Flag for graceful shutdown
         self._shutdown_requested = False
+        
+        # Per-panel REST polling detection.
+        # Strategy: WS-first. Start by assuming WebSocket delivers all data
+        # (including breaker/CT values), regardless of firmware version.
+        # Only fall back to REST polling after WS demonstrably fails to
+        # deliver breaker data for several consecutive IotWhem messages.
+        # Key: panel_id, Value: True if REST polling is needed
+        self._panel_needs_rest_poll: dict[str, bool] = {}
+        # Track how many IotWhem WS messages we've seen per panel without breaker data
+        self._ws_iotwhem_count: dict[str, int] = {}
+        # After this many IotWhem messages without breaker data, enable REST polling.
+        # With WS messages arriving every ~5-6s, 5 messages ≈ 30s grace period.
+        _WS_DETECTION_THRESHOLD = 5
+        self._WS_DETECTION_THRESHOLD = _WS_DETECTION_THRESHOLD
+        # Track when WS last delivered breaker data per panel (for coordinator)
+        self._ws_last_breaker_data_time: dict[str, float] = {}
+
+        # ── Unified zero-transition protection ────────────────────────
+        # On V2 firmware the cloud sporadically sends zero power *and/or*
+        # zero rmsCurrent for breakers that actually carry a stable load.
+        # This happens on both the WS and REST paths.
+        #
+        # We protect BOTH power and current together:
+        #   • A breaker is considered "loaded" when EITHER power > 0 OR
+        #     current > 0.  (A tiny motor can show current with ~0 real W.)
+        #   • Once loaded, ALL electrical fields (power, current, voltage,
+        #     frequency) are frozen until the breaker reports zero for BOTH
+        #     power AND current for N consecutive updates.
+        #   • Any single non-zero reading on either metric resets the counter.
+        #
+        # The counter is intentionally shared across REST and WS updates so
+        # a single stale zero from one transport does not reset the sequence
+        # established by the other.
+        self._breaker_zero_count: dict[str, int] = {}
+        _ZERO_CONFIRM_THRESHOLD = 6
+        self._ZERO_CONFIRM_THRESHOLD = _ZERO_CONFIRM_THRESHOLD
+        # Stash the last-known-good values so we can hold them during
+        # the zero-confirmation window.  Keyed by breaker_id.
+        self._breaker_last_good: dict[str, dict] = {}
 
     def _check_rate_limit(self) -> None:
         """Enforces a 10-second wait between login attempts."""
@@ -659,6 +698,53 @@ class LDATAService:
             result = 0.0
         return result
 
+    def _check_zero_transition(
+        self,
+        breaker_id: str,
+        new_power: float,
+        new_current: float,
+        old_power: float,
+        old_current: float,
+        source: str = "?",
+    ) -> bool:
+        """Unified zero-transition guard for breaker power AND current.
+
+        Returns True if the new values should be ACCEPTED, or False if they
+        should be HELD at their previous non-zero values.
+
+        A breaker is considered "loaded" when old_power > 0 OR old_current > 0.
+        Once loaded, a transition to zero is only accepted after
+        _ZERO_CONFIRM_THRESHOLD consecutive updates where BOTH new_power == 0
+        AND new_current == 0.
+
+        Any update with a non-zero reading on either metric resets the counter.
+        """
+        was_loaded = abs(old_power) > 0 or abs(old_current) > 0.01
+        now_zero = abs(new_power) < 0.01 and abs(new_current) < 0.01
+
+        if was_loaded and now_zero:
+            # Potential stale-zero — count it
+            count = self._breaker_zero_count.get(breaker_id, 0) + 1
+            self._breaker_zero_count[breaker_id] = count
+            if count < self._ZERO_CONFIRM_THRESHOLD:
+                _LOGGER.debug(
+                    f"[v{self.version}] {source}: Holding breaker {breaker_id} "
+                    f"at {old_power}W/{old_current}A "
+                    f"(zero {count}/{self._ZERO_CONFIRM_THRESHOLD})"
+                )
+                return False  # REJECT — hold old values
+            else:
+                _LOGGER.debug(
+                    f"[v{self.version}] {source}: Accepting zero for breaker "
+                    f"{breaker_id} after {self._ZERO_CONFIRM_THRESHOLD} consecutive updates"
+                )
+                self._breaker_zero_count[breaker_id] = 0
+                return True  # ACCEPT — genuinely off
+        else:
+            # Non-zero reading on at least one metric — reset counter
+            self._breaker_zero_count[breaker_id] = 0
+            return True  # ACCEPT
+
     def status(self):
         """Get the breakers from the API."""
         try:
@@ -764,6 +850,28 @@ class LDATAService:
             panel_data["connected"] = panel.get("connected", False)
             if panel.get("model") == "DAU" and panel.get("status") == "READY":
                 panel_data["connected"] = True
+            
+            # Detect if this panel needs REST polling for breaker/CT data.
+            # LWHEM firmware >= 2.0 no longer sends breaker data via WebSocket.
+            # We use firmware version as an initial hint, then confirm via WS detection.
+            fw_str = panel.get("updateVersion", "0")
+            try:
+                fw_major = int(fw_str.split(".")[0])
+            except (ValueError, IndexError):
+                fw_major = 0
+            
+            # WS-first strategy: ALL panels start assuming WebSocket delivers
+            # breaker/CT data. REST polling is only enabled after auto-detection
+            # confirms WS is NOT delivering breaker data for this panel.
+            # Firmware version is logged for diagnostics but does NOT control
+            # the initial polling decision.
+            if panel_data["panel_type"] == "WHEMS":
+                self._panel_needs_rest_poll[panel["id"]] = False
+                self._ws_iotwhem_count[panel["id"]] = 0
+                _LOGGER.info(
+                    f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' firmware {fw_str} "
+                    f"— starting with WebSocket for all data (REST polling will auto-enable if needed)"
+                )
             if three_phase is False:
                 panel_data["voltage"] = (
                     float(panel["rmsVoltage"]) + float(panel["rmsVoltage2"])
@@ -984,6 +1092,306 @@ class LDATAService:
             }
         }
 
+    def _bandwidth_toggle(self, panel_id: str, panel_type: str = "WHEMS"):
+        """Toggle bandwidth 1→0→1 to force the panel to refresh its energy counters.
+        
+        The Leviton web app does this exact sequence before fetching CT data.
+        Just sending bandwidth:1 repeatedly doesn't trigger a new reading —
+        the panel needs to see the 0→1 transition to push fresh
+        energyConsumption/energyImport values to the cloud.
+        """
+        if panel_type == "LDATA":
+            url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
+        else:
+            url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
+        
+        headers = {**defaultHeaders}
+        headers["authorization"] = self.auth_token
+        
+        try:
+            # Step 1: bandwidth:1 (wake up)
+            self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+            # Step 2: bandwidth:0 (turn off)
+            self.session.put(url, headers=headers, json={"bandwidth": 0}, timeout=5)
+            # Step 3: bandwidth:1 (turn back on — this 0→1 transition triggers the refresh)
+            self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+            _LOGGER.debug(f"[v{self.version}] Bandwidth toggle 1→0→1 for {panel_type} panel {panel_id}")
+        except Exception as e:
+            _LOGGER.debug(f"[v{self.version}] Bandwidth toggle for panel {panel_id}: {e}")
+
+    def refresh_breaker_data(self) -> bool:
+        """Re-fetch breaker and CT data from the REST API and merge into status_data.
+        
+        This is a FALLBACK mechanism. WebSocket is the primary data source.
+        REST polling only activates for panels where auto-detection has confirmed
+        that WS is NOT delivering breaker/CT data (e.g., LWHEM firmware >= 2.0
+        where Leviton moved breaker data to REST-only).
+        
+        Returns True if data was successfully refreshed.
+        """
+        if not self.status_data or not self.status_data.get("panels"):
+            return False
+        
+        if not self.auth_token:
+            return False
+        
+        # Check if any panel needs REST polling
+        if not any(self._panel_needs_rest_poll.values()):
+            return False
+        
+        # Safely get options
+        three_phase = THREE_PHASE_DEFAULT
+        if self.entry:
+            three_phase = self.entry.options.get(
+                THREE_PHASE, self.entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
+            )
+        
+        new_status_data = self.status_data.copy()
+        breakers = new_status_data.get("breakers", {}).copy()
+        cts = new_status_data.get("cts", {}).copy()
+        updated = False
+        
+        for panel_data in new_status_data.get("panels", []):
+            panel_id = panel_data.get("id")
+            panel_type = panel_data.get("panel_type", "WHEMS")
+            
+            if not panel_id:
+                continue
+            
+            # Only poll panels that need REST polling
+            if not self._panel_needs_rest_poll.get(panel_id, False):
+                continue
+            
+            try:
+                # Simple bandwidth:1 to keep the panel awake for breaker data.
+                # We do NOT toggle 1→0→1 here — the toggle is reserved for the
+                # CT poll only. Toggling here causes the cloud to cache zero power
+                # for breakers that haven't refreshed yet during the brief off window.
+                try:
+                    headers = {**defaultHeaders}
+                    headers["authorization"] = self.auth_token
+                    if panel_type == "LDATA":
+                        url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
+                    else:
+                        url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
+                    self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+                except Exception as bw_ex:
+                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: {bw_ex}")
+                
+                # Fetch fresh breaker data
+                raw_breakers = self.get_Whems_breakers(panel_id)
+                if raw_breakers:
+                    for breaker in raw_breakers:
+                        if (
+                            breaker.get("model") is not None
+                            and breaker["model"] != "NONE-2"
+                            and breaker["model"] != "NONE-1"
+                        ):
+                            b_id = breaker["id"]
+                            if b_id in breakers:
+                                existing = breakers[b_id].copy()
+                                
+                                # Calculate new power from REST response
+                                if breaker["position"] in _LEG1_POSITIONS:
+                                    leg = 1
+                                    p1 = self.none_to_zero(breaker, "power")
+                                    p2 = self.none_to_zero(breaker, "power2")
+                                    v1 = self.none_to_zero(breaker, "rmsVoltage")
+                                    v2 = self.none_to_zero(breaker, "rmsVoltage2")
+                                    c1 = self.none_to_zero(breaker, "rmsCurrent")
+                                    c2 = self.none_to_zero(breaker, "rmsCurrent2")
+                                    f1 = self.none_to_zero(breaker, "lineFrequency")
+                                    f2 = self.none_to_zero(breaker, "lineFrequency2")
+                                else:
+                                    leg = 2
+                                    p1 = self.none_to_zero(breaker, "power2")
+                                    p2 = self.none_to_zero(breaker, "power")
+                                    v1 = self.none_to_zero(breaker, "rmsVoltage2")
+                                    v2 = self.none_to_zero(breaker, "rmsVoltage")
+                                    c1 = self.none_to_zero(breaker, "rmsCurrent2")
+                                    c2 = self.none_to_zero(breaker, "rmsCurrent")
+                                    f1 = self.none_to_zero(breaker, "lineFrequency2")
+                                    f2 = self.none_to_zero(breaker, "lineFrequency")
+                                
+                                new_power = p1 + p2
+                                old_power = existing.get("power", 0)
+                                
+                                # Compute new current for zero-check
+                                if breaker.get("poles") == 2 or existing.get("poles") == 2:
+                                    new_current_total = (c1 + c2) / 2
+                                else:
+                                    new_current_total = c1 + c2
+                                old_current = existing.get("current", 0)
+                                
+                                # --- Unified zero-transition protection ---
+                                # Guards power AND current together. See _check_zero_transition.
+                                accept_update = self._check_zero_transition(
+                                    b_id, new_power, new_current_total,
+                                    old_power, old_current, source="REST"
+                                )
+                                
+                                if accept_update:
+                                    existing["power"] = new_power
+                                    existing["power1"] = p1
+                                    existing["power2"] = p2
+                                    
+                                    if (three_phase is False) or (breaker["poles"] == 1):
+                                        existing["voltage"] = v1 + v2
+                                    else:
+                                        existing["voltage"] = (v1 * 0.866025403784439) + (v2 * 0.866025403784439)
+                                    existing["voltage1"] = v1
+                                    existing["voltage2"] = v2
+                                    
+                                    if breaker["poles"] == 2:
+                                        existing["current"] = (c1 + c2) / 2
+                                        existing["frequency"] = (f1 + f2) / 2.0
+                                    else:
+                                        existing["current"] = c1 + c2
+                                        existing["frequency"] = f1
+                                    existing["current1"] = c1
+                                    existing["current2"] = c2
+                                    existing["frequency1"] = f1
+                                    existing["frequency2"] = f2
+                                
+                                # Always update state fields regardless of power staleness
+                                if breaker.get("currentState"):
+                                    existing["state"] = breaker["currentState"]
+                                if breaker.get("connected") is not None:
+                                    existing["connected"] = breaker["connected"]
+                                if breaker.get("remoteState") is not None:
+                                    existing["remoteState"] = breaker["remoteState"]
+                                    if existing["remoteState"] == "":
+                                        existing["remoteState"] = "RemoteON"
+                                
+                                breakers[b_id] = existing
+                                updated = True
+                
+                # Fetch fresh CT data
+                raw_cts = self.get_Whems_CT(panel_id)
+                if raw_cts:
+                    for ct in raw_cts:
+                        if ct.get("usageType") != "NOT_USED":
+                            ct_id = str(ct["id"])
+                            if ct_id in cts:
+                                existing_ct = cts[ct_id].copy()
+                                
+                                existing_ct["power1"] = self.none_to_zero(ct, "activePower")
+                                existing_ct["power2"] = self.none_to_zero(ct, "activePower2")
+                                existing_ct["power"] = existing_ct["power1"] + existing_ct["power2"]
+                                
+                                existing_ct["consumption1"] = self.none_to_zero(ct, "energyConsumption")
+                                existing_ct["consumption2"] = self.none_to_zero(ct, "energyConsumption2")
+                                existing_ct["consumption"] = existing_ct["consumption1"] + existing_ct["consumption2"]
+                                
+                                existing_ct["import1"] = self.none_to_zero(ct, "energyImport")
+                                existing_ct["import2"] = self.none_to_zero(ct, "energyImport2")
+                                existing_ct["import"] = existing_ct["import1"] + existing_ct["import2"]
+                                
+                                existing_ct["current1"] = self.none_to_zero(ct, "rmsCurrent")
+                                existing_ct["current2"] = self.none_to_zero(ct, "rmsCurrent2")
+                                existing_ct["current"] = (existing_ct["current1"] + existing_ct["current2"]) / 2
+                                
+                                cts[ct_id] = existing_ct
+                                updated = True
+                
+            except LDATAAuthError:
+                raise
+            except Exception as e:
+                _LOGGER.warning(f"[v{self.version}] Error refreshing data for panel {panel_id}: {e}")
+        
+        if updated:
+            new_status_data["breakers"] = breakers
+            new_status_data["cts"] = cts
+            self.status_data = new_status_data
+        
+        return updated
+
+    @property
+    def needs_rest_poll(self) -> bool:
+        """Return True if any panel requires REST polling for breaker/CT data."""
+        return any(self._panel_needs_rest_poll.values())
+
+    def refresh_ct_data(self) -> bool:
+        """Re-fetch only CT data from the REST API and merge into status_data.
+        
+        FALLBACK mechanism — only runs for panels where WS auto-detection has
+        confirmed that WebSocket does not deliver energyConsumption/energyImport.
+        
+        Lightweight alternative to refresh_breaker_data that only polls the
+        /iotCts endpoint. Uses bandwidth toggle (1→0→1) to force the panel
+        to push fresh energy counter values to the cloud.
+        
+        Returns True if data was successfully refreshed.
+        """
+        if not self.status_data or not self.status_data.get("panels"):
+            return False
+        
+        if not self.auth_token:
+            return False
+        
+        new_status_data = self.status_data.copy()
+        cts = new_status_data.get("cts", {}).copy()
+        updated = False
+        
+        for panel_data in new_status_data.get("panels", []):
+            panel_id = panel_data.get("id")
+            
+            if not panel_id:
+                continue
+            
+            # Only poll panels that need REST polling (v2 firmware)
+            if not self._panel_needs_rest_poll.get(panel_id, False):
+                continue
+            
+            try:
+                # Toggle bandwidth 1→0→1 to force the panel to refresh energy counters.
+                # The Leviton web app does this exact sequence before fetching CT data.
+                # Without the 0→1 transition, GET /iotCts returns stale energy values.
+                panel_type = panel_data.get("panel_type", "WHEMS")
+                self._bandwidth_toggle(panel_id, panel_type)
+                
+                # Brief pause to let the panel push fresh values to the cloud
+                # after the bandwidth transition before we GET.
+                time.sleep(2)
+                
+                raw_cts = self.get_Whems_CT(panel_id)
+                if raw_cts:
+                    for ct in raw_cts:
+                        if ct.get("usageType") != "NOT_USED":
+                            ct_id = str(ct["id"])
+                            if ct_id in cts:
+                                existing_ct = cts[ct_id].copy()
+                                
+                                existing_ct["power1"] = self.none_to_zero(ct, "activePower")
+                                existing_ct["power2"] = self.none_to_zero(ct, "activePower2")
+                                existing_ct["power"] = existing_ct["power1"] + existing_ct["power2"]
+                                
+                                existing_ct["consumption1"] = self.none_to_zero(ct, "energyConsumption")
+                                existing_ct["consumption2"] = self.none_to_zero(ct, "energyConsumption2")
+                                existing_ct["consumption"] = existing_ct["consumption1"] + existing_ct["consumption2"]
+                                
+                                existing_ct["import1"] = self.none_to_zero(ct, "energyImport")
+                                existing_ct["import2"] = self.none_to_zero(ct, "energyImport2")
+                                existing_ct["import"] = existing_ct["import1"] + existing_ct["import2"]
+                                
+                                existing_ct["current1"] = self.none_to_zero(ct, "rmsCurrent")
+                                existing_ct["current2"] = self.none_to_zero(ct, "rmsCurrent2")
+                                existing_ct["current"] = (existing_ct["current1"] + existing_ct["current2"]) / 2
+                                
+                                cts[ct_id] = existing_ct
+                                updated = True
+                
+            except LDATAAuthError:
+                raise
+            except Exception as e:
+                _LOGGER.warning(f"[v{self.version}] Error refreshing CT data for panel {panel_id}: {e}")
+        
+        if updated:
+            new_status_data["cts"] = cts
+            self.status_data = new_status_data
+        
+        return updated
+
     def _update_from_websocket(self, payload):
         """Update the internal status_data cache from a WebSocket notification.
         
@@ -1053,12 +1461,74 @@ class LDATAService:
                       else:
                           p1 = cached_p1
                   
-                  # Update total power if either field was present
-                  if "power" in data or "power2" in data:
-                      breaker["power"] = p1 + p2
+                  # ── Unified zero-transition protection for WS ──────────
+                  # WS sends power and current independently (sometimes
+                  # only power, sometimes only rmsCurrent, rarely both).
+                  # We compute candidate values for BOTH, then run a
+                  # single zero-check that guards all electrical fields.
+                  
+                  has_power_field = "power" in data or "power2" in data
+                  has_current_field = "rmsCurrent" in data or "rmsCurrent2" in data
+                  has_voltage_field = "rmsVoltage" in data or "rmsVoltage2" in data
+                  has_any_electrical = has_power_field or has_current_field
+                  
+                  # Candidate power (use new if present, else keep old)
+                  if has_power_field:
+                      cand_power = p1 + p2
+                  else:
+                      cand_power = breaker.get("power", 0)
+                  
+                  # Candidate current
+                  if has_current_field:
+                      cached_c1 = breaker.get("current1", 0)
+                      cached_c2 = breaker.get("current2", 0)
+                      
+                      if leg == 1:
+                          c1 = float(data["rmsCurrent"]) if data.get("rmsCurrent") is not None and "rmsCurrent" in data else cached_c1
+                          c2 = float(data["rmsCurrent2"]) if data.get("rmsCurrent2") is not None and "rmsCurrent2" in data else cached_c2
+                      else:
+                          c2 = float(data["rmsCurrent"]) if data.get("rmsCurrent") is not None and "rmsCurrent" in data else cached_c2
+                          c1 = float(data["rmsCurrent2"]) if data.get("rmsCurrent2") is not None and "rmsCurrent2" in data else cached_c1
+                      
+                      poles = breaker.get("poles", 1)
+                      cand_current = (c1 + c2) / 2 if poles == 2 else c1 + c2
+                  else:
+                      cand_current = breaker.get("current", 0)
+                      c1 = breaker.get("current1", 0)
+                      c2 = breaker.get("current2", 0)
+                  
+                  # Run unified zero-check (only if we got electrical data)
+                  if has_any_electrical:
+                      old_power = breaker.get("power", 0)
+                      old_current = breaker.get("current", 0)
+                      accept_update = self._check_zero_transition(
+                          breaker_id, cand_power, cand_current,
+                          old_power, old_current, source="WS"
+                      )
+                  else:
+                      accept_update = True  # Non-electrical update, always accept
+                  
+                  if accept_update:
+                      # Apply power
+                      if has_power_field:
+                          breaker["power"] = cand_power
+                          breaker["power1"] = p1
+                          breaker["power2"] = p2
+                      
+                      # Apply current
+                      if has_current_field:
+                          breaker["current"] = cand_current
+                          breaker["current1"] = c1
+                          breaker["current2"] = c2
+                  else:
+                      # REJECTED — revert power1/power2 to cached values
+                      if has_power_field:
+                          breaker["power1"] = cached_p1
+                          breaker["power2"] = cached_p2
                   
                   # Handle voltage (same leg mapping as power)
-                  if "rmsVoltage" in data or "rmsVoltage2" in data:
+                  # Voltage is only updated when the electrical update is accepted
+                  if has_voltage_field and accept_update:
                       cached_v1 = breaker.get("voltage1", 0)
                       cached_v2 = breaker.get("voltage2", 0)
                       
@@ -1088,44 +1558,12 @@ class LDATAService:
                       
                       breaker["voltage"] = v1 + v2
                   
-                  # Handle current (same leg mapping as power)
-                  if "rmsCurrent" in data or "rmsCurrent2" in data:
-                      cached_c1 = breaker.get("current1", 0)
-                      cached_c2 = breaker.get("current2", 0)
-                      
-                      if leg == 1:
-                          if "rmsCurrent" in data:
-                              c1 = float(data["rmsCurrent"]) if data["rmsCurrent"] is not None else cached_c1
-                              breaker["current1"] = c1
-                          else:
-                              c1 = cached_c1
-                          if "rmsCurrent2" in data:
-                              c2 = float(data["rmsCurrent2"]) if data["rmsCurrent2"] is not None else cached_c2
-                              breaker["current2"] = c2
-                          else:
-                              c2 = cached_c2
-                      else:
-                          # Leg 2: swap current mapping
-                          if "rmsCurrent" in data:
-                              c2 = float(data["rmsCurrent"]) if data["rmsCurrent"] is not None else cached_c2
-                              breaker["current2"] = c2
-                          else:
-                              c2 = cached_c2
-                          if "rmsCurrent2" in data:
-                              c1 = float(data["rmsCurrent2"]) if data["rmsCurrent2"] is not None else cached_c1
-                              breaker["current1"] = c1
-                          else:
-                              c1 = cached_c1
-                      
-                      # Current total depends on poles
-                      poles = breaker.get("poles", 1)
-                      if poles == 2:
-                          breaker["current"] = (c1 + c2) / 2
-                      else:
-                          breaker["current"] = c1 + c2
+                  # NOTE: Current is now handled in the unified zero-protection
+                  # block above (together with power). No separate handling needed.
                   
                   # Handle frequency (same leg mapping as power)
-                  if "lineFrequency" in data or "lineFrequency2" in data:
+                  # Frequency is gated by accept_update to stay consistent
+                  if ("lineFrequency" in data or "lineFrequency2" in data) and accept_update:
                       cached_f1 = breaker.get("frequency1", 0)
                       cached_f2 = breaker.get("frequency2", 0)
                       
@@ -1261,7 +1699,49 @@ class LDATAService:
                   
         # Handle IotWhem (The Panel itself)
         elif model_name == "IotWhem":
-             if "ResidentialBreaker" in data:
+             panel_id = data.get("id")
+             has_breaker_data = "ResidentialBreaker" in data
+             has_ct_data = "IotCt" in data
+             
+             # --- Auto-detection of REST polling need ---
+             # WS-first strategy: track whether IotWhem WS messages contain
+             # breaker ELECTRICAL data (power/current/voltage).
+             # The cloud sends two kinds of embedded breaker updates:
+             #   1. Status-only: {env, bleRSSI, connected, lastUpdated} — NOT useful
+             #   2. Electrical:  {power, rmsCurrent, rmsVoltage, ...} — useful
+             # Only type (2) should count as "WS is delivering breaker data".
+             has_electrical_data = False
+             if has_breaker_data:
+                 for b_check in data["ResidentialBreaker"]:
+                     if any(k in b_check for k in ("power", "power2", "rmsCurrent", "rmsCurrent2", "rmsVoltage", "rmsVoltage2")):
+                         has_electrical_data = True
+                         break
+             
+             if panel_id and panel_id in self._ws_iotwhem_count:
+                 if has_electrical_data:
+                     # WS IS delivering electrical breaker data — ensure REST polling stays OFF
+                     self._ws_last_breaker_data_time[panel_id] = time.time()
+                     if self._panel_needs_rest_poll.get(panel_id, False):
+                         _LOGGER.info(
+                             f"[v{self.version}] Panel {panel_id}: WS is delivering breaker electrical data — "
+                             f"disabling REST polling fallback"
+                         )
+                         self._panel_needs_rest_poll[panel_id] = False
+                     self._ws_iotwhem_count[panel_id] = 0
+                 else:
+                     self._ws_iotwhem_count[panel_id] = self._ws_iotwhem_count.get(panel_id, 0) + 1
+                     if (
+                         not self._panel_needs_rest_poll.get(panel_id, False)
+                         and self._ws_iotwhem_count[panel_id] >= self._WS_DETECTION_THRESHOLD
+                     ):
+                         _LOGGER.warning(
+                             f"[v{self.version}] Panel {panel_id}: {self._ws_iotwhem_count[panel_id]} "
+                             f"IotWhem WS messages without breaker electrical data — enabling REST polling as fallback"
+                         )
+                         self._panel_needs_rest_poll[panel_id] = True
+                         self._panel_needs_rest_poll[panel_id] = True
+             
+             if has_breaker_data:
                   breakers = new_status_data["breakers"].copy()
                   for b_data in data["ResidentialBreaker"]:
                        b_id = b_data.get("id")
@@ -1303,12 +1783,64 @@ class LDATAService:
                                 else:
                                     p1 = cached_p1
                             
-                            # Update total power if either field was present
-                            if "power" in b_data or "power2" in b_data:
-                                breaker["power"] = p1 + p2
+                            # ── Unified zero-transition protection for WS bulk ──
+                            has_power_field = "power" in b_data or "power2" in b_data
+                            has_current_field = "rmsCurrent" in b_data or "rmsCurrent2" in b_data
+                            has_voltage_field = "rmsVoltage" in b_data or "rmsVoltage2" in b_data
+                            has_any_electrical = has_power_field or has_current_field
+                            
+                            # Candidate power
+                            if has_power_field:
+                                cand_power = p1 + p2
+                            else:
+                                cand_power = breaker.get("power", 0)
+                            
+                            # Candidate current
+                            if has_current_field:
+                                cached_c1 = breaker.get("current1", 0)
+                                cached_c2 = breaker.get("current2", 0)
+                                
+                                if leg == 1:
+                                    c1 = float(b_data["rmsCurrent"]) if b_data.get("rmsCurrent") is not None and "rmsCurrent" in b_data else cached_c1
+                                    c2 = float(b_data["rmsCurrent2"]) if b_data.get("rmsCurrent2") is not None and "rmsCurrent2" in b_data else cached_c2
+                                else:
+                                    c2 = float(b_data["rmsCurrent"]) if b_data.get("rmsCurrent") is not None and "rmsCurrent" in b_data else cached_c2
+                                    c1 = float(b_data["rmsCurrent2"]) if b_data.get("rmsCurrent2") is not None and "rmsCurrent2" in b_data else cached_c1
+                                
+                                poles = breaker.get("poles", 1)
+                                cand_current = (c1 + c2) / 2 if poles == 2 else c1 + c2
+                            else:
+                                cand_current = breaker.get("current", 0)
+                                c1 = breaker.get("current1", 0)
+                                c2 = breaker.get("current2", 0)
+                            
+                            # Run unified zero-check
+                            if has_any_electrical:
+                                old_power = breaker.get("power", 0)
+                                old_current = breaker.get("current", 0)
+                                accept_update = self._check_zero_transition(
+                                    b_id, cand_power, cand_current,
+                                    old_power, old_current, source="WS-bulk"
+                                )
+                            else:
+                                accept_update = True
+                            
+                            if accept_update:
+                                if has_power_field:
+                                    breaker["power"] = cand_power
+                                    breaker["power1"] = p1
+                                    breaker["power2"] = p2
+                                if has_current_field:
+                                    breaker["current"] = cand_current
+                                    breaker["current1"] = c1
+                                    breaker["current2"] = c2
+                            else:
+                                if has_power_field:
+                                    breaker["power1"] = cached_p1
+                                    breaker["power2"] = cached_p2
                             
                             # Handle voltage (same leg mapping as power)
-                            if "rmsVoltage" in b_data or "rmsVoltage2" in b_data:
+                            if has_voltage_field and accept_update:
                                 cached_v1 = breaker.get("voltage1", 0)
                                 cached_v2 = breaker.get("voltage2", 0)
                                 
@@ -1337,42 +1869,11 @@ class LDATAService:
                                 
                                 breaker["voltage"] = v1 + v2
                             
-                            # Handle current (same leg mapping)
-                            if "rmsCurrent" in b_data or "rmsCurrent2" in b_data:
-                                cached_c1 = breaker.get("current1", 0)
-                                cached_c2 = breaker.get("current2", 0)
-                                
-                                if leg == 1:
-                                    if "rmsCurrent" in b_data:
-                                        c1 = float(b_data["rmsCurrent"]) if b_data["rmsCurrent"] is not None else cached_c1
-                                        breaker["current1"] = c1
-                                    else:
-                                        c1 = cached_c1
-                                    if "rmsCurrent2" in b_data:
-                                        c2 = float(b_data["rmsCurrent2"]) if b_data["rmsCurrent2"] is not None else cached_c2
-                                        breaker["current2"] = c2
-                                    else:
-                                        c2 = cached_c2
-                                else:
-                                    if "rmsCurrent" in b_data:
-                                        c2 = float(b_data["rmsCurrent"]) if b_data["rmsCurrent"] is not None else cached_c2
-                                        breaker["current2"] = c2
-                                    else:
-                                        c2 = cached_c2
-                                    if "rmsCurrent2" in b_data:
-                                        c1 = float(b_data["rmsCurrent2"]) if b_data["rmsCurrent2"] is not None else cached_c1
-                                        breaker["current1"] = c1
-                                    else:
-                                        c1 = cached_c1
-                                
-                                poles = breaker.get("poles", 1)
-                                if poles == 2:
-                                    breaker["current"] = (c1 + c2) / 2
-                                else:
-                                    breaker["current"] = c1 + c2
+                            # NOTE: Current is now handled in the unified zero-protection
+                            # block above (together with power). No separate handling needed.
                             
-                            # Handle frequency (same leg mapping)
-                            if "lineFrequency" in b_data or "lineFrequency2" in b_data:
+                            # Handle frequency (same leg mapping) — gated by accept_update
+                            if ("lineFrequency" in b_data or "lineFrequency2" in b_data) and accept_update:
                                 cached_f1 = breaker.get("frequency1", 0)
                                 cached_f2 = breaker.get("frequency2", 0)
                                 
@@ -1548,19 +2049,25 @@ class LDATAService:
         return None
 
     async def async_run_websocket(self, update_callback, connection_callback=None):
-        """Run the WebSocket connection loop.
+        """Run the WebSocket connection loop — PRIMARY data source.
         
-        Strategy (based on official Leviton app):
-        - PUT bandwidth:1 every 50 seconds (this is what keeps WebSocket alive!)
-        - Subscribe once at start
-        - Re-subscribe only if no data received for 120 seconds
-        - No fallback polling - WebSocket only
+        WS-FIRST Strategy:
+        - WebSocket is always the preferred data transport
+        - All panels (regardless of firmware) start with WS-only
+        - REST polling is ONLY enabled as a fallback after auto-detection
+          confirms WS is not delivering breaker data for a specific panel
+        
+        Keepalive (based on official Leviton app):
+        - PUT bandwidth:1 every 50 seconds (keeps WS alive)
+        - GET /apiversion every 10 seconds (keeps server session alive)
+        - Subscribe once at start, re-subscribe if no data for 60 seconds
         """
         uri = "wss://socket.cloud.leviton.com/"
         reconnect_delay = 10
         max_delay = 300
         
         BANDWIDTH_PUT_INTERVAL = 50      # PUT bandwidth:1 every 50 seconds (like official app)
+        APIVERSION_HEARTBEAT_INTERVAL = 10  # GET /apiversion every 10 seconds (like official app, keeps session alive)
         STALE_DATA_THRESHOLD = 60        # Re-subscribe if no data for 60 seconds
         PROACTIVE_RECONNECT = 3300       # Proactively reconnect every 55 minutes (before server timeout)
         
@@ -1605,7 +2112,8 @@ class LDATAService:
                         ]
                     
                     # Bandwidth PUT function - this is what keeps the WebSocket alive
-                    # Must PUT to EVERY panel using the correct endpoint for its type
+                    # v1.54.2 HAR shows the app sends TWO bandwidth:1 PUTs back-to-back
+                    # every 50 seconds. Must PUT to EVERY panel using the correct endpoint.
                     async def bandwidth_put():
                         if not panel_info:
                             return
@@ -1618,31 +2126,58 @@ class LDATAService:
                             "Sec-Fetch-Mode": "cors",
                             "Sec-Fetch-Site": "same-site",
                             "DNT": "1",
-                            "Sec-GPC": "1",
-                            "Priority": "u=0",
                         }
-                        for panel_id, panel_type in panel_info:
-                            try:
-                                if panel_type == "LDATA":
-                                    url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-                                else:
-                                    url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-                                async with session.put(
-                                    url,
-                                    headers=headers,
-                                    json={"bandwidth": 1},
-                                    timeout=aiohttp.ClientTimeout(total=10)
-                                ) as resp:
-                                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id}: {resp.status}")
-                            except aiohttp.ClientConnectionResetError:
-                                _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: connection reset (expected)")
-                            except asyncio.CancelledError:
-                                raise
-                            except Exception as e:
-                                _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id} failed: {e}")
+                        # Send TWO bandwidth:1 PUTs per panel (matches v1.54.2 app behavior)
+                        for _round in range(2):
+                            for panel_id, panel_type in panel_info:
+                                try:
+                                    if panel_type == "LDATA":
+                                        url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
+                                    else:
+                                        url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
+                                    async with session.put(
+                                        url,
+                                        headers=headers,
+                                        json={"bandwidth": 1},
+                                        timeout=aiohttp.ClientTimeout(total=10)
+                                    ) as resp:
+                                        _LOGGER.debug(f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id} (round {_round+1}): {resp.status}")
+                                except aiohttp.ClientConnectionResetError:
+                                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: connection reset (expected)")
+                                except asyncio.CancelledError:
+                                    raise
+                                except Exception as e:
+                                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id} failed: {e}")
+                    
+                    # API version heartbeat - the Leviton web app polls this every ~10s.
+                    # This keeps the server-side session warm so the cloud continues
+                    # pushing data and honoring the bandwidth:1 setting for v2 firmware.
+                    async def apiversion_heartbeat():
+                        try:
+                            async with session.get(
+                                "https://my.leviton.com/apiversion",
+                                headers={
+                                    "Authorization": self.auth_token,
+                                    "Origin": "https://myapp.leviton.com",
+                                    "Referer": "https://myapp.leviton.com/",
+                                    "Accept": "application/json, text/plain, */*",
+                                    "Sec-Fetch-Dest": "empty",
+                                    "Sec-Fetch-Mode": "cors",
+                                    "Sec-Fetch-Site": "same-site",
+                                },
+                                timeout=aiohttp.ClientTimeout(total=10)
+                            ) as resp:
+                                _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as e:
+                            _LOGGER.debug(f"[v{self.version}] API version heartbeat failed: {e}")
                     
                     # Initial bandwidth PUT
                     await bandwidth_put()
+                    
+                    # Initial apiversion heartbeat
+                    await apiversion_heartbeat()
                     
                     try:
                         ws = await session.ws_connect(
@@ -1793,9 +2328,11 @@ class LDATAService:
                         # 4. Main listen loop
                         message_count = 0
                         bandwidth_put_count = 0
+                        heartbeat_count = 0
                         resubscribe_count = 0
                         start_time = asyncio.get_event_loop().time()
                         last_bandwidth_put_time = start_time
+                        last_heartbeat_time = start_time
                         last_data_time = start_time
                         
                         while True:
@@ -1815,6 +2352,19 @@ class LDATAService:
                                         pass  # Suppress any exception
                                 task.add_done_callback(handle_task_exception)
                                 _LOGGER.debug(f"[v{self.version}] Bandwidth PUT #{bandwidth_put_count} ({len(panel_info)} panels)")
+                            
+                            # API version heartbeat every 10 seconds (keeps server session alive for v2 firmware)
+                            if current_time - last_heartbeat_time >= APIVERSION_HEARTBEAT_INTERVAL:
+                                heartbeat_count += 1
+                                last_heartbeat_time = current_time
+                                hb_task = asyncio.create_task(apiversion_heartbeat())
+                                def handle_hb_exception(t):
+                                    try:
+                                        if t.done() and not t.cancelled():
+                                            t.exception()
+                                    except Exception:
+                                        pass
+                                hb_task.add_done_callback(handle_hb_exception)
                             
                             # Re-subscribe if no data for 60 seconds
                             if current_time - last_data_time >= STALE_DATA_THRESHOLD:
@@ -1848,7 +2398,7 @@ class LDATAService:
                                 
                                 if message_count % 100 == 0:
                                     elapsed = current_time - start_time
-                                    _LOGGER.debug(f"[v{self.version}] WS: {message_count} msgs, {elapsed:.0f}s, {bandwidth_put_count} PUTs")
+                                    _LOGGER.debug(f"[v{self.version}] WS: {message_count} msgs, {elapsed:.0f}s, {bandwidth_put_count} PUTs, {heartbeat_count} heartbeats")
                                 
                                 try:
                                     payload = json.loads(msg.data)
@@ -1862,7 +2412,7 @@ class LDATAService:
                                                 _LOGGER.error(f"[v{self.version}] Callback error: {e}")
                                 except (ValueError, json.JSONDecodeError) as e:
                                     _LOGGER.warning(f"[v{self.version}] Invalid JSON: {e}")
-                            
+                                    
                             elif msg.type == aiohttp.WSMsgType.ERROR:
                                 _LOGGER.error(f"[v{self.version}] WS error: {ws.exception()}")
                                 break
