@@ -1997,33 +1997,36 @@ class LDATAService:
                         while True:
                             current_time = asyncio.get_event_loop().time()
                             
-                            # Bandwidth PUT every 50 seconds (this keeps WebSocket alive!)
+                            # Bandwidth PUT every 20 seconds (this keeps WebSocket alive!)
                             if current_time - last_bandwidth_put_time >= BANDWIDTH_PUT_INTERVAL:
                                 bandwidth_put_count += 1
                                 last_bandwidth_put_time = current_time
-                                # Create task with exception handler to prevent "exception never retrieved"
-                                task = asyncio.create_task(bandwidth_put())
-                                def handle_task_exception(t):
+                                async def _safe_bandwidth_put():
                                     try:
-                                        if t.done() and not t.cancelled():
-                                            t.exception()  # This retrieves and suppresses the exception
+                                        await bandwidth_put()
+                                    except (aiohttp.ClientConnectionResetError, ConnectionResetError):
+                                        pass  # Expected during shutdown/reconnect
+                                    except asyncio.CancelledError:
+                                        pass
                                     except Exception:
-                                        pass  # Suppress any exception
-                                task.add_done_callback(handle_task_exception)
+                                        pass
+                                asyncio.create_task(_safe_bandwidth_put())
                                 _LOGGER.debug(f"[v{self.version}] Bandwidth PUT #{bandwidth_put_count} ({len(panel_info)} panels)")
                             
                             # API version heartbeat every 10 seconds (keeps server session alive for v2 firmware)
                             if current_time - last_heartbeat_time >= APIVERSION_HEARTBEAT_INTERVAL:
                                 heartbeat_count += 1
                                 last_heartbeat_time = current_time
-                                hb_task = asyncio.create_task(apiversion_heartbeat())
-                                def handle_hb_exception(t):
+                                async def _safe_heartbeat():
                                     try:
-                                        if t.done() and not t.cancelled():
-                                            t.exception()
+                                        await apiversion_heartbeat()
+                                    except (aiohttp.ClientConnectionResetError, ConnectionResetError):
+                                        pass
+                                    except asyncio.CancelledError:
+                                        pass
                                     except Exception:
                                         pass
-                                hb_task.add_done_callback(handle_hb_exception)
+                                asyncio.create_task(_safe_heartbeat())
                             
                             # Re-subscribe if no data for 60 seconds
                             if current_time - last_data_time >= STALE_DATA_THRESHOLD:
