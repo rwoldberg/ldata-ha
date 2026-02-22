@@ -260,10 +260,6 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
 
-    @callback
-    def _schedule_immediate_update(self):
-        self.async_schedule_update_ha_state(True)
-
     @property
     def name_suffix(self) -> str | None:
         """Suffix to append to the LDATA device's name."""

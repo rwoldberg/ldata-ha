@@ -7,6 +7,7 @@ import socket
 import re
 import os
 import json
+import threading
 import requests
 import asyncio
 import aiohttp
@@ -69,6 +70,11 @@ class LDATAService:
         self.session = requests.Session()
         self.session.headers.update(defaultHeaders)
         
+        # Lock to serialize REST poll operations. The breaker poll and CT poll
+        # both use self.session and interact with the bandwidth setting.
+        # Without serialization the CT toggle (bandwidth:0) can corrupt a
+        # concurrent breaker GET, causing the cloud to return stale zeros.
+        self._rest_poll_lock = threading.Lock()
         # Cache for the latest status data to support WebSocket updates
         self.status_data = None
         # Storage for full auth response to support WebSocket handshake
@@ -269,7 +275,7 @@ class LDATAService:
         while attempts < max_attempts:
             attempts += 1
             try:
-                result = requests.get(url, headers=headers, timeout=15)
+                result = self.session.get(url, headers=headers, timeout=15)
                 
                 if result.status_code == 200:
                     _LOGGER.debug(f"[v{self.version}] Stored token is still valid.")
@@ -464,7 +470,7 @@ class LDATAService:
             self.clear_tokens()
         return False
 
-    def get_Whems_breakers(self, panel_id: str) -> object:
+    def get_Whems_breakers(self, panel_id: str) -> list[dict] | None:
         """Get the whemns modules for the residence."""
         headers = {**defaultHeaders}
         headers["authorization"] = self.auth_token
@@ -491,10 +497,9 @@ class LDATAService:
             if isinstance(e, LDATAAuthError):
                 raise
             _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS breakers!")
-            self.clear_tokens()
         return None
 
-    def get_Whems_CT(self, panel_id: str) -> object:
+    def get_Whems_CT(self, panel_id: str) -> list[dict] | None:
         """Get the whemns CTs for the panel module."""
         headers = {**defaultHeaders}
         headers["authorization"] = self.auth_token
@@ -521,7 +526,6 @@ class LDATAService:
             if isinstance(e, LDATAAuthError):
                 raise
             _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS CTs!")
-            self.clear_tokens()
         return None
 
     def _fetch_panels(self, url_template: str, panel_type: str) -> object:
@@ -681,22 +685,18 @@ class LDATAService:
         # Call the new helper
         return self._put_request(url, {"remoteOn": True}, "remote_on", referer=referer)
 
-    def none_to_zero(self, dict, key) -> float:
+    def none_to_zero(self, data_dict, key) -> float:
         """Convert a value to a float and replace None with 0.0."""
-        result = 0.0
         try:
-            value = dict[key]
+            value = data_dict[key]
         except (KeyError, TypeError, AttributeError):
-            value = None
+            return 0.0
         if value is None:
-            return result
-        if value is KeyError:
-            return result
+            return 0.0
         try:
-            result = float(value)
-        except (KeyError, TypeError, AttributeError):
-            result = 0.0
-        return result
+            return float(value)
+        except (ValueError, TypeError):
+            return 0.0
 
     def _check_zero_transition(
         self,
@@ -706,24 +706,59 @@ class LDATAService:
         old_power: float,
         old_current: float,
         source: str = "?",
+        power_from_msg: bool = True,
+        current_from_msg: bool = True,
     ) -> bool:
         """Unified zero-transition guard for breaker power AND current.
 
         Returns True if the new values should be ACCEPTED, or False if they
         should be HELD at their previous non-zero values.
 
-        A breaker is considered "loaded" when old_power > 0 OR old_current > 0.
-        Once loaded, a transition to zero is only accepted after
-        _ZERO_CONFIRM_THRESHOLD consecutive updates where BOTH new_power == 0
-        AND new_current == 0.
+        The key insight: WS often sends power and current INDEPENDENTLY.
+        A message with just {"power": 0} should NOT be accepted immediately
+        just because the cached current is still non-zero.
 
-        Any update with a non-zero reading on either metric resets the counter.
+        Logic:
+          • A breaker is "loaded" when old_power > 0 OR old_current > 0.
+          • If loaded and ANY arriving field is zero while NONE of the arriving
+            fields are non-zero, count toward zero confirmation.
+          • If ANY arriving field is non-zero, reset the counter — real load.
+          • Accept the zero transition only after _ZERO_CONFIRM_THRESHOLD
+            consecutive zero-indicating updates.
+
+        power_from_msg / current_from_msg: indicates whether that value was
+        actually present in the WS/REST message (True) or is a cached
+        carry-forward from the breaker dict (False).
         """
         was_loaded = abs(old_power) > 0 or abs(old_current) > 0.01
-        now_zero = abs(new_power) < 0.01 and abs(new_current) < 0.01
 
-        if was_loaded and now_zero:
-            # Potential stale-zero — count it
+        if not was_loaded:
+            # Already at zero — nothing to protect
+            self._breaker_zero_count[breaker_id] = 0
+            return True
+
+        # Determine what the arriving fields tell us.
+        # Only look at fields that actually came in the message.
+        arriving_values = []
+        if power_from_msg:
+            arriving_values.append(abs(new_power))
+        if current_from_msg:
+            arriving_values.append(abs(new_current))
+
+        if not arriving_values:
+            # No electrical fields arrived — nothing to check
+            return True
+
+        any_arriving_nonzero = any(v > 0.01 for v in arriving_values)
+        all_arriving_zero = all(v < 0.01 for v in arriving_values)
+
+        if any_arriving_nonzero:
+            # Real load confirmed — reset counter, accept
+            self._breaker_zero_count[breaker_id] = 0
+            return True
+
+        if all_arriving_zero:
+            # Every field that arrived is zero — count toward confirmation
             count = self._breaker_zero_count.get(breaker_id, 0) + 1
             self._breaker_zero_count[breaker_id] = count
             if count < self._ZERO_CONFIRM_THRESHOLD:
@@ -740,10 +775,207 @@ class LDATAService:
                 )
                 self._breaker_zero_count[breaker_id] = 0
                 return True  # ACCEPT — genuinely off
+
+        # Shouldn't reach here, but accept if we do
+        return True
+
+    def _apply_breaker_update(
+        self,
+        existing: dict,
+        raw: dict,
+        source: str = "?",
+        three_phase: bool = False,
+    ) -> bool:
+        """Apply a breaker update from any source (REST, WS direct, WS embedded).
+        
+        Handles leg-swap mapping, partial update caching, unified zero-transition
+        protection, and field updates. Mutates `existing` in place.
+        
+        Args:
+            existing: The current breaker dict (will be mutated).
+            raw: The new data dict (from REST API response or WS payload).
+            source: Label for logging ("REST", "WS", "WS-bulk").
+            three_phase: Whether the panel uses three-phase voltage calculation.
+            
+        Returns:
+            True if power was updated (for totalPower recalculation).
+        """
+        # Cached values for partial update handling
+        cached_p1 = existing.get("power1", 0)
+        cached_p2 = existing.get("power2", 0)
+        leg = existing.get("leg", 1)
+        
+        # --- Power fields with leg swap ---
+        if leg == 1:
+            if "power" in raw:
+                p1 = float(raw["power"]) if raw["power"] is not None else cached_p1
+            else:
+                p1 = cached_p1
+            if "power2" in raw:
+                p2 = float(raw["power2"]) if raw["power2"] is not None else cached_p2
+            else:
+                p2 = cached_p2
         else:
-            # Non-zero reading on at least one metric — reset counter
-            self._breaker_zero_count[breaker_id] = 0
-            return True  # ACCEPT
+            # Leg 2: power -> power2, power2 -> power1 (swapped)
+            if "power" in raw:
+                p2 = float(raw["power"]) if raw["power"] is not None else cached_p2
+            else:
+                p2 = cached_p2
+            if "power2" in raw:
+                p1 = float(raw["power2"]) if raw["power2"] is not None else cached_p1
+            else:
+                p1 = cached_p1
+        
+        # --- Current fields with leg swap ---
+        cached_c1 = existing.get("current1", 0)
+        cached_c2 = existing.get("current2", 0)
+        if leg == 1:
+            c1 = float(raw["rmsCurrent"]) if raw.get("rmsCurrent") is not None and "rmsCurrent" in raw else cached_c1
+            c2 = float(raw["rmsCurrent2"]) if raw.get("rmsCurrent2") is not None and "rmsCurrent2" in raw else cached_c2
+        else:
+            c2 = float(raw["rmsCurrent"]) if raw.get("rmsCurrent") is not None and "rmsCurrent" in raw else cached_c2
+            c1 = float(raw["rmsCurrent2"]) if raw.get("rmsCurrent2") is not None and "rmsCurrent2" in raw else cached_c1
+        
+        # --- Detect which fields arrived ---
+        has_power_field = "power" in raw or "power2" in raw
+        has_current_field = "rmsCurrent" in raw or "rmsCurrent2" in raw
+        has_voltage_field = "rmsVoltage" in raw or "rmsVoltage2" in raw
+        has_frequency_field = "lineFrequency" in raw or "lineFrequency2" in raw
+        has_any_electrical = has_power_field or has_current_field
+        
+        # --- Candidate values ---
+        cand_power = (p1 + p2) if has_power_field else existing.get("power", 0)
+        poles = existing.get("poles", 1)
+        cand_current = ((c1 + c2) / 2 if poles == 2 else c1 + c2) if has_current_field else existing.get("current", 0)
+        
+        # --- Unified zero-transition protection ---
+        if has_any_electrical:
+            accept_update = self._check_zero_transition(
+                existing["id"], cand_power, cand_current,
+                existing.get("power", 0), existing.get("current", 0),
+                source=source,
+                power_from_msg=has_power_field,
+                current_from_msg=has_current_field,
+            )
+        else:
+            accept_update = True
+        
+        power_changed = False
+        if accept_update:
+            if has_power_field:
+                existing["power"] = cand_power
+                existing["power1"] = p1
+                existing["power2"] = p2
+                power_changed = True
+            if has_current_field:
+                existing["current"] = cand_current
+                existing["current1"] = c1
+                existing["current2"] = c2
+            
+            # Voltage (same leg swap)
+            if has_voltage_field:
+                cached_v1 = existing.get("voltage1", 0)
+                cached_v2 = existing.get("voltage2", 0)
+                if leg == 1:
+                    v1 = float(raw["rmsVoltage"]) if raw.get("rmsVoltage") is not None and "rmsVoltage" in raw else cached_v1
+                    v2 = float(raw["rmsVoltage2"]) if raw.get("rmsVoltage2") is not None and "rmsVoltage2" in raw else cached_v2
+                else:
+                    v2 = float(raw["rmsVoltage"]) if raw.get("rmsVoltage") is not None and "rmsVoltage" in raw else cached_v2
+                    v1 = float(raw["rmsVoltage2"]) if raw.get("rmsVoltage2") is not None and "rmsVoltage2" in raw else cached_v1
+                existing["voltage1"] = v1
+                existing["voltage2"] = v2
+                if (not three_phase) or (poles == 1):
+                    existing["voltage"] = v1 + v2
+                else:
+                    existing["voltage"] = (v1 * 0.866025403784439) + (v2 * 0.866025403784439)
+            
+            # Frequency (same leg swap)
+            if has_frequency_field:
+                cached_f1 = existing.get("frequency1", 0)
+                cached_f2 = existing.get("frequency2", 0)
+                if leg == 1:
+                    f1 = float(raw["lineFrequency"]) if raw.get("lineFrequency") is not None and "lineFrequency" in raw else cached_f1
+                    f2 = float(raw["lineFrequency2"]) if raw.get("lineFrequency2") is not None and "lineFrequency2" in raw else cached_f2
+                else:
+                    f2 = float(raw["lineFrequency"]) if raw.get("lineFrequency") is not None and "lineFrequency" in raw else cached_f2
+                    f1 = float(raw["lineFrequency2"]) if raw.get("lineFrequency2") is not None and "lineFrequency2" in raw else cached_f1
+                existing["frequency1"] = f1
+                existing["frequency2"] = f2
+                if poles == 2:
+                    existing["frequency"] = (f1 + f2) / 2
+                else:
+                    existing["frequency"] = f1
+        else:
+            # REJECTED — revert cached power values
+            if has_power_field:
+                existing["power1"] = cached_p1
+                existing["power2"] = cached_p2
+        
+        # Always update non-electrical state fields
+        if raw.get("currentState"):
+            existing["state"] = raw["currentState"]
+        if raw.get("connected") is not None:
+            existing["connected"] = raw["connected"]
+        if raw.get("remoteState") is not None:
+            existing["remoteState"] = raw["remoteState"]
+            if existing["remoteState"] == "":
+                existing["remoteState"] = "RemoteON"
+        
+        return power_changed
+
+    def _apply_ct_update(self, existing: dict, raw: dict) -> None:
+        """Apply a CT update from any source (REST, WS direct, WS embedded).
+        
+        Handles partial update caching for all CT fields.
+        Mutates `existing` in place.
+        """
+        # Power
+        if "activePower" in raw or "activePower2" in raw:
+            cached_p1, cached_p2 = existing.get("power1", 0), existing.get("power2", 0)
+            if "activePower" in raw:
+                existing["power1"] = float(raw["activePower"]) if raw["activePower"] is not None else cached_p1
+            if "activePower2" in raw:
+                existing["power2"] = float(raw["activePower2"]) if raw["activePower2"] is not None else cached_p2
+            existing["power"] = existing["power1"] + existing["power2"]
+        
+        # Energy consumption
+        if "energyConsumption" in raw or "energyConsumption2" in raw:
+            cached_c1, cached_c2 = existing.get("consumption1", 0), existing.get("consumption2", 0)
+            if "energyConsumption" in raw:
+                existing["consumption1"] = float(raw["energyConsumption"]) if raw["energyConsumption"] is not None else cached_c1
+            if "energyConsumption2" in raw:
+                existing["consumption2"] = float(raw["energyConsumption2"]) if raw["energyConsumption2"] is not None else cached_c2
+            existing["consumption"] = existing["consumption1"] + existing["consumption2"]
+        
+        # Energy import
+        if "energyImport" in raw or "energyImport2" in raw:
+            cached_i1, cached_i2 = existing.get("import1", 0), existing.get("import2", 0)
+            if "energyImport" in raw:
+                existing["import1"] = float(raw["energyImport"]) if raw["energyImport"] is not None else cached_i1
+            if "energyImport2" in raw:
+                existing["import2"] = float(raw["energyImport2"]) if raw["energyImport2"] is not None else cached_i2
+            existing["import"] = existing["import1"] + existing["import2"]
+        
+        # Current
+        if "rmsCurrent" in raw or "rmsCurrent2" in raw:
+            cached_cur1, cached_cur2 = existing.get("current1", 0), existing.get("current2", 0)
+            if "rmsCurrent" in raw:
+                existing["current1"] = float(raw["rmsCurrent"]) if raw["rmsCurrent"] is not None else cached_cur1
+            if "rmsCurrent2" in raw:
+                existing["current2"] = float(raw["rmsCurrent2"]) if raw["rmsCurrent2"] is not None else cached_cur2
+            existing["current"] = (existing["current1"] + existing["current2"]) / 2
+
+    def _recalc_total_power(self, status_data: dict, panel_id: str) -> None:
+        """Recalculate totalPower for a single panel from its breaker values."""
+        breakers = status_data.get("breakers", {})
+        total = 0.0
+        for b_data in breakers.values():
+            if b_data.get("panel_id") == panel_id:
+                try:
+                    total += float(b_data.get("power", 0))
+                except (ValueError, TypeError):
+                    pass
+        status_data[panel_id + "totalPower"] = total
 
     def status(self):
         """Get the breakers from the API."""
@@ -822,10 +1054,10 @@ class LDATAService:
 
     def parse_panels(self, panels_json) -> object:
         """Parse the panel json data."""
-        status_data: dict[str, typing.Any] = dict[str, typing.Any]()
-        breakers: dict[str, typing.Any] = dict[str, typing.Any]()
-        cts: dict[str, typing.Any] = dict[str, typing.Any]()
-        panels: list[typing.Any] = list[typing.Any]()
+        status_data: dict[str, typing.Any] = {}
+        breakers: dict[str, typing.Any] = {}
+        cts: dict[str, typing.Any] = {}
+        panels: list[typing.Any] = []
         status_data["breakers"] = breakers
         status_data["cts"] = cts
         status_data["panels"] = panels
@@ -1074,7 +1306,7 @@ class LDATAService:
 
     def _construct_auth_payload(self):
         """Construct the correct auth payload for WebSocket handshake."""
-        from datetime import datetime
+        from datetime import datetime, timezone
         
         # Case 1: We have the full response from a fresh login
         if self.full_auth_response:
@@ -1087,7 +1319,7 @@ class LDATAService:
                 "id": self.auth_token,
                 "userId": self.userid,
                 "ttl": 5184000, 
-                "created": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+                "created": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
                 "scopes": None
             }
         }
@@ -1110,12 +1342,20 @@ class LDATAService:
         
         try:
             # Step 1: bandwidth:1 (wake up)
-            self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+            r1 = self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+            if r1.status_code in (401, 403, 406):
+                raise LDATAAuthError(f"[v{self.version}] Auth expired during bandwidth toggle (step 1): {r1.status_code}")
             # Step 2: bandwidth:0 (turn off)
-            self.session.put(url, headers=headers, json={"bandwidth": 0}, timeout=5)
+            r2 = self.session.put(url, headers=headers, json={"bandwidth": 0}, timeout=5)
+            if r2.status_code in (401, 403, 406):
+                raise LDATAAuthError(f"[v{self.version}] Auth expired during bandwidth toggle (step 2): {r2.status_code}")
             # Step 3: bandwidth:1 (turn back on — this 0→1 transition triggers the refresh)
-            self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+            r3 = self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+            if r3.status_code in (401, 403, 406):
+                raise LDATAAuthError(f"[v{self.version}] Auth expired during bandwidth toggle (step 3): {r3.status_code}")
             _LOGGER.debug(f"[v{self.version}] Bandwidth toggle 1→0→1 for {panel_type} panel {panel_id}")
+        except LDATAAuthError:
+            raise
         except Exception as e:
             _LOGGER.debug(f"[v{self.version}] Bandwidth toggle for panel {panel_id}: {e}")
 
@@ -1139,7 +1379,15 @@ class LDATAService:
         if not any(self._panel_needs_rest_poll.values()):
             return False
         
-        # Safely get options
+        # Serialize with CT poll to prevent bandwidth:0 toggle from corrupting
+        # breaker data. Without this lock, the CT poll's bandwidth:0 can cause
+        # the cloud to return stale zeros for breakers mid-fetch.
+        with self._rest_poll_lock:
+            return self._refresh_breaker_data_locked()
+
+    def _refresh_breaker_data_locked(self) -> bool:
+        """Inner implementation of refresh_breaker_data, called under _rest_poll_lock."""
+        
         three_phase = THREE_PHASE_DEFAULT
         if self.entry:
             three_phase = self.entry.options.get(
@@ -1150,33 +1398,17 @@ class LDATAService:
         breakers = new_status_data.get("breakers", {}).copy()
         cts = new_status_data.get("cts", {}).copy()
         updated = False
+        panels_with_power_change = set()
         
         for panel_data in new_status_data.get("panels", []):
             panel_id = panel_data.get("id")
             panel_type = panel_data.get("panel_type", "WHEMS")
             
-            if not panel_id:
-                continue
-            
-            # Only poll panels that need REST polling
-            if not self._panel_needs_rest_poll.get(panel_id, False):
+            if not panel_id or not self._panel_needs_rest_poll.get(panel_id, False):
                 continue
             
             try:
-                # Simple bandwidth:1 to keep the panel awake for breaker data.
-                # We do NOT toggle 1→0→1 here — the toggle is reserved for the
-                # CT poll only. Toggling here causes the cloud to cache zero power
-                # for breakers that haven't refreshed yet during the brief off window.
-                try:
-                    headers = {**defaultHeaders}
-                    headers["authorization"] = self.auth_token
-                    if panel_type == "LDATA":
-                        url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-                    else:
-                        url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-                    self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
-                except Exception as bw_ex:
-                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: {bw_ex}")
+                self._bandwidth_toggle(panel_id, panel_type)
                 
                 # Fetch fresh breaker data
                 raw_breakers = self.get_Whems_breakers(panel_id)
@@ -1190,79 +1422,12 @@ class LDATAService:
                             b_id = breaker["id"]
                             if b_id in breakers:
                                 existing = breakers[b_id].copy()
-                                
-                                # Calculate new power from REST response
-                                if breaker["position"] in _LEG1_POSITIONS:
-                                    leg = 1
-                                    p1 = self.none_to_zero(breaker, "power")
-                                    p2 = self.none_to_zero(breaker, "power2")
-                                    v1 = self.none_to_zero(breaker, "rmsVoltage")
-                                    v2 = self.none_to_zero(breaker, "rmsVoltage2")
-                                    c1 = self.none_to_zero(breaker, "rmsCurrent")
-                                    c2 = self.none_to_zero(breaker, "rmsCurrent2")
-                                    f1 = self.none_to_zero(breaker, "lineFrequency")
-                                    f2 = self.none_to_zero(breaker, "lineFrequency2")
-                                else:
-                                    leg = 2
-                                    p1 = self.none_to_zero(breaker, "power2")
-                                    p2 = self.none_to_zero(breaker, "power")
-                                    v1 = self.none_to_zero(breaker, "rmsVoltage2")
-                                    v2 = self.none_to_zero(breaker, "rmsVoltage")
-                                    c1 = self.none_to_zero(breaker, "rmsCurrent2")
-                                    c2 = self.none_to_zero(breaker, "rmsCurrent")
-                                    f1 = self.none_to_zero(breaker, "lineFrequency2")
-                                    f2 = self.none_to_zero(breaker, "lineFrequency")
-                                
-                                new_power = p1 + p2
-                                old_power = existing.get("power", 0)
-                                
-                                # Compute new current for zero-check
-                                if breaker.get("poles") == 2 or existing.get("poles") == 2:
-                                    new_current_total = (c1 + c2) / 2
-                                else:
-                                    new_current_total = c1 + c2
-                                old_current = existing.get("current", 0)
-                                
-                                # --- Unified zero-transition protection ---
-                                # Guards power AND current together. See _check_zero_transition.
-                                accept_update = self._check_zero_transition(
-                                    b_id, new_power, new_current_total,
-                                    old_power, old_current, source="REST"
+                                power_changed = self._apply_breaker_update(
+                                    existing, breaker, source="REST",
+                                    three_phase=three_phase,
                                 )
-                                
-                                if accept_update:
-                                    existing["power"] = new_power
-                                    existing["power1"] = p1
-                                    existing["power2"] = p2
-                                    
-                                    if (three_phase is False) or (breaker["poles"] == 1):
-                                        existing["voltage"] = v1 + v2
-                                    else:
-                                        existing["voltage"] = (v1 * 0.866025403784439) + (v2 * 0.866025403784439)
-                                    existing["voltage1"] = v1
-                                    existing["voltage2"] = v2
-                                    
-                                    if breaker["poles"] == 2:
-                                        existing["current"] = (c1 + c2) / 2
-                                        existing["frequency"] = (f1 + f2) / 2.0
-                                    else:
-                                        existing["current"] = c1 + c2
-                                        existing["frequency"] = f1
-                                    existing["current1"] = c1
-                                    existing["current2"] = c2
-                                    existing["frequency1"] = f1
-                                    existing["frequency2"] = f2
-                                
-                                # Always update state fields regardless of power staleness
-                                if breaker.get("currentState"):
-                                    existing["state"] = breaker["currentState"]
-                                if breaker.get("connected") is not None:
-                                    existing["connected"] = breaker["connected"]
-                                if breaker.get("remoteState") is not None:
-                                    existing["remoteState"] = breaker["remoteState"]
-                                    if existing["remoteState"] == "":
-                                        existing["remoteState"] = "RemoteON"
-                                
+                                if power_changed:
+                                    panels_with_power_change.add(existing.get("panel_id"))
                                 breakers[b_id] = existing
                                 updated = True
                 
@@ -1274,23 +1439,7 @@ class LDATAService:
                             ct_id = str(ct["id"])
                             if ct_id in cts:
                                 existing_ct = cts[ct_id].copy()
-                                
-                                existing_ct["power1"] = self.none_to_zero(ct, "activePower")
-                                existing_ct["power2"] = self.none_to_zero(ct, "activePower2")
-                                existing_ct["power"] = existing_ct["power1"] + existing_ct["power2"]
-                                
-                                existing_ct["consumption1"] = self.none_to_zero(ct, "energyConsumption")
-                                existing_ct["consumption2"] = self.none_to_zero(ct, "energyConsumption2")
-                                existing_ct["consumption"] = existing_ct["consumption1"] + existing_ct["consumption2"]
-                                
-                                existing_ct["import1"] = self.none_to_zero(ct, "energyImport")
-                                existing_ct["import2"] = self.none_to_zero(ct, "energyImport2")
-                                existing_ct["import"] = existing_ct["import1"] + existing_ct["import2"]
-                                
-                                existing_ct["current1"] = self.none_to_zero(ct, "rmsCurrent")
-                                existing_ct["current2"] = self.none_to_zero(ct, "rmsCurrent2")
-                                existing_ct["current"] = (existing_ct["current1"] + existing_ct["current2"]) / 2
-                                
+                                self._apply_ct_update(existing_ct, ct)
                                 cts[ct_id] = existing_ct
                                 updated = True
                 
@@ -1302,6 +1451,9 @@ class LDATAService:
         if updated:
             new_status_data["breakers"] = breakers
             new_status_data["cts"] = cts
+            for pid in panels_with_power_change:
+                if pid:
+                    self._recalc_total_power(new_status_data, pid)
             self.status_data = new_status_data
         
         return updated
@@ -1329,6 +1481,14 @@ class LDATAService:
         if not self.auth_token:
             return False
         
+        # Serialize with breaker poll so bandwidth:0 toggle doesn't corrupt
+        # a concurrent breaker GET.
+        with self._rest_poll_lock:
+            return self._refresh_ct_data_locked()
+
+    def _refresh_ct_data_locked(self) -> bool:
+        """Inner implementation of refresh_ct_data, called under _rest_poll_lock."""
+        
         new_status_data = self.status_data.copy()
         cts = new_status_data.get("cts", {}).copy()
         updated = False
@@ -1336,23 +1496,12 @@ class LDATAService:
         for panel_data in new_status_data.get("panels", []):
             panel_id = panel_data.get("id")
             
-            if not panel_id:
-                continue
-            
-            # Only poll panels that need REST polling (v2 firmware)
-            if not self._panel_needs_rest_poll.get(panel_id, False):
+            if not panel_id or not self._panel_needs_rest_poll.get(panel_id, False):
                 continue
             
             try:
-                # Toggle bandwidth 1→0→1 to force the panel to refresh energy counters.
-                # The Leviton web app does this exact sequence before fetching CT data.
-                # Without the 0→1 transition, GET /iotCts returns stale energy values.
                 panel_type = panel_data.get("panel_type", "WHEMS")
                 self._bandwidth_toggle(panel_id, panel_type)
-                
-                # Brief pause to let the panel push fresh values to the cloud
-                # after the bandwidth transition before we GET.
-                time.sleep(2)
                 
                 raw_cts = self.get_Whems_CT(panel_id)
                 if raw_cts:
@@ -1361,23 +1510,7 @@ class LDATAService:
                             ct_id = str(ct["id"])
                             if ct_id in cts:
                                 existing_ct = cts[ct_id].copy()
-                                
-                                existing_ct["power1"] = self.none_to_zero(ct, "activePower")
-                                existing_ct["power2"] = self.none_to_zero(ct, "activePower2")
-                                existing_ct["power"] = existing_ct["power1"] + existing_ct["power2"]
-                                
-                                existing_ct["consumption1"] = self.none_to_zero(ct, "energyConsumption")
-                                existing_ct["consumption2"] = self.none_to_zero(ct, "energyConsumption2")
-                                existing_ct["consumption"] = existing_ct["consumption1"] + existing_ct["consumption2"]
-                                
-                                existing_ct["import1"] = self.none_to_zero(ct, "energyImport")
-                                existing_ct["import2"] = self.none_to_zero(ct, "energyImport2")
-                                existing_ct["import"] = existing_ct["import1"] + existing_ct["import2"]
-                                
-                                existing_ct["current1"] = self.none_to_zero(ct, "rmsCurrent")
-                                existing_ct["current2"] = self.none_to_zero(ct, "rmsCurrent2")
-                                existing_ct["current"] = (existing_ct["current1"] + existing_ct["current2"]) / 2
-                                
+                                self._apply_ct_update(existing_ct, ct)
                                 cts[ct_id] = existing_ct
                                 updated = True
                 
@@ -1421,190 +1554,20 @@ class LDATAService:
         if model_name == "ResidentialBreaker":
              breaker_id = data.get("id")
              if breaker_id and breaker_id in new_status_data["breakers"]:
-                  # Copy the specific breaker data before modifying
                   breakers = new_status_data["breakers"].copy()
                   breaker = breakers[breaker_id].copy()
                   
-                  # Get cached values for partial update handling
-                  cached_p1 = breaker.get("power1", 0)
-                  cached_p2 = breaker.get("power2", 0)
+                  power_changed = self._apply_breaker_update(breaker, data, source="WS")
                   
-                  # Handle power/power2 fields
-                  # WebSocket may send only one of these at a time
-                  # Must respect leg position mapping (leg 2 positions swap power/power2)
-                  leg = breaker.get("leg", 1)
-                  
-                  if leg == 1:
-                      # Leg 1: power -> power1, power2 -> power2
-                      if "power" in data:
-                          p1 = float(data["power"]) if data["power"] is not None else cached_p1
-                          breaker["power1"] = p1
-                      else:
-                          p1 = cached_p1
-                      
-                      if "power2" in data:
-                          p2 = float(data["power2"]) if data["power2"] is not None else cached_p2
-                          breaker["power2"] = p2
-                      else:
-                          p2 = cached_p2
-                  else:
-                      # Leg 2: power -> power2, power2 -> power1 (swapped)
-                      if "power" in data:
-                          p2 = float(data["power"]) if data["power"] is not None else cached_p2
-                          breaker["power2"] = p2
-                      else:
-                          p2 = cached_p2
-                      
-                      if "power2" in data:
-                          p1 = float(data["power2"]) if data["power2"] is not None else cached_p1
-                          breaker["power1"] = p1
-                      else:
-                          p1 = cached_p1
-                  
-                  # ── Unified zero-transition protection for WS ──────────
-                  # WS sends power and current independently (sometimes
-                  # only power, sometimes only rmsCurrent, rarely both).
-                  # We compute candidate values for BOTH, then run a
-                  # single zero-check that guards all electrical fields.
-                  
-                  has_power_field = "power" in data or "power2" in data
-                  has_current_field = "rmsCurrent" in data or "rmsCurrent2" in data
-                  has_voltage_field = "rmsVoltage" in data or "rmsVoltage2" in data
-                  has_any_electrical = has_power_field or has_current_field
-                  
-                  # Candidate power (use new if present, else keep old)
-                  if has_power_field:
-                      cand_power = p1 + p2
-                  else:
-                      cand_power = breaker.get("power", 0)
-                  
-                  # Candidate current
-                  if has_current_field:
-                      cached_c1 = breaker.get("current1", 0)
-                      cached_c2 = breaker.get("current2", 0)
-                      
-                      if leg == 1:
-                          c1 = float(data["rmsCurrent"]) if data.get("rmsCurrent") is not None and "rmsCurrent" in data else cached_c1
-                          c2 = float(data["rmsCurrent2"]) if data.get("rmsCurrent2") is not None and "rmsCurrent2" in data else cached_c2
-                      else:
-                          c2 = float(data["rmsCurrent"]) if data.get("rmsCurrent") is not None and "rmsCurrent" in data else cached_c2
-                          c1 = float(data["rmsCurrent2"]) if data.get("rmsCurrent2") is not None and "rmsCurrent2" in data else cached_c1
-                      
-                      poles = breaker.get("poles", 1)
-                      cand_current = (c1 + c2) / 2 if poles == 2 else c1 + c2
-                  else:
-                      cand_current = breaker.get("current", 0)
-                      c1 = breaker.get("current1", 0)
-                      c2 = breaker.get("current2", 0)
-                  
-                  # Run unified zero-check (only if we got electrical data)
-                  if has_any_electrical:
-                      old_power = breaker.get("power", 0)
-                      old_current = breaker.get("current", 0)
-                      accept_update = self._check_zero_transition(
-                          breaker_id, cand_power, cand_current,
-                          old_power, old_current, source="WS"
-                      )
-                  else:
-                      accept_update = True  # Non-electrical update, always accept
-                  
-                  if accept_update:
-                      # Apply power
-                      if has_power_field:
-                          breaker["power"] = cand_power
-                          breaker["power1"] = p1
-                          breaker["power2"] = p2
-                      
-                      # Apply current
-                      if has_current_field:
-                          breaker["current"] = cand_current
-                          breaker["current1"] = c1
-                          breaker["current2"] = c2
-                  else:
-                      # REJECTED — revert power1/power2 to cached values
-                      if has_power_field:
-                          breaker["power1"] = cached_p1
-                          breaker["power2"] = cached_p2
-                  
-                  # Handle voltage (same leg mapping as power)
-                  # Voltage is only updated when the electrical update is accepted
-                  if has_voltage_field and accept_update:
-                      cached_v1 = breaker.get("voltage1", 0)
-                      cached_v2 = breaker.get("voltage2", 0)
-                      
-                      if leg == 1:
-                          if "rmsVoltage" in data:
-                              v1 = float(data["rmsVoltage"]) if data["rmsVoltage"] is not None else cached_v1
-                              breaker["voltage1"] = v1
-                          else:
-                              v1 = cached_v1
-                          if "rmsVoltage2" in data:
-                              v2 = float(data["rmsVoltage2"]) if data["rmsVoltage2"] is not None else cached_v2
-                              breaker["voltage2"] = v2
-                          else:
-                              v2 = cached_v2
-                      else:
-                          # Leg 2: swap voltage mapping
-                          if "rmsVoltage" in data:
-                              v2 = float(data["rmsVoltage"]) if data["rmsVoltage"] is not None else cached_v2
-                              breaker["voltage2"] = v2
-                          else:
-                              v2 = cached_v2
-                          if "rmsVoltage2" in data:
-                              v1 = float(data["rmsVoltage2"]) if data["rmsVoltage2"] is not None else cached_v1
-                              breaker["voltage1"] = v1
-                          else:
-                              v1 = cached_v1
-                      
-                      breaker["voltage"] = v1 + v2
-                  
-                  # NOTE: Current is now handled in the unified zero-protection
-                  # block above (together with power). No separate handling needed.
-                  
-                  # Handle frequency (same leg mapping as power)
-                  # Frequency is gated by accept_update to stay consistent
-                  if ("lineFrequency" in data or "lineFrequency2" in data) and accept_update:
-                      cached_f1 = breaker.get("frequency1", 0)
-                      cached_f2 = breaker.get("frequency2", 0)
-                      
-                      if leg == 1:
-                          if "lineFrequency" in data:
-                              f1 = float(data["lineFrequency"]) if data["lineFrequency"] is not None else cached_f1
-                              breaker["frequency1"] = f1
-                          else:
-                              f1 = cached_f1
-                          if "lineFrequency2" in data:
-                              f2 = float(data["lineFrequency2"]) if data["lineFrequency2"] is not None else cached_f2
-                              breaker["frequency2"] = f2
-                          else:
-                              f2 = cached_f2
-                      else:
-                          # Leg 2: swap frequency mapping
-                          if "lineFrequency" in data:
-                              f2 = float(data["lineFrequency"]) if data["lineFrequency"] is not None else cached_f2
-                              breaker["frequency2"] = f2
-                          else:
-                              f2 = cached_f2
-                          if "lineFrequency2" in data:
-                              f1 = float(data["lineFrequency2"]) if data["lineFrequency2"] is not None else cached_f1
-                              breaker["frequency1"] = f1
-                          else:
-                              f1 = cached_f1
-                      
-                      # Frequency total depends on poles
-                      poles = breaker.get("poles", 1)
-                      if poles == 2:
-                          breaker["frequency"] = (f1 + f2) / 2
-                      else:
-                          breaker["frequency"] = f1
-                  
-                  if "connected" in data: breaker["connected"] = data["connected"]
-                  if "currentState" in data: breaker["state"] = data["currentState"]
-                  if "remoteState" in data: breaker["remoteState"] = data["remoteState"]
-                  
-                  # Save back to the structure
                   breakers[breaker_id] = breaker
                   new_status_data["breakers"] = breakers
+                  
+                  # Recalculate totalPower for the breaker's panel if power changed
+                  if power_changed:
+                      panel_id = breaker.get("panel_id")
+                      if panel_id:
+                          self._recalc_total_power(new_status_data, panel_id)
+                  
                   updated = True
 
         # Handle IotCt (CT Clamps)
@@ -1613,86 +1576,7 @@ class LDATAService:
              if ct_id and ct_id in new_status_data["cts"]:
                   cts = new_status_data["cts"].copy()
                   ct = cts[ct_id].copy()
-                  
-                  # Get cached values (or 0 if not yet cached)
-                  cached_p1 = ct.get("power1", 0)
-                  cached_p2 = ct.get("power2", 0)
-                  
-                  # Update only the values that are present in the payload
-                  # Use cached value if not present
-                  if "activePower" in data:
-                      p1 = float(data["activePower"]) if data["activePower"] is not None else cached_p1
-                      ct["power1"] = p1
-                  else:
-                      p1 = cached_p1
-                      
-                  if "activePower2" in data:
-                      p2 = float(data["activePower2"]) if data["activePower2"] is not None else cached_p2
-                      ct["power2"] = p2
-                  else:
-                      p2 = cached_p2
-                  
-                  # Total power is always sum of both (using cached values for missing)
-                  if "activePower" in data or "activePower2" in data:
-                      ct["power"] = p1 + p2
-                  
-                  # Handle energy consumption the same way
-                  if "energyConsumption" in data or "energyConsumption2" in data:
-                      cached_c1 = ct.get("consumption1", 0)
-                      cached_c2 = ct.get("consumption2", 0)
-                      
-                      if "energyConsumption" in data:
-                          c1 = float(data["energyConsumption"]) if data["energyConsumption"] is not None else cached_c1
-                          ct["consumption1"] = c1
-                      else:
-                          c1 = cached_c1
-                          
-                      if "energyConsumption2" in data:
-                          c2 = float(data["energyConsumption2"]) if data["energyConsumption2"] is not None else cached_c2
-                          ct["consumption2"] = c2
-                      else:
-                          c2 = cached_c2
-                      
-                      ct["consumption"] = c1 + c2
-                  
-                  # Handle energy import (grid import) the same way
-                  if "energyImport" in data or "energyImport2" in data:
-                      cached_i1 = ct.get("import1", 0)
-                      cached_i2 = ct.get("import2", 0)
-                      
-                      if "energyImport" in data:
-                          i1 = float(data["energyImport"]) if data["energyImport"] is not None else cached_i1
-                          ct["import1"] = i1
-                      else:
-                          i1 = cached_i1
-                          
-                      if "energyImport2" in data:
-                          i2 = float(data["energyImport2"]) if data["energyImport2"] is not None else cached_i2
-                          ct["import2"] = i2
-                      else:
-                          i2 = cached_i2
-                      
-                      ct["import"] = i1 + i2
-                  
-                  # Handle current the same way
-                  if "rmsCurrent" in data or "rmsCurrent2" in data:
-                      cached_cur1 = ct.get("current1", 0)
-                      cached_cur2 = ct.get("current2", 0)
-                      
-                      if "rmsCurrent" in data:
-                          cur1 = float(data["rmsCurrent"]) if data["rmsCurrent"] is not None else cached_cur1
-                          ct["current1"] = cur1
-                      else:
-                          cur1 = cached_cur1
-                          
-                      if "rmsCurrent2" in data:
-                          cur2 = float(data["rmsCurrent2"]) if data["rmsCurrent2"] is not None else cached_cur2
-                          ct["current2"] = cur2
-                      else:
-                          cur2 = cached_cur2
-                      
-                      ct["current"] = (cur1 + cur2) / 2
-                  
+                  self._apply_ct_update(ct, data)
                   cts[ct_id] = ct
                   new_status_data["cts"] = cts
                   updated = True
@@ -1739,263 +1623,34 @@ class LDATAService:
                              f"IotWhem WS messages without breaker electrical data — enabling REST polling as fallback"
                          )
                          self._panel_needs_rest_poll[panel_id] = True
-                         self._panel_needs_rest_poll[panel_id] = True
              
              if has_breaker_data:
                   breakers = new_status_data["breakers"].copy()
+                  panels_with_power_change = set()
                   for b_data in data["ResidentialBreaker"]:
                        b_id = b_data.get("id")
                        if b_id and b_id in breakers:
                             breaker = breakers[b_id].copy()
-                            
-                            # Get cached values for partial update handling
-                            cached_p1 = breaker.get("power1", 0)
-                            cached_p2 = breaker.get("power2", 0)
-                            
-                            # Handle power/power2 fields
-                            # Must respect leg position mapping (leg 2 positions swap power/power2)
-                            leg = breaker.get("leg", 1)
-                            
-                            if leg == 1:
-                                # Leg 1: power -> power1, power2 -> power2
-                                if "power" in b_data:
-                                    p1 = float(b_data["power"]) if b_data["power"] is not None else cached_p1
-                                    breaker["power1"] = p1
-                                else:
-                                    p1 = cached_p1
-                                
-                                if "power2" in b_data:
-                                    p2 = float(b_data["power2"]) if b_data["power2"] is not None else cached_p2
-                                    breaker["power2"] = p2
-                                else:
-                                    p2 = cached_p2
-                            else:
-                                # Leg 2: power -> power2, power2 -> power1 (swapped)
-                                if "power" in b_data:
-                                    p2 = float(b_data["power"]) if b_data["power"] is not None else cached_p2
-                                    breaker["power2"] = p2
-                                else:
-                                    p2 = cached_p2
-                                
-                                if "power2" in b_data:
-                                    p1 = float(b_data["power2"]) if b_data["power2"] is not None else cached_p1
-                                    breaker["power1"] = p1
-                                else:
-                                    p1 = cached_p1
-                            
-                            # ── Unified zero-transition protection for WS bulk ──
-                            has_power_field = "power" in b_data or "power2" in b_data
-                            has_current_field = "rmsCurrent" in b_data or "rmsCurrent2" in b_data
-                            has_voltage_field = "rmsVoltage" in b_data or "rmsVoltage2" in b_data
-                            has_any_electrical = has_power_field or has_current_field
-                            
-                            # Candidate power
-                            if has_power_field:
-                                cand_power = p1 + p2
-                            else:
-                                cand_power = breaker.get("power", 0)
-                            
-                            # Candidate current
-                            if has_current_field:
-                                cached_c1 = breaker.get("current1", 0)
-                                cached_c2 = breaker.get("current2", 0)
-                                
-                                if leg == 1:
-                                    c1 = float(b_data["rmsCurrent"]) if b_data.get("rmsCurrent") is not None and "rmsCurrent" in b_data else cached_c1
-                                    c2 = float(b_data["rmsCurrent2"]) if b_data.get("rmsCurrent2") is not None and "rmsCurrent2" in b_data else cached_c2
-                                else:
-                                    c2 = float(b_data["rmsCurrent"]) if b_data.get("rmsCurrent") is not None and "rmsCurrent" in b_data else cached_c2
-                                    c1 = float(b_data["rmsCurrent2"]) if b_data.get("rmsCurrent2") is not None and "rmsCurrent2" in b_data else cached_c1
-                                
-                                poles = breaker.get("poles", 1)
-                                cand_current = (c1 + c2) / 2 if poles == 2 else c1 + c2
-                            else:
-                                cand_current = breaker.get("current", 0)
-                                c1 = breaker.get("current1", 0)
-                                c2 = breaker.get("current2", 0)
-                            
-                            # Run unified zero-check
-                            if has_any_electrical:
-                                old_power = breaker.get("power", 0)
-                                old_current = breaker.get("current", 0)
-                                accept_update = self._check_zero_transition(
-                                    b_id, cand_power, cand_current,
-                                    old_power, old_current, source="WS-bulk"
-                                )
-                            else:
-                                accept_update = True
-                            
-                            if accept_update:
-                                if has_power_field:
-                                    breaker["power"] = cand_power
-                                    breaker["power1"] = p1
-                                    breaker["power2"] = p2
-                                if has_current_field:
-                                    breaker["current"] = cand_current
-                                    breaker["current1"] = c1
-                                    breaker["current2"] = c2
-                            else:
-                                if has_power_field:
-                                    breaker["power1"] = cached_p1
-                                    breaker["power2"] = cached_p2
-                            
-                            # Handle voltage (same leg mapping as power)
-                            if has_voltage_field and accept_update:
-                                cached_v1 = breaker.get("voltage1", 0)
-                                cached_v2 = breaker.get("voltage2", 0)
-                                
-                                if leg == 1:
-                                    if "rmsVoltage" in b_data:
-                                        v1 = float(b_data["rmsVoltage"]) if b_data["rmsVoltage"] is not None else cached_v1
-                                        breaker["voltage1"] = v1
-                                    else:
-                                        v1 = cached_v1
-                                    if "rmsVoltage2" in b_data:
-                                        v2 = float(b_data["rmsVoltage2"]) if b_data["rmsVoltage2"] is not None else cached_v2
-                                        breaker["voltage2"] = v2
-                                    else:
-                                        v2 = cached_v2
-                                else:
-                                    if "rmsVoltage" in b_data:
-                                        v2 = float(b_data["rmsVoltage"]) if b_data["rmsVoltage"] is not None else cached_v2
-                                        breaker["voltage2"] = v2
-                                    else:
-                                        v2 = cached_v2
-                                    if "rmsVoltage2" in b_data:
-                                        v1 = float(b_data["rmsVoltage2"]) if b_data["rmsVoltage2"] is not None else cached_v1
-                                        breaker["voltage1"] = v1
-                                    else:
-                                        v1 = cached_v1
-                                
-                                breaker["voltage"] = v1 + v2
-                            
-                            # NOTE: Current is now handled in the unified zero-protection
-                            # block above (together with power). No separate handling needed.
-                            
-                            # Handle frequency (same leg mapping) — gated by accept_update
-                            if ("lineFrequency" in b_data or "lineFrequency2" in b_data) and accept_update:
-                                cached_f1 = breaker.get("frequency1", 0)
-                                cached_f2 = breaker.get("frequency2", 0)
-                                
-                                if leg == 1:
-                                    if "lineFrequency" in b_data:
-                                        f1 = float(b_data["lineFrequency"]) if b_data["lineFrequency"] is not None else cached_f1
-                                        breaker["frequency1"] = f1
-                                    else:
-                                        f1 = cached_f1
-                                    if "lineFrequency2" in b_data:
-                                        f2 = float(b_data["lineFrequency2"]) if b_data["lineFrequency2"] is not None else cached_f2
-                                        breaker["frequency2"] = f2
-                                    else:
-                                        f2 = cached_f2
-                                else:
-                                    if "lineFrequency" in b_data:
-                                        f2 = float(b_data["lineFrequency"]) if b_data["lineFrequency"] is not None else cached_f2
-                                        breaker["frequency2"] = f2
-                                    else:
-                                        f2 = cached_f2
-                                    if "lineFrequency2" in b_data:
-                                        f1 = float(b_data["lineFrequency2"]) if b_data["lineFrequency2"] is not None else cached_f1
-                                        breaker["frequency1"] = f1
-                                    else:
-                                        f1 = cached_f1
-                                
-                                poles = breaker.get("poles", 1)
-                                if poles == 2:
-                                    breaker["frequency"] = (f1 + f2) / 2
-                                else:
-                                    breaker["frequency"] = f1
-                            
+                            power_changed = self._apply_breaker_update(
+                                breaker, b_data, source="WS-bulk"
+                            )
+                            if power_changed:
+                                panels_with_power_change.add(breaker.get("panel_id"))
                             breakers[b_id] = breaker
                             updated = True
                   if updated:
                       new_status_data["breakers"] = breakers
+                      for pid in panels_with_power_change:
+                          if pid:
+                              self._recalc_total_power(new_status_data, pid)
 
              if "IotCt" in data:
                   cts = new_status_data["cts"].copy()
-                  for ct_data in data["IotCt"]:
-                       ct_id = str(ct_data.get("id"))
+                  for ct_data_item in data["IotCt"]:
+                       ct_id = str(ct_data_item.get("id"))
                        if ct_id and ct_id in cts:
                             ct = cts[ct_id].copy()
-                            
-                            # Get cached power values (or 0 if not yet cached)
-                            cached_p1 = ct.get("power1", 0)
-                            cached_p2 = ct.get("power2", 0)
-                            
-                            # Update only the values that are present
-                            if "activePower" in ct_data:
-                                p1 = float(ct_data["activePower"]) if ct_data["activePower"] is not None else cached_p1
-                                ct["power1"] = p1
-                            else:
-                                p1 = cached_p1
-                                
-                            if "activePower2" in ct_data:
-                                p2 = float(ct_data["activePower2"]) if ct_data["activePower2"] is not None else cached_p2
-                                ct["power2"] = p2
-                            else:
-                                p2 = cached_p2
-                            
-                            # Total power uses cached values for missing
-                            if "activePower" in ct_data or "activePower2" in ct_data:
-                                ct["power"] = p1 + p2
-                            
-                            # Handle energy consumption
-                            if "energyConsumption" in ct_data or "energyConsumption2" in ct_data:
-                                cached_c1 = ct.get("consumption1", 0)
-                                cached_c2 = ct.get("consumption2", 0)
-                                
-                                if "energyConsumption" in ct_data:
-                                    c1 = float(ct_data["energyConsumption"]) if ct_data["energyConsumption"] is not None else cached_c1
-                                    ct["consumption1"] = c1
-                                else:
-                                    c1 = cached_c1
-                                    
-                                if "energyConsumption2" in ct_data:
-                                    c2 = float(ct_data["energyConsumption2"]) if ct_data["energyConsumption2"] is not None else cached_c2
-                                    ct["consumption2"] = c2
-                                else:
-                                    c2 = cached_c2
-                                
-                                ct["consumption"] = c1 + c2
-                            
-                            # Handle energy import (grid import)
-                            if "energyImport" in ct_data or "energyImport2" in ct_data:
-                                cached_i1 = ct.get("import1", 0)
-                                cached_i2 = ct.get("import2", 0)
-                                
-                                if "energyImport" in ct_data:
-                                    i1 = float(ct_data["energyImport"]) if ct_data["energyImport"] is not None else cached_i1
-                                    ct["import1"] = i1
-                                else:
-                                    i1 = cached_i1
-                                    
-                                if "energyImport2" in ct_data:
-                                    i2 = float(ct_data["energyImport2"]) if ct_data["energyImport2"] is not None else cached_i2
-                                    ct["import2"] = i2
-                                else:
-                                    i2 = cached_i2
-                                
-                                ct["import"] = i1 + i2
-                            
-                            # Handle current
-                            if "rmsCurrent" in ct_data or "rmsCurrent2" in ct_data:
-                                cached_cur1 = ct.get("current1", 0)
-                                cached_cur2 = ct.get("current2", 0)
-                                
-                                if "rmsCurrent" in ct_data:
-                                    cur1 = float(ct_data["rmsCurrent"]) if ct_data["rmsCurrent"] is not None else cached_cur1
-                                    ct["current1"] = cur1
-                                else:
-                                    cur1 = cached_cur1
-                                    
-                                if "rmsCurrent2" in ct_data:
-                                    cur2 = float(ct_data["rmsCurrent2"]) if ct_data["rmsCurrent2"] is not None else cached_cur2
-                                    ct["current2"] = cur2
-                                else:
-                                    cur2 = cached_cur2
-                                
-                                ct["current"] = (cur1 + cur2) / 2
-                            
+                            self._apply_ct_update(ct, ct_data_item)
                             cts[ct_id] = ct
                             updated = True
                   if updated:
@@ -2066,8 +1721,12 @@ class LDATAService:
         reconnect_delay = 10
         max_delay = 300
         
-        BANDWIDTH_PUT_INTERVAL = 50      # PUT bandwidth:1 every 50 seconds (like official app)
-        APIVERSION_HEARTBEAT_INTERVAL = 10  # GET /apiversion every 10 seconds (like official app, keeps session alive)
+        BANDWIDTH_PUT_INTERVAL = 20      # PUT bandwidth:1 every 20 seconds to keep cloud active
+        # The cloud decays bandwidth:1 to :2 within ~2 seconds. The official
+        # app sends every 50s but has the UI open which generates additional
+        # activity. Without the app UI, we need more frequent PUTs to keep
+        # the cloud pushing breaker data via WS.
+        APIVERSION_HEARTBEAT_INTERVAL = 10  # GET /apiversion every 10 seconds (keeps server session alive)
         STALE_DATA_THRESHOLD = 60        # Re-subscribe if no data for 60 seconds
         PROACTIVE_RECONNECT = 3300       # Proactively reconnect every 55 minutes (before server timeout)
         
