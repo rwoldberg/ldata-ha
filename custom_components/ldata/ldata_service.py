@@ -77,6 +77,13 @@ class LDATAService:
         self._rest_poll_lock = threading.Lock()
         # Cache for the latest status data to support WebSocket updates
         self.status_data = None
+        # Three-phase voltage calculation mode — cached from options so all
+        # update paths (REST, WS direct, WS embedded) use the same formula.
+        self._three_phase = THREE_PHASE_DEFAULT
+        if entry:
+            self._three_phase = entry.options.get(
+                THREE_PHASE, entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
+            )
         # Storage for full auth response to support WebSocket handshake
         self.full_auth_response = None
         # Flag for graceful shutdown
@@ -181,17 +188,13 @@ class LDATAService:
             timeout=15,
         )
         
-        _LOGGER.debug(
-            f"[v{self.version}] Authorization attempt result {result.status_code}: {result.text}"
-        )
-
         if result.status_code == 200:
             json_data = result.json()
             self.auth_token = json_data["id"]
             self.userid = json_data["userId"]
             self.refresh_token = json_data["id"] # Store the auth token
             self.full_auth_response = json_data # Store full response for WebSocket
-            _LOGGER.debug(f"[v{self.version}] Login successful. Storing auth token.")
+            _LOGGER.debug(f"[v{self.version}] Login successful (HTTP 200).")
             return True
 
         # Treat both 401 and 406 as potential auth failures
@@ -233,20 +236,18 @@ class LDATAService:
             timeout=15,
         )
 
-        _LOGGER.debug(f"[v{self.version}] 2FA completion result {result.status_code}: {result.text}")
-
         if result.status_code == 200:
             json_data = result.json()
             self.auth_token = json_data["id"]
             self.userid = json_data["userId"]
             self.refresh_token = json_data["id"] # Store the auth token
             self.full_auth_response = json_data # Store full response for WebSocket
-            _LOGGER.debug(f"[v{self.version}] 2FA login successful. Storing auth token.")
+            _LOGGER.debug(f"[v{self.version}] 2FA login successful (HTTP 200).")
             return True
         
         # Failed 2FA
         clean_msg = self._get_clean_error_msg(result.text)
-        _LOGGER.warning(f"[v{self.version}] 2FA completion failed. Response: {clean_msg}")
+        _LOGGER.warning(f"[v{self.version}] 2FA completion failed (HTTP {result.status_code}). Response: {clean_msg}")
         raise LDATAAuthError(f"[v{self.version}] Invalid 2FA code")
 
     def refresh_auth(self) -> bool:
@@ -403,7 +404,8 @@ class LDATAService:
             if result.status_code == 200 and len(result_json) > 0:
                 for account in result_json:
                     if account["residenceId"] is not None:
-                        self.residence_id_list.append(account["residenceId"])
+                        if account["residenceId"] not in self.residence_id_list:
+                            self.residence_id_list.append(account["residenceId"])
                 return True
             _LOGGER.error(f"[v{self.version}] Unable to get Residence Permissions!")
         except Exception as e:  # pylint: disable=broad-except
@@ -781,10 +783,11 @@ class LDATAService:
 
     def _apply_breaker_update(
         self,
+        breaker_id: str,
         existing: dict,
         raw: dict,
         source: str = "?",
-        three_phase: bool = False,
+        three_phase: bool | None = None,
     ) -> bool:
         """Apply a breaker update from any source (REST, WS direct, WS embedded).
         
@@ -792,14 +795,18 @@ class LDATAService:
         protection, and field updates. Mutates `existing` in place.
         
         Args:
+            breaker_id: The breaker ID (for zero-transition tracking).
             existing: The current breaker dict (will be mutated).
             raw: The new data dict (from REST API response or WS payload).
             source: Label for logging ("REST", "WS", "WS-bulk").
             three_phase: Whether the panel uses three-phase voltage calculation.
+                         Defaults to self._three_phase if not specified.
             
         Returns:
             True if power was updated (for totalPower recalculation).
         """
+        if three_phase is None:
+            three_phase = self._three_phase
         # Cached values for partial update handling
         cached_p1 = existing.get("power1", 0)
         cached_p2 = existing.get("power2", 0)
@@ -851,7 +858,7 @@ class LDATAService:
         # --- Unified zero-transition protection ---
         if has_any_electrical:
             accept_update = self._check_zero_transition(
-                existing["id"], cand_power, cand_current,
+                breaker_id, cand_power, cand_current,
                 existing.get("power", 0), existing.get("current", 0),
                 source=source,
                 power_from_msg=has_power_field,
@@ -1065,19 +1072,24 @@ class LDATAService:
             return status_data
         
         # Safely get options, as self.entry might be None during config flow
-        three_phase = THREE_PHASE_DEFAULT
+        # Refresh the cached three-phase setting from options (may have changed)
         if self.entry:
-            three_phase = self.entry.options.get(
+            self._three_phase = self.entry.options.get(
                 THREE_PHASE, self.entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
             )
+        three_phase = self._three_phase
 
         for panel in panels_json:
             panel_data = {}
-            panel_data["firmware"] = panel["updateVersion"]
-            panel_data["model"] = panel["model"]
-            panel_data["id"] = panel["id"]
-            panel_data["name"] = panel["name"]
-            panel_data["serialNumber"] = panel["id"]
+            panel_data["firmware"] = panel.get("updateVersion", "unknown")
+            panel_data["model"] = panel.get("model", "unknown")
+            panel_data["id"] = panel.get("id")
+            panel_data["name"] = panel.get("name", "Unknown Panel")
+            panel_data["serialNumber"] = panel.get("id")
+            
+            if not panel_data["id"]:
+                _LOGGER.warning(f"[v{self.version}] Skipping panel with missing ID: {panel}")
+                continue
             panel_data["panel_type"] = panel.get("ModuleType", "WHEMS")
             panel_data["connected"] = panel.get("connected", False)
             if panel.get("model") == "DAU" and panel.get("status") == "READY":
@@ -1097,13 +1109,14 @@ class LDATAService:
             # confirms WS is NOT delivering breaker data for this panel.
             # Firmware version is logged for diagnostics but does NOT control
             # the initial polling decision.
-            if panel_data["panel_type"] == "WHEMS":
+            if panel["id"] not in self._panel_needs_rest_poll:
                 self._panel_needs_rest_poll[panel["id"]] = False
                 self._ws_iotwhem_count[panel["id"]] = 0
-                _LOGGER.info(
-                    f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' firmware {fw_str} "
-                    f"— starting with WebSocket for all data (REST polling will auto-enable if needed)"
-                )
+            _LOGGER.info(
+                f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' "
+                f"({panel_data['panel_type']}) firmware {fw_str} "
+                f"— starting with WebSocket for all data (REST polling will auto-enable if needed)"
+            )
             if three_phase is False:
                 panel_data["voltage"] = (
                     float(panel["rmsVoltage"]) + float(panel["rmsVoltage2"])
@@ -1382,17 +1395,17 @@ class LDATAService:
         # Serialize with CT poll to prevent bandwidth:0 toggle from corrupting
         # breaker data. Without this lock, the CT poll's bandwidth:0 can cause
         # the cloud to return stale zeros for breakers mid-fetch.
-        with self._rest_poll_lock:
+        acquired = self._rest_poll_lock.acquire(timeout=30)
+        if not acquired:
+            _LOGGER.warning(f"[v{self.version}] Breaker poll timed out waiting for lock — skipping this cycle")
+            return False
+        try:
             return self._refresh_breaker_data_locked()
+        finally:
+            self._rest_poll_lock.release()
 
     def _refresh_breaker_data_locked(self) -> bool:
         """Inner implementation of refresh_breaker_data, called under _rest_poll_lock."""
-        
-        three_phase = THREE_PHASE_DEFAULT
-        if self.entry:
-            three_phase = self.entry.options.get(
-                THREE_PHASE, self.entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
-            )
         
         new_status_data = self.status_data.copy()
         breakers = new_status_data.get("breakers", {}).copy()
@@ -1423,8 +1436,7 @@ class LDATAService:
                             if b_id in breakers:
                                 existing = breakers[b_id].copy()
                                 power_changed = self._apply_breaker_update(
-                                    existing, breaker, source="REST",
-                                    three_phase=three_phase,
+                                    b_id, existing, breaker, source="REST",
                                 )
                                 if power_changed:
                                     panels_with_power_change.add(existing.get("panel_id"))
@@ -1483,8 +1495,14 @@ class LDATAService:
         
         # Serialize with breaker poll so bandwidth:0 toggle doesn't corrupt
         # a concurrent breaker GET.
-        with self._rest_poll_lock:
+        acquired = self._rest_poll_lock.acquire(timeout=30)
+        if not acquired:
+            _LOGGER.warning(f"[v{self.version}] CT poll timed out waiting for lock — skipping this cycle")
+            return False
+        try:
             return self._refresh_ct_data_locked()
+        finally:
+            self._rest_poll_lock.release()
 
     def _refresh_ct_data_locked(self) -> bool:
         """Inner implementation of refresh_ct_data, called under _rest_poll_lock."""
@@ -1557,7 +1575,7 @@ class LDATAService:
                   breakers = new_status_data["breakers"].copy()
                   breaker = breakers[breaker_id].copy()
                   
-                  power_changed = self._apply_breaker_update(breaker, data, source="WS")
+                  power_changed = self._apply_breaker_update(breaker_id, breaker, data, source="WS")
                   
                   breakers[breaker_id] = breaker
                   new_status_data["breakers"] = breakers
@@ -1632,7 +1650,7 @@ class LDATAService:
                        if b_id and b_id in breakers:
                             breaker = breakers[b_id].copy()
                             power_changed = self._apply_breaker_update(
-                                breaker, b_data, source="WS-bulk"
+                                b_id, breaker, b_data, source="WS-bulk"
                             )
                             if power_changed:
                                 panels_with_power_change.add(breaker.get("panel_id"))
@@ -2028,15 +2046,19 @@ class LDATAService:
                                         pass
                                 asyncio.create_task(_safe_heartbeat())
                             
-                            # Re-subscribe if no data for 60 seconds
+                            # Re-subscribe if no data for 60 seconds (max 5 per connection)
                             if current_time - last_data_time >= STALE_DATA_THRESHOLD:
                                 resubscribe_count += 1
                                 last_data_time = current_time
-                                _LOGGER.debug(f"[v{self.version}] No data for {STALE_DATA_THRESHOLD}s, re-subscribing (#{resubscribe_count})")
-                                try:
-                                    await send_subscriptions()
-                                except aiohttp.ClientConnectionResetError:
-                                    _LOGGER.debug(f"[v{self.version}] Connection reset during re-subscribe")
+                                if resubscribe_count <= 5:
+                                    _LOGGER.debug(f"[v{self.version}] No data for {STALE_DATA_THRESHOLD}s, re-subscribing (#{resubscribe_count})")
+                                    try:
+                                        await send_subscriptions()
+                                    except aiohttp.ClientConnectionResetError:
+                                        _LOGGER.debug(f"[v{self.version}] Connection reset during re-subscribe")
+                                        break
+                                else:
+                                    _LOGGER.warning(f"[v{self.version}] Re-subscribe limit reached (#{resubscribe_count}), forcing reconnect")
                                     break
                             
                             # Proactive reconnect every 55 minutes (before server forces disconnect)

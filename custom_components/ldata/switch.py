@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, LOGGER_NAME, ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT
 from .ldata_entity import LDATAEntity
+from .ldata_service import LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -99,38 +100,46 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Trip the breaker."""
-        # Capture result to verify success before updating state
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.remote_off, self.breaker_data["id"]
-        )
+        try:
+            result = await self.coordinator.hass.async_add_executor_job(
+                self.coordinator.service.remote_off, self.breaker_data["id"]
+            )
+        except LDATAAuthError as ex:
+            _LOGGER.error("Auth error turning off breaker %s: %s", self.name, ex)
+            self.async_write_ha_state()
+            return
+        except Exception as ex:
+            _LOGGER.error("Error turning off breaker %s: %s", self.name, ex)
+            self.async_write_ha_state()
+            return
 
         if result:
             self._state = False
             self.async_write_ha_state()
-            # Wait for the physical device to react before refreshing
-            await asyncio.sleep(2)
-            await self.coordinator.async_request_refresh()
         else:
             _LOGGER.error("Failed to turn off breaker %s", self.name)
-            # Write state immediately to revert the UI toggle to its previous position
             self.async_write_ha_state()
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Reset the breaker."""
-        # Capture result to verify success before updating state
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.remote_on, self.breaker_data["id"]
-        )
+        try:
+            result = await self.coordinator.hass.async_add_executor_job(
+                self.coordinator.service.remote_on, self.breaker_data["id"]
+            )
+        except LDATAAuthError as ex:
+            _LOGGER.error("Auth error turning on breaker %s: %s", self.name, ex)
+            self.async_write_ha_state()
+            return
+        except Exception as ex:
+            _LOGGER.error("Error turning on breaker %s: %s", self.name, ex)
+            self.async_write_ha_state()
+            return
 
         if result:
             self._state = True
             self.async_write_ha_state()
-            # Wait for the physical device to react before refreshing
-            await asyncio.sleep(2)
-            await self.coordinator.async_request_refresh()
         else:
             _LOGGER.error("Failed to turn on breaker %s", self.name)
-            # Write state immediately to revert the UI toggle to its previous position
             self.async_write_ha_state()
 
     @property

@@ -349,23 +349,37 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             if fields_to_log_str := options.get("log_fields", ""):
                 fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
                 log_output = {}
-                if data and data.get('cts'):
+                if data:
                     for ct_id, ct_data in data.get('cts', {}).items():
                         for field in fields_to_log:
                             if field in ct_data:
                                 log_output[f"CT_{ct_id}_{field}"] = ct_data[field]
+                    
+                    for b_id, b_data in data.get('breakers', {}).items():
+                        for field in fields_to_log:
+                            if field in b_data:
+                                log_output[f"Breaker_{b_data.get('name', b_id)}_{field}"] = b_data[field]
+                    
+                    for panel in data.get('panels', []):
+                        for field in fields_to_log:
+                            if field in panel:
+                                log_output[f"Panel_{panel.get('name', panel.get('id', '?'))}_{field}"] = panel[field]
                 
                 if log_output:
                     _LOGGER.warning("Leviton %s Selected Data: %s", source, log_output)
 
+    _REDACT_KEYS = frozenset({
+        "IP", "Token", "residenceId", "mac", "residentialRoomId",
+        "id", "userId", "accountId", "auth_token", "refresh_token",
+        "password", "serialNumber", "ttl", "created",
+    })
+
     def _redact_data(self, data):
         """Redact sensitive fields from data for logging."""
         if isinstance(data, dict):
-            # Create a new dict to avoid modifying the original data
             redacted = {}
             for key, value in data.items():
-                # Check for the specific keys requested
-                if key in ["IP", "Token", "residenceId", "mac", "residentialRoomId"]:
+                if key in self._REDACT_KEYS:
                     redacted[key] = "***REDACTED***"
                 else:
                     redacted[key] = self._redact_data(value)

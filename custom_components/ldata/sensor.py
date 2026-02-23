@@ -259,6 +259,34 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 self._state = float(last_state.state)
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
+            
+            # Restore integration baseline values from attributes.
+            # Without these, the first update after restart has last_update_time=0,
+            # so it skips energy calc. The second update then averages with
+            # previous_value=0, producing a half-sized reading.
+            attrs = last_state.attributes or {}
+            try:
+                self.previous_value = float(attrs.get("previous_power", 0))
+            except (ValueError, TypeError):
+                self.previous_value = 0.0
+            try:
+                self.last_update_time = float(attrs.get("last_update_time", 0))
+            except (ValueError, TypeError):
+                self.last_update_time = 0.0
+            if date_str := attrs.get("last_update_date"):
+                try:
+                    self.last_update_date = dt_util.parse_datetime(date_str) or dt_util.now()
+                except (ValueError, TypeError):
+                    self.last_update_date = dt_util.now()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes for state restoration."""
+        attributes = super().extra_state_attributes
+        attributes["previous_power"] = self.previous_value
+        attributes["last_update_time"] = self.last_update_time
+        attributes["last_update_date"] = self.last_update_date.isoformat()
+        return attributes
 
     @property
     def name_suffix(self) -> str | None:
@@ -313,11 +341,7 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 current_time = time.time()
                 current_date = dt_util.now()
                 
-                if (
-                    (self.last_update_date.day != current_date.day)
-                    or (self.last_update_date.month != current_date.month)
-                    or (self.last_update_date.year != current_date.year)
-                ):
+                if self.last_update_date.date() != current_date.date():
                     self._state = 0
                     # Reset the baseline immediately to prevent calculating a phantom spike from the "gap" time across midnight. We treat the new day as starting from "now".
                     self.last_update_time = current_time
@@ -444,7 +468,7 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         # --- Midnight Reset Logic ---
         # Prioritize the midnight check. If the day has rolled over,
         # reset the state and update the date immediately.
-        if self.last_update_date.day != current_date.day:
+        if self.last_update_date.date() != current_date.date():
             if self.coordinator.config_entry.options.get("log_data_warnings", True):
                 _LOGGER.info("New day detected for %s, resetting daily total.", self.entity_id)
             self._state = 0.0
@@ -547,13 +571,21 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
 
     def total_values(self) -> float:
         """Total value for all breakers."""
-        total = 0.0
-        count = 0
-        
-        # Add safety check for coordinator.data
         if not self.coordinator.data or "breakers" not in self.coordinator.data:
             return 0.0
 
+        # Fast path: totalPower is pre-calculated and maintained by all update paths.
+        # Use it for the common case (total power, both legs) to avoid iterating all breakers.
+        if self.entity_description.key == "power" and self.leg_to_total == "both" and not self.is_average:
+            key = self.entity_data["serialNumber"] + "totalPower"
+            try:
+                return float(self.coordinator.data.get(key, 0))
+            except (ValueError, TypeError):
+                return 0.0
+
+        # General path: iterate breakers for per-leg totals, current totals, averages
+        total = 0.0
+        count = 0
         for breaker in self.coordinator.data["breakers"].items():
             breaker_data = breaker[1]
             if breaker_data["panel_id"] == self.entity_data["serialNumber"]:
