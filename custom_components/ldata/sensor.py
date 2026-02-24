@@ -28,7 +28,17 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, LOGGER_NAME
+from .const import (
+    DOMAIN,
+    LOGGER_NAME,
+    GAP_HANDLING,
+    GAP_HANDLING_DEFAULT,
+    GAP_HANDLING_SKIP,
+    GAP_HANDLING_EXTRAPOLATE,
+    GAP_HANDLING_AVERAGE,
+    GAP_THRESHOLD,
+    GAP_THRESHOLD_DEFAULT,
+)
 from .coordinator import LDATAUpdateCoordinator
 from .ldata_ct_entity import LDATACTEntity
 from .ldata_entity import LDATAEntity
@@ -351,23 +361,77 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                     return
 
                 if self.last_update_time > 0:
-                    # Calculate power by averaging current and previous readings.
-                    power = ((self.previous_value + current_value) / 2) / 1000
-                    if power < 0:
-                        power = -power
-                    
                     # Calculate time elapsed since last update in hours.
                     time_span = (current_time - self.last_update_time) / 3600
                     
-                    # Update total energy by adding energy used in the time span (Power * Time).
-                    try:
-                        if self._state is not None:
-                            self._state = self._state + (power * time_span)
-                        else:
-                            self._state = power * time_span
-                    except Exception:
-                        if self.coordinator.config_entry.options.get("log_warnings", True):
-                            _LOGGER.exception("Error in daily usage calculation for %s", self.entity_id)
+                    # Gap detection: if time_span exceeds the configured threshold,
+                    # we have no data for that period and must handle it specially.
+                    gap_threshold_min = self.coordinator.config_entry.options.get(
+                        GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT
+                    )
+                    gap_threshold_hrs = gap_threshold_min / 60.0
+                    
+                    if time_span > gap_threshold_hrs:
+                        # Data gap detected
+                        gap_mode = self.coordinator.config_entry.options.get(
+                            GAP_HANDLING, GAP_HANDLING_DEFAULT
+                        )
+                        
+                        if gap_mode == GAP_HANDLING_SKIP:
+                            # Don't accumulate anything — reset baseline only
+                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                _LOGGER.debug(
+                                    "Gap detected for %s: %.1f min gap, skipping integration",
+                                    self.entity_id, time_span * 60
+                                )
+                        elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
+                            # Use last known power across the entire gap
+                            power = abs(self.previous_value) / 1000
+                            try:
+                                if self._state is not None:
+                                    self._state = self._state + (power * time_span)
+                                else:
+                                    self._state = power * time_span
+                            except Exception:
+                                if self.coordinator.config_entry.options.get("log_warnings", True):
+                                    _LOGGER.exception("Error in gap extrapolation for %s", self.entity_id)
+                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                _LOGGER.debug(
+                                    "Gap detected for %s: %.1f min gap, extrapolated %.3f kWh at %.0fW",
+                                    self.entity_id, time_span * 60, power * time_span, self.previous_value
+                                )
+                        elif gap_mode == GAP_HANDLING_AVERAGE:
+                            # Average last known + recovery power across gap
+                            power = ((self.previous_value + current_value) / 2) / 1000
+                            if power < 0:
+                                power = -power
+                            try:
+                                if self._state is not None:
+                                    self._state = self._state + (power * time_span)
+                                else:
+                                    self._state = power * time_span
+                            except Exception:
+                                if self.coordinator.config_entry.options.get("log_warnings", True):
+                                    _LOGGER.exception("Error in gap average for %s", self.entity_id)
+                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                _LOGGER.debug(
+                                    "Gap detected for %s: %.1f min gap, averaged %.3f kWh (%.0fW → %.0fW)",
+                                    self.entity_id, time_span * 60, power * time_span,
+                                    self.previous_value, current_value
+                                )
+                    else:
+                        # Normal integration — no gap
+                        power = ((self.previous_value + current_value) / 2) / 1000
+                        if power < 0:
+                            power = -power
+                        try:
+                            if self._state is not None:
+                                self._state = self._state + (power * time_span)
+                            else:
+                                self._state = power * time_span
+                        except Exception:
+                            if self.coordinator.config_entry.options.get("log_warnings", True):
+                                _LOGGER.exception("Error in daily usage calculation for %s", self.entity_id)
 
                 # Store current values for the next calculation.
                 self.last_update_time = current_time

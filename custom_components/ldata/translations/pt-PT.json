@@ -36,6 +36,8 @@
                 "data": {
                     "three_phase": "Sistema Trifásico",
                     "allow_breaker_control": "Permitir Controlo dos Disjuntores",
+                    "gap_handling": "Gestão de Interrupções",
+                    "gap_threshold": "Limiar de Interrupção (mins)",
                     "ha_inform_rate": "Taxa de Informação HA (segundos)",
                     "log_warnings": "Registar Erros Gerais de Integração",
                     "log_data_warnings": "Registar Avisos de Valores de Dados (Picos/Resets)",
@@ -47,6 +49,8 @@
                     "ha_inform_rate": "Com que frequência atualizar sensores no Home Assistant (2-600 segundos). Valores mais baixos = mais responsivo mas maior carga no sistema e escritas na BD.",
                     "three_phase": "Ativar para instalações elétricas trifásicas.",
                     "allow_breaker_control": "Quando ativado, o HA criará entidades interruptor permitindo disparar/rearmar disjuntores. Quando desativado, os disjuntores são tratados apenas como sensores.",
+                    "gap_handling": "Como os sensores de energia diária tratam interrupções sem dados. Ignorar: não acumular energia durante a interrupção (mais seguro, pode subestimar em falhas de rede). Extrapolar: assumir que a última potência conhecida continuou (pode sobrestimar em falhas elétricas). Média: usar a média da última potência e a de recuperação (compromisso).",
+                    "gap_threshold": "Tempo sem dados antes da gestão de interrupções ser ativada (1-30 minutos). As atualizações normais chegam a cada 5-30 segundos.",
                     "log_warnings": "Registar falhas de integração ou erros web.",
                     "log_data_warnings": "Registar avisos de inconsistências de dados da Leviton (picos/resets).",
                     "log_all_raw": "Registar todos os dados fornecidos via WebSocket.",

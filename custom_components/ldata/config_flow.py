@@ -24,6 +24,13 @@ from .const import (
     HA_INFORM_RATE_DEFAULT,
     HA_INFORM_RATE_MIN,
     HA_INFORM_RATE_MAX,
+    GAP_HANDLING,
+    GAP_HANDLING_DEFAULT,
+    GAP_HANDLING_OPTIONS,
+    GAP_THRESHOLD,
+    GAP_THRESHOLD_DEFAULT,
+    GAP_THRESHOLD_MIN,
+    GAP_THRESHOLD_MAX,
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 
@@ -264,6 +271,26 @@ class OptionsFlow(config_entries.OptionsFlow):
                 ALLOW_BREAKER_CONTROL,
                 default=current_options.get(ALLOW_BREAKER_CONTROL, current_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)),
             ): bool,
+            vol.Optional(
+                GAP_HANDLING,
+                default=current_options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT),
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(value="skip", label="Skip — Don't accumulate energy during gaps"),
+                        selector.SelectOptionDict(value="extrapolate", label="Extrapolate — Assume last known power continued"),
+                        selector.SelectOptionDict(value="average", label="Average — Use mean of last and recovery power"),
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional(
+                GAP_THRESHOLD,
+                default=current_options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT),
+            ): vol.All(
+                vol.Coerce(float),
+                vol.Range(min=GAP_THRESHOLD_MIN, max=GAP_THRESHOLD_MAX)
+            ),
             vol.Optional(
                 "log_warnings",
                 default=current_options.get("log_warnings", True),

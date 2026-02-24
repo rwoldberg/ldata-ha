@@ -36,6 +36,8 @@
                 "data": {
                     "three_phase": "Système triphasé",
                     "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
+                    "gap_handling": "Gestion des interruptions",
+                    "gap_threshold": "Seuil d'interruption (mins)",
                     "ha_inform_rate": "Taux d'information HA (secondes)",
                     "log_warnings": "Journaliser les erreurs générales d'intégration",
                     "log_data_warnings": "Journaliser les avertissements de données (pics/réinitialisations)",
@@ -47,6 +49,8 @@
                     "ha_inform_rate": "Fréquence de mise à jour des capteurs dans Home Assistant (2-600 secondes). Des valeurs plus basses = plus réactif mais charge système et écritures BD plus élevées.",
                     "three_phase": "Activer pour les installations électriques triphasées.",
                     "allow_breaker_control": "Lorsqu'activé, HA créera des entités interrupteur permettant de déclencher/réarmer les disjoncteurs. Lorsque désactivé, les disjoncteurs sont uniquement traités comme des capteurs.",
+                    "gap_handling": "Comment les capteurs d'énergie quotidienne gèrent les interruptions sans données. Ignorer : ne pas accumuler d'énergie pendant l'interruption (plus sûr, peut sous-estimer lors de pannes réseau). Extrapoler : supposer que la dernière puissance connue a continué (peut surestimer lors de pannes électriques). Moyenne : utiliser la moyenne de la dernière puissance et celle de reprise (compromis).",
+                    "gap_threshold": "Durée sans données avant activation de la gestion des interruptions (1-30 minutes). Les mises à jour normales arrivent toutes les 5-30 secondes.",
                     "log_warnings": "Journaliser les plantages d'intégration ou les erreurs web.",
                     "log_data_warnings": "Journaliser les avertissements d'incohérences de données de Leviton (pics/réinitialisations).",
                     "log_all_raw": "Journaliser toutes les données fournies via WebSocket.",
