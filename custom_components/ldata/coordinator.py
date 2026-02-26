@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 # REST polling interval for breaker/CT data (seconds)
 # This is a FALLBACK — only used when WS auto-detection confirms a panel
 # does not deliver breaker data via WebSocket.
-REST_POLL_INTERVAL = 30
+REST_POLL_INTERVAL = 60
 
 # Grace period (seconds) before REST poll loops start actively polling.
 # This gives the WebSocket time to connect, subscribe, and prove whether
@@ -136,22 +136,22 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._debounce_timer = None
 
     async def _rest_poll_loop(self):
-        """Periodically poll the REST API for fresh breaker and CT data.
+        """Periodically poll the REST API for fresh breaker data.
         
         WS-FIRST STRATEGY: This loop is a FALLBACK. It waits for the WebSocket
-        auto-detection grace period before starting, giving WS time to prove
-        it can deliver breaker data. Only panels where WS demonstrably fails
-        to deliver breaker data will be polled via REST.
+        auto-detection grace period before starting. Only panels where WS 
+        demonstrably fails to deliver breaker data will be polled via REST.
+        
+        On panels with hardware energy counters (firmware 2.0+), daily energy
+        uses hardware counters and this poll is only needed for power/current
+        freshness. On older firmware, this poll is critical for daily energy
+        (power×time integration).
         """
-        # Wait for initial data to be available before starting the poll loop
+        # Wait for initial data
         while not self._service.status_data and not self._service._shutdown_requested:
             await asyncio.sleep(5)
         
-        # WS-first: wait for the full detection grace period.
-        # During this time, the WebSocket is connecting, subscribing, and
-        # the auto-detection in _update_from_websocket is tracking whether
-        # IotWhem messages contain breaker data. If WS delivers breaker data,
-        # _panel_needs_rest_poll stays False and this loop does nothing.
+        # Wait for WS auto-detection grace period
         _LOGGER.debug(
             f"[v{self._service.version}] REST poll loop: waiting {WS_DETECTION_GRACE_PERIOD}s "
             f"for WebSocket auto-detection before enabling fallback polling"
@@ -182,9 +182,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 if self._service._shutdown_requested:
                     break
                 
-                # WS-first: only run the REST poll if at least one panel needs it.
-                # This check is dynamic — if WS starts delivering breaker data for
-                # a panel that was previously REST-polled, polling stops for that panel.
+                # Only poll if at least one panel needs it
                 if not self._service.needs_rest_poll:
                     continue
                 
@@ -194,7 +192,6 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 )
                 
                 if refreshed:
-                    # Trigger a debounced update to HA
                     self._handle_websocket_update()
                     
             except asyncio.CancelledError:
@@ -209,33 +206,26 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug(f"[v{self._service.version}] REST poll loop stopped")
 
     async def _ct_poll_loop(self):
-        """Fast poll loop for CT energy data on panels where WS doesn't deliver it.
+        """Poll loop for CT energy data.
         
-        WS-FIRST STRATEGY: This loop is a FALLBACK. It waits for the WebSocket
-        auto-detection grace period. Only panels where WS fails to deliver
-        energyConsumption/energyImport will be polled. If WS delivers all CT
-        data, this loop does nothing.
+        CT energy counters require a bandwidth toggle (1→0→1) to refresh.
+        This only runs for panels that have CTs (set during parse_panels).
         """
         # Wait for initial data to be available
         while not self._service.status_data and not self._service._shutdown_requested:
             await asyncio.sleep(5)
         
-        # WS-first: wait for the full detection grace period + a bit extra
-        # so the REST poll loop detects first
-        _LOGGER.debug(
-            f"[v{self._service.version}] CT poll loop: waiting {WS_DETECTION_GRACE_PERIOD + 5}s "
-            f"for WebSocket auto-detection before enabling fallback CT polling"
-        )
-        await asyncio.sleep(WS_DETECTION_GRACE_PERIOD + 5)
+        # Brief startup delay to let WS connect first
+        await asyncio.sleep(10)
         
         if self._service.needs_rest_poll:
             _LOGGER.info(
-                f"[v{self._service.version}] CT poll loop started as fallback "
-                f"(interval={CT_POLL_INTERVAL}s, panels: "
+                f"[v{self._service.version}] CT poll loop started "
+                f"(interval={CT_POLL_INTERVAL}s, panels with CTs: "
                 f"{[pid for pid, need in self._service._panel_needs_rest_poll.items() if need]})"
             )
         else:
-            _LOGGER.debug(f"[v{self._service.version}] CT poll loop started (no panels need CT polling, monitoring...)")
+            _LOGGER.debug(f"[v{self._service.version}] CT poll loop: no panels have CTs, monitoring...")
         
         while not self._service._shutdown_requested:
             try:

@@ -1,61 +1,58 @@
 {
     "config": {
-        "abort": {
-            "already_configured": "A conta já se encontra configurada",
-            "reauth_successful": "Reautenticação bem-sucedida"
-        },
-        "error": {
-            "cannot_connect": "Falha na ligação",
-            "invalid_auth": "Autenticação inválida",
-            "invalid_2fa": "Código 2FA inválido, por favor tente novamente",
-            "unknown": "Erro inesperado"
-        },
         "step": {
             "user": {
                 "data": {
-                    "username": "Utilizador my.leviton.com",
+                    "username": "Nome de utilizador my.leviton.com",
                     "password": "Palavra-passe my.leviton.com",
-                    "three_phase": "Energia trifásica",
-                    "allow_breaker_control": "Permitir controlo dos disjuntores"
+                    "three_phase": "Sistema trifásico",
+                    "allow_breaker_control": "Permitir controlo de disjuntores"
                 },
                 "title": "Configurar LDATA"
             },
             "2fa": {
-                "title": "Autenticação de Dois Fatores",
-                "description": "É necessário um código de autenticação de dois fatores para {username}. Por favor, verifique a sua aplicação de autenticação ou e-mail e introduza o código abaixo.",
+                "title": "Autenticação de dois fatores",
+                "description": "É necessário um código de autenticação de dois fatores para {username}. Verifique a sua aplicação de autenticação ou e-mail e introduza o código abaixo.",
                 "data": {
-                    "2fa_code": "Código de Autenticação"
+                    "2fa_code": "Código de autenticação"
                 }
             }
+        },
+        "error": {
+            "cannot_connect": "Não foi possível conectar",
+            "invalid_auth": "Autenticação inválida",
+            "unknown": "Erro desconhecido",
+            "invalid_2fa": "Código de dois fatores inválido. Por favor, tente novamente.",
+            "2fa_expired": "Código de dois fatores expirado. Por favor, reinicie a configuração.",
+            "2fa_required": "Autenticação de dois fatores necessária"
+        },
+        "abort": {
+            "already_configured": "O dispositivo já está configurado"
         }
     },
     "options": {
         "step": {
             "init": {
-                "title": "Opções Leviton LDATA",
+                "title": "Configurar LDATA",
                 "data": {
-                    "three_phase": "Sistema Trifásico",
-                    "allow_breaker_control": "Permitir Controlo dos Disjuntores",
-                    "gap_handling": "Gestão de Interrupções",
+                    "three_phase": "Sistema trifásico",
+                    "allow_breaker_control": "Permitir controlo de disjuntores",
+                    "gap_handling": "Gestão de Interrupções (firmware antigo)",
                     "gap_threshold": "Limiar de Interrupção (mins)",
-                    "ha_inform_rate": "Taxa de Informação HA (segundos)",
-                    "log_warnings": "Registar Erros Gerais de Integração",
-                    "log_data_warnings": "Registar Avisos de Valores de Dados (Picos/Resets)",
-                    "log_all_raw": "Registar Dados Completos de WebSocket",
-                    "enable_specific_logging": "Ativar Registo de Campos Específicos",
-                    "log_fields": "Campos a Registar"
+                    "ha_inform_rate": "Taxa de informação HA (segundos)",
+                    "log_warnings": "Registar avisos",
+                    "log_data_warnings": "Registar avisos de dados",
+                    "log_specific_fields": "Registar campos específicos"
                 },
                 "data_description": {
-                    "ha_inform_rate": "Com que frequência atualizar sensores no Home Assistant (2-600 segundos). Valores mais baixos = mais responsivo mas maior carga no sistema e escritas na BD.",
-                    "three_phase": "Ativar para instalações elétricas trifásicas.",
-                    "allow_breaker_control": "Quando ativado, o HA criará entidades interruptor permitindo disparar/rearmar disjuntores. Quando desativado, os disjuntores são tratados apenas como sensores.",
-                    "gap_handling": "Como os sensores de energia diária tratam interrupções sem dados. Ignorar: não acumular energia durante a interrupção (mais seguro, pode subestimar em falhas de rede). Extrapolar: assumir que a última potência conhecida continuou (pode sobrestimar em falhas elétricas). Média: usar a média da última potência e a de recuperação (compromisso).",
-                    "gap_threshold": "Tempo sem dados antes da gestão de interrupções ser ativada (1-30 minutos). As atualizações normais chegam a cada 5-30 segundos.",
-                    "log_warnings": "Registar falhas de integração ou erros web.",
-                    "log_data_warnings": "Registar avisos de inconsistências de dados da Leviton (picos/resets).",
-                    "log_all_raw": "Registar todos os dados fornecidos via WebSocket.",
-                    "enable_specific_logging": "Registar qualquer campo especificado. Os nomes dos campos podem ser encontrados ativando brevemente 'Registar Dados Completos de WebSocket'.",
-                    "log_fields": "Para encontrar nomes de campos, ative 'Registar Todos os Dados Brutos da API' e verifique os registos do Home Assistant. Introduza acima separados por vírgulas."
+                    "three_phase": "Ativar suporte para alimentação trifásica.",
+                    "allow_breaker_control": "Quando ativado, o HA criará interruptores para acionar/repor disjuntores.",
+                    "gap_handling": "Reserva para firmware antigo sem contadores. Ignorar: mais seguro. Extrapolar: última potência. Média: compromisso. Firmware 2.0+ usa contadores de hardware.",
+                    "gap_threshold": "Tempo sem dados antes da ativação (1-30 minutos). Apenas modo de reserva.",
+                    "ha_inform_rate": "Intervalo em segundos entre atualizações enviadas ao HA (mínimo 2s, máximo 600s).",
+                    "log_warnings": "Registar falhas da integração ou erros web.",
+                    "log_data_warnings": "Registar dados em falta ou inconsistentes.",
+                    "log_specific_fields": "Lista de campos separados por vírgulas para registar (ex: power,current,consumption)."
                 }
             }
         }

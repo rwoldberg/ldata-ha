@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import datetime
 from dataclasses import dataclass
 import logging
 import time
@@ -38,6 +39,8 @@ from .const import (
     GAP_HANDLING_AVERAGE,
     GAP_THRESHOLD,
     GAP_THRESHOLD_DEFAULT,
+    HW_COUNTER_NONE_TOLERANCE,
+    MAX_DAILY_ENERGY_KWH,
 )
 from .coordinator import LDATAUpdateCoordinator
 from .ldata_ct_entity import LDATACTEntity
@@ -153,6 +156,17 @@ async def async_setup_entry(
         entities_to_add.append(
             LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[2])
         )
+        # Add lifetime Import and Consumption sensors for breakers that have
+        # hardware energy counters. These are TOTAL_INCREASING and feed the
+        # HA Energy dashboard directly (solar production via Import, grid
+        # consumption via Consumption). Created unconditionally — if a breaker
+        # doesn't have hw counters, the sensor stays at 0/None harmlessly.
+        entities_to_add.append(
+            LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[4])
+        )
+        entities_to_add.append(
+            LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[5])
+        )
 
     for panel in coordinator.data.get("panels", []):
         entity_data = {}
@@ -241,7 +255,18 @@ async def async_setup_entry(
 
 
 class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
-    """Sensor that tracks daily usage for an LDATA device."""
+    """Sensor that tracks daily usage for an LDATA device.
+    
+    Dual-mode operation:
+    1. Hardware counters (primary): Uses energyConsumption lifetime kWh totals.
+       Daily energy = current_consumption - midnight_baseline.
+       Available on firmware 2.0+ panels.
+    2. Power×time integration (fallback): For older firmware without hardware
+       counters. Integrates power over time with configurable gap handling.
+    
+    Mode is auto-detected per panel based on whether energyConsumption data
+    is available.
+    """
 
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_device_class = SensorDeviceClass.ENERGY
@@ -254,11 +279,25 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state: float | None = None
-        self.last_update_time = 0.0
-        self.previous_value = 0.0
-        self.last_update_date = dt_util.now()
+        self._last_reported: float | None = None  # Monotonic clamp for TOTAL_INCREASING
         self.panel_total = panelTotal
         self.panel_id = which_panel
+        # --- Hardware counter mode ---
+        self._midnight_baseline: float | None = None
+        self._last_date: datetime.date | None = None
+        # For panel total: per-breaker baselines {breaker_id: baseline_consumption}
+        self._panel_baselines: dict[str, float] = {}
+        # --- Power×time fallback mode ---
+        self._last_update_time: float | None = None  # time.time() of last update
+        self._last_power: float | None = None  # Last known power in watts
+        # Track which mode this sensor is using (set on first update)
+        self._use_hw_counters: bool | None = None
+        # Which energy counter to use: "consumption" for normal breakers,
+        # "import" for solar breakers (auto-detected on first update).
+        self._energy_key: str | None = None
+        # Consecutive None readings from _get_breaker_consumption — used to
+        # distinguish transient reconnect glitches from genuine hw counter loss.
+        self._consecutive_none: int = 0
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass to restore state on startup."""
@@ -268,34 +307,52 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             try:
                 self._state = float(last_state.state)
             except (ValueError, TypeError):
-                pass # Ignore if the stored state is invalid
+                pass
             
-            # Restore integration baseline values from attributes.
-            # Without these, the first update after restart has last_update_time=0,
-            # so it skips energy calc. The second update then averages with
-            # previous_value=0, producing a half-sized reading.
             attrs = last_state.attributes or {}
+            # Restore hardware counter state
             try:
-                self.previous_value = float(attrs.get("previous_power", 0))
-            except (ValueError, TypeError):
-                self.previous_value = 0.0
-            try:
-                self.last_update_time = float(attrs.get("last_update_time", 0))
-            except (ValueError, TypeError):
-                self.last_update_time = 0.0
-            if date_str := attrs.get("last_update_date"):
+                self._midnight_baseline = float(attrs["midnight_baseline"])
+            except (KeyError, ValueError, TypeError):
+                self._midnight_baseline = None
+            if date_str := attrs.get("last_date"):
                 try:
-                    self.last_update_date = dt_util.parse_datetime(date_str) or dt_util.now()
+                    parsed = dt_util.parse_datetime(date_str)
+                    self._last_date = parsed.date() if parsed else None
                 except (ValueError, TypeError):
-                    self.last_update_date = dt_util.now()
+                    self._last_date = None
+            # Restore panel baselines
+            if panel_baselines_str := attrs.get("panel_baselines"):
+                try:
+                    import json
+                    self._panel_baselines = {k: float(v) for k, v in json.loads(panel_baselines_str).items()}
+                except (ValueError, TypeError, json.JSONDecodeError):
+                    self._panel_baselines = {}
+            # Restore power×time fallback state
+            try:
+                self._last_update_time = float(attrs["last_update_time"])
+            except (KeyError, ValueError, TypeError):
+                self._last_update_time = None
+            # Restore mode flag
+            if "use_hw_counters" in attrs:
+                self._use_hw_counters = attrs["use_hw_counters"]
+            # Restore energy key (consumption vs import)
+            if "energy_key" in attrs:
+                self._energy_key = attrs["energy_key"]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes for state restoration."""
+        import json
         attributes = super().extra_state_attributes
-        attributes["previous_power"] = self.previous_value
-        attributes["last_update_time"] = self.last_update_time
-        attributes["last_update_date"] = self.last_update_date.isoformat()
+        attributes["midnight_baseline"] = self._midnight_baseline
+        attributes["last_date"] = self._last_date.isoformat() if self._last_date else None
+        attributes["use_hw_counters"] = self._use_hw_counters
+        attributes["energy_key"] = self._energy_key
+        if self._last_update_time is not None:
+            attributes["last_update_time"] = self._last_update_time
+        if self.panel_total and self._panel_baselines:
+            attributes["panel_baselines"] = json.dumps(self._panel_baselines)
         return attributes
 
     @property
@@ -312,136 +369,394 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     def native_value(self) -> StateType:
         """Return the used kilowatts of the device."""
         if self._state is not None:
-            return round(self._state, 2)
+            val = round(self._state, 2)
+            # TOTAL_INCREASING clamp: never report a decrease within a day.
+            # Hardware counter jitter (e.g. 21.31→21.30) or rounding can
+            # cause tiny dips that trigger HA recorder warnings.
+            # Midnight resets (val near 0 while _last_reported is high) are
+            # allowed — HA handles those natively for TOTAL_INCREASING.
+            if self._last_reported is not None and val < self._last_reported:
+                if val > 0.5:  # Not a midnight reset
+                    return self._last_reported
+            self._last_reported = val
+            return val
         return 0.0
+
+    def _detect_energy_key(self) -> str:
+        """Detect whether this breaker is solar (uses import) or normal (uses consumption).
+        
+        Solar breakers have energyImport >> energyConsumption.
+        Normal breakers have energyConsumption >> energyImport.
+        """
+        if breakers := self.coordinator.data.get("breakers"):
+            if breaker := breakers.get(self.breaker_data["id"]):
+                imp = float(breaker.get("import", 0) or 0)
+                cons = float(breaker.get("consumption", 0) or 0)
+                if imp > cons and imp > 1.0:
+                    _LOGGER.info(
+                        "Daily sensor %s: detected as solar breaker "
+                        "(import=%.1f >> consumption=%.1f) — using energyImport",
+                        self.entity_id, imp, cons
+                    )
+                    return "import"
+        return "consumption"
+
+    def _get_breaker_consumption(self, breaker_id: str) -> float | None:
+        """Get the current lifetime energy counter for a breaker, or None if unavailable.
+        
+        Uses energyImport for solar breakers, energyConsumption for normal breakers.
+        Returns None for zero values when the breaker hasn't been seen yet,
+        since none_to_zero converts missing values to 0.0 during parse_panels
+        or reconnect — a false reading, not a real counter.
+        """
+        if breakers := self.coordinator.data.get("breakers"):
+            if breaker := breakers.get(breaker_id):
+                key = self._energy_key or "consumption"
+                val = breaker.get(key)
+                if val is not None:
+                    try:
+                        fval = float(val)
+                        # Reject 0.0 if we have a non-zero baseline — this is
+                        # almost certainly a stale/missing value from parse_panels
+                        # where none_to_zero converted None → 0.0, not a real
+                        # counter that happens to be exactly zero.
+                        if fval == 0.0 and self._midnight_baseline and self._midnight_baseline > 1.0:
+                            return None
+                        return fval
+                    except (ValueError, TypeError):
+                        pass
+        return None
+
+    def _detect_mode(self) -> bool:
+        """Detect whether to use hardware counters or power×time fallback.
+        
+        Returns True for hardware counters, False for power×time.
+        """
+        # Check if ldata_service detected hw counters for this panel
+        if hasattr(self.coordinator, '_service') and self.coordinator._service:
+            return self.coordinator._service.panel_has_hw_counters(self.panel_id)
+        # Fallback: check if consumption data exists on this breaker
+        if not self.panel_total:
+            consumption = self._get_breaker_consumption(self.breaker_data["id"])
+            return consumption is not None and consumption > 0
+        return False
 
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
-        # Add safety check for coordinator data
         if not self.coordinator.data:
             return
 
         try:
-            have_values = False
-            new_data = None
-            if self.panel_total is True:
-                current_value = 0
-                if (self.panel_id + "totalPower") in self.coordinator.data:
-                    current_value = self.coordinator.data[self.panel_id + "totalPower"]
-                    have_values = True
+            # Auto-detect mode on first update
+            if self._use_hw_counters is None:
+                self._use_hw_counters = self._detect_mode()
+                if self._use_hw_counters:
+                    _LOGGER.debug("Daily sensor %s: using hardware energy counters", self.entity_id)
+                else:
+                    _LOGGER.debug("Daily sensor %s: using power×time fallback", self.entity_id)
+
+            # Auto-detect energy key on first update (solar vs normal breaker)
+            if self._energy_key is None and not self.panel_total:
+                self._energy_key = self._detect_energy_key()
+
+            today = dt_util.now().date()
+            is_new_day = self._last_date is not None and self._last_date != today
+
+            if self._use_hw_counters:
+                if self.panel_total:
+                    self._update_panel_total_hw(today, is_new_day)
+                else:
+                    self._update_single_breaker_hw(today, is_new_day)
             else:
-                if "breakers" in self.coordinator.data and self.breaker_data["id"] in self.coordinator.data["breakers"]:
-                    new_data = self.coordinator.data["breakers"][self.breaker_data["id"]]
-            
-            if ((self.panel_total is True) and (have_values is True)) or (
-                new_data is not None
-            ):
-                if new_data is not None:
-                    current_value = new_data["power"]
-                try:
-                    current_value = float(current_value)
-                except ValueError:
-                    current_value = 0
-                try:
-                    self.previous_value = float(self.previous_value)
-                except ValueError:
-                    self.previous_value = 0
-                
-                current_time = time.time()
-                current_date = dt_util.now()
-                
-                if self.last_update_date.date() != current_date.date():
-                    self._state = 0
-                    # Reset the baseline immediately to prevent calculating a phantom spike from the "gap" time across midnight. We treat the new day as starting from "now".
-                    self.last_update_time = current_time
-                    self.previous_value = current_value
-                    self.last_update_date = current_date
-                    self.async_write_ha_state()
-                    return
+                if self.panel_total:
+                    self._update_panel_total_pxt(today, is_new_day)
+                else:
+                    self._update_single_breaker_pxt(today, is_new_day)
 
-                if self.last_update_time > 0:
-                    # Calculate time elapsed since last update in hours.
-                    time_span = (current_time - self.last_update_time) / 3600
-                    
-                    # Gap detection: if time_span exceeds the configured threshold,
-                    # we have no data for that period and must handle it specially.
-                    gap_threshold_min = self.coordinator.config_entry.options.get(
-                        GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT
-                    )
-                    gap_threshold_hrs = gap_threshold_min / 60.0
-                    
-                    if time_span > gap_threshold_hrs:
-                        # Data gap detected
-                        gap_mode = self.coordinator.config_entry.options.get(
-                            GAP_HANDLING, GAP_HANDLING_DEFAULT
-                        )
-                        
-                        if gap_mode == GAP_HANDLING_SKIP:
-                            # Don't accumulate anything — reset baseline only
-                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
-                                _LOGGER.debug(
-                                    "Gap detected for %s: %.1f min gap, skipping integration",
-                                    self.entity_id, time_span * 60
-                                )
-                        elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
-                            # Use last known power across the entire gap
-                            power = abs(self.previous_value) / 1000
-                            try:
-                                if self._state is not None:
-                                    self._state = self._state + (power * time_span)
-                                else:
-                                    self._state = power * time_span
-                            except Exception:
-                                if self.coordinator.config_entry.options.get("log_warnings", True):
-                                    _LOGGER.exception("Error in gap extrapolation for %s", self.entity_id)
-                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
-                                _LOGGER.debug(
-                                    "Gap detected for %s: %.1f min gap, extrapolated %.3f kWh at %.0fW",
-                                    self.entity_id, time_span * 60, power * time_span, self.previous_value
-                                )
-                        elif gap_mode == GAP_HANDLING_AVERAGE:
-                            # Average last known + recovery power across gap
-                            power = ((self.previous_value + current_value) / 2) / 1000
-                            if power < 0:
-                                power = -power
-                            try:
-                                if self._state is not None:
-                                    self._state = self._state + (power * time_span)
-                                else:
-                                    self._state = power * time_span
-                            except Exception:
-                                if self.coordinator.config_entry.options.get("log_warnings", True):
-                                    _LOGGER.exception("Error in gap average for %s", self.entity_id)
-                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
-                                _LOGGER.debug(
-                                    "Gap detected for %s: %.1f min gap, averaged %.3f kWh (%.0fW → %.0fW)",
-                                    self.entity_id, time_span * 60, power * time_span,
-                                    self.previous_value, current_value
-                                )
-                    else:
-                        # Normal integration — no gap
-                        power = ((self.previous_value + current_value) / 2) / 1000
-                        if power < 0:
-                            power = -power
-                        try:
-                            if self._state is not None:
-                                self._state = self._state + (power * time_span)
-                            else:
-                                self._state = power * time_span
-                        except Exception:
-                            if self.coordinator.config_entry.options.get("log_warnings", True):
-                                _LOGGER.exception("Error in daily usage calculation for %s", self.entity_id)
-
-                # Store current values for the next calculation.
-                self.last_update_time = current_time
-                self.previous_value = current_value
-                self.last_update_date = current_date
+            self._last_date = today
         except Exception:
-            # Catch all other errors to prevent crashes.
             if self.coordinator.config_entry.options.get("log_warnings", True):
                 _LOGGER.exception("Error updating daily usage sensor for %s", self.entity_id)
         self.async_write_ha_state()
+
+    # ── Hardware counter mode ────────────────────────────────────────────
+
+    def _update_single_breaker_hw(self, today: datetime.date, is_new_day: bool):
+        """Update daily energy for a single breaker using hardware counter.
+        
+        Uses energyImport for solar breakers, energyConsumption for normal
+        breakers (auto-detected via _energy_key).
+        """
+        consumption = self._get_breaker_consumption(self.breaker_data["id"])
+        if consumption is None:
+            self._consecutive_none += 1
+            if self._consecutive_none >= HW_COUNTER_NONE_TOLERANCE:
+                self._use_hw_counters = False
+                self._consecutive_none = 0
+                _LOGGER.warning(
+                    "Hardware counter unavailable for %s after %d consecutive reads "
+                    "— switching to power×time fallback",
+                    self.entity_id, HW_COUNTER_NONE_TOLERANCE
+                )
+            else:
+                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                    _LOGGER.debug(
+                        "Transient None for %s (count=%d/%d) — skipping update",
+                        self.entity_id, self._consecutive_none, HW_COUNTER_NONE_TOLERANCE
+                    )
+            return
+
+        self._consecutive_none = 0
+
+        if is_new_day:
+            if self._midnight_baseline is not None and self._midnight_baseline > 10.0 and consumption < 1.0:
+                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                    _LOGGER.warning(
+                        "New-day reset for %s: consumption=%.3f is suspiciously low "
+                        "(previous baseline=%.3f) — carrying forward old baseline",
+                        self.entity_id, consumption, self._midnight_baseline
+                    )
+                self._state = 0.0
+                return
+
+            self._midnight_baseline = consumption
+            self._state = 0.0
+            return
+
+        if self._midnight_baseline is None:
+            self._midnight_baseline = consumption
+            self._state = 0.0
+            return
+
+        daily = consumption - self._midnight_baseline
+        if daily < 0:
+            if consumption < 1.0 and self._midnight_baseline > 10.0:
+                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                    _LOGGER.debug(
+                        "Ignoring suspicious consumption=%.3f for %s (baseline=%.3f) — likely transient",
+                        consumption, self.entity_id, self._midnight_baseline
+                    )
+                return
+
+            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                _LOGGER.warning(
+                    "Consumption counter reset for %s: was %.3f, now %.3f — re-baselining",
+                    self.entity_id, self._midnight_baseline, consumption
+                )
+            self._midnight_baseline = consumption
+            daily = 0.0
+
+        if daily > MAX_DAILY_ENERGY_KWH:
+            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                _LOGGER.warning(
+                    "Daily energy %.1f kWh for %s exceeds sanity cap (%.0f kWh) "
+                    "— likely corrupted baseline (%.3f). Re-baselining.",
+                    daily, self.entity_id, MAX_DAILY_ENERGY_KWH, self._midnight_baseline
+                )
+            self._midnight_baseline = consumption
+            daily = 0.0
+
+        self._state = daily
+
+    def _update_panel_total_hw(self, today: datetime.date, is_new_day: bool):
+        """Update daily energy for the panel total by summing all breaker deltas.
+        
+        Uses energyImport for solar breakers, energyConsumption for normal.
+        """
+        breakers = self.coordinator.data.get("breakers", {})
+        if not breakers:
+            return
+
+        if is_new_day:
+            new_baselines = {}
+            for b_id, b_data in breakers.items():
+                if b_data.get("panel_id") == self.panel_id:
+                    # Pick the right energy key per breaker
+                    imp = float(b_data.get("import", 0) or 0)
+                    cons = float(b_data.get("consumption", 0) or 0)
+                    key = "import" if (imp > cons and imp > 1.0) else "consumption"
+                    val = b_data.get(key)
+                    if val is not None:
+                        try:
+                            fval = float(val)
+                            old_baseline = self._panel_baselines.get(b_id)
+                            if old_baseline is not None and old_baseline > 10.0 and fval < 1.0:
+                                _LOGGER.debug(
+                                    "Panel total new-day: keeping old baseline for breaker %s "
+                                    "(value=%.3f, old_baseline=%.3f)",
+                                    b_id, fval, old_baseline
+                                )
+                                new_baselines[b_id] = old_baseline
+                            else:
+                                new_baselines[b_id] = fval
+                        except (ValueError, TypeError):
+                            pass
+            self._panel_baselines = new_baselines
+            self._state = 0.0
+            return
+
+        # Build baselines for new breakers
+        for b_id, b_data in breakers.items():
+            if b_data.get("panel_id") == self.panel_id and b_id not in self._panel_baselines:
+                imp = float(b_data.get("import", 0) or 0)
+                cons = float(b_data.get("consumption", 0) or 0)
+                key = "import" if (imp > cons and imp > 1.0) else "consumption"
+                val = b_data.get(key)
+                if val is not None:
+                    try:
+                        self._panel_baselines[b_id] = float(val)
+                    except (ValueError, TypeError):
+                        pass
+
+        # Sum deltas
+        total_daily = 0.0
+        for b_id, baseline in self._panel_baselines.items():
+            if b_id in breakers:
+                b_data = breakers[b_id]
+                imp = float(b_data.get("import", 0) or 0)
+                cons = float(b_data.get("consumption", 0) or 0)
+                key = "import" if (imp > cons and imp > 1.0) else "consumption"
+                val = b_data.get(key)
+                if val is not None:
+                    try:
+                        fval = float(val)
+                        if fval == 0.0 and baseline > 1.0:
+                            continue
+                        delta = fval - baseline
+                        if delta > 0:
+                            if delta > MAX_DAILY_ENERGY_KWH:
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.warning(
+                                        "Panel total: breaker %s delta %.1f kWh exceeds cap — "
+                                        "re-baselining (baseline=%.3f, value=%.3f)",
+                                        b_id, delta, baseline, fval
+                                    )
+                                self._panel_baselines[b_id] = fval
+                                continue
+                            total_daily += delta
+                    except (ValueError, TypeError):
+                        pass
+
+        self._state = total_daily
+
+    # ── Power×time fallback mode ─────────────────────────────────────────
+
+    def _update_single_breaker_pxt(self, today: datetime.date, is_new_day: bool):
+        """Update daily energy for a single breaker using power×time integration."""
+        new_data = self.coordinator.data.get("breakers", {}).get(self.breaker_data["id"])
+        if not new_data:
+            return
+        
+        try:
+            current_power = abs(float(new_data.get("power", 0)))
+        except (ValueError, TypeError):
+            return
+
+        now = time.time()
+        options = self.coordinator.config_entry.options
+
+        if is_new_day:
+            self._state = 0.0
+            self._last_update_time = now
+            self._last_power = current_power
+            return
+
+        if self._last_update_time is None or self._state is None:
+            # First run — establish baseline
+            self._last_update_time = now
+            self._last_power = current_power
+            if self._state is None:
+                self._state = 0.0
+            return
+
+        time_span = now - self._last_update_time
+        if time_span <= 0:
+            return
+
+        gap_threshold_secs = options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT) * 60
+        gap_mode = options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT)
+
+        if time_span > gap_threshold_secs:
+            # Gap detected
+            if gap_mode == GAP_HANDLING_SKIP:
+                # Don't accumulate energy during the gap
+                if options.get("log_data_warnings", True):
+                    _LOGGER.debug(
+                        "Gap detected for %s: %.1fs (threshold %.1fs) — skipping",
+                        self.entity_id, time_span, gap_threshold_secs
+                    )
+            elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
+                # Assume last known power continued through the gap
+                last_p = self._last_power or 0
+                energy_kwh = (last_p * time_span) / 3_600_000
+                self._state += energy_kwh
+            elif gap_mode == GAP_HANDLING_AVERAGE:
+                # Average of last known and recovery power
+                last_p = self._last_power or 0
+                avg_power = (last_p + current_power) / 2
+                energy_kwh = (avg_power * time_span) / 3_600_000
+                self._state += energy_kwh
+        else:
+            # Normal integration: power × time
+            avg_power = ((self._last_power or 0) + current_power) / 2
+            energy_kwh = (avg_power * time_span) / 3_600_000
+            self._state += energy_kwh
+
+        self._last_update_time = now
+        self._last_power = current_power
+
+    def _update_panel_total_pxt(self, today: datetime.date, is_new_day: bool):
+        """Update daily energy for panel total using totalPower × time integration."""
+        try:
+            current_power = abs(float(
+                self.coordinator.data.get(self.panel_id + "totalPower", 0)
+            ))
+        except (ValueError, TypeError):
+            return
+
+        now = time.time()
+        options = self.coordinator.config_entry.options
+
+        if is_new_day:
+            self._state = 0.0
+            self._last_update_time = now
+            self._last_power = current_power
+            return
+
+        if self._last_update_time is None or self._state is None:
+            self._last_update_time = now
+            self._last_power = current_power
+            if self._state is None:
+                self._state = 0.0
+            return
+
+        time_span = now - self._last_update_time
+        if time_span <= 0:
+            return
+
+        gap_threshold_secs = options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT) * 60
+        gap_mode = options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT)
+
+        if time_span > gap_threshold_secs:
+            if gap_mode == GAP_HANDLING_SKIP:
+                pass  # Don't accumulate
+            elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
+                last_p = self._last_power or 0
+                energy_kwh = (last_p * time_span) / 3_600_000
+                self._state += energy_kwh
+            elif gap_mode == GAP_HANDLING_AVERAGE:
+                last_p = self._last_power or 0
+                avg_power = (last_p + current_power) / 2
+                energy_kwh = (avg_power * time_span) / 3_600_000
+                self._state += energy_kwh
+        else:
+            avg_power = ((self._last_power or 0) + current_power) / 2
+            energy_kwh = (avg_power * time_span) / 3_600_000
+            self._state += energy_kwh
+
+        self._last_update_time = now
+        self._last_power = current_power
 
 
 class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
@@ -656,17 +971,19 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
                 current_value = 0.0
                 if self.leg_to_total == "both":
                     try:
-                        current_value = float(breaker_data[self.entity_description.key])
-                    except (ValueError, KeyError):
+                        val = breaker_data[self.entity_description.key]
+                        if val is not None:
+                            current_value = float(val)
+                    except (ValueError, KeyError, TypeError):
                         current_value = 0.0
                 else:
                     try:
-                        current_value = float(
-                            breaker_data[
-                                self.entity_description.key + self.leg_to_total
-                            ]
-                        )
-                    except (ValueError, KeyError):
+                        val = breaker_data[
+                            self.entity_description.key + self.leg_to_total
+                        ]
+                        if val is not None:
+                            current_value = float(val)
+                    except (ValueError, KeyError, TypeError):
                         current_value = 0.0
                 current_value = max(current_value, 0.0)
                 total += current_value
@@ -722,9 +1039,10 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         try:
-            self._state = float(self.breaker_data[self.entity_description.key])
-        except ValueError:
-            self._state = 0.0
+            val = self.breaker_data[self.entity_description.key]
+            self._state = float(val) if val is not None else None
+        except (ValueError, TypeError):
+            self._state = None
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
@@ -766,6 +1084,136 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
         attributes = super().extra_state_attributes
         attributes["panel_id"] = self.breaker_data["panel_id"]
         return attributes
+
+
+class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
+    """Lifetime energy counter for a breaker (Import or Consumption).
+
+    Exposes the hardware energyImport / energyConsumption counters as
+    TOTAL_INCREASING sensors so HA's Energy dashboard can track per-breaker
+    grid consumption and solar production without any user configuration.
+
+    For solar breakers the Import counter tracks energy flowing back to the
+    grid (production) while Consumption tracks energy drawn from the grid.
+    """
+
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    entity_description: SensorDescription
+
+    def __init__(
+        self, coordinator: LDATAUpdateCoordinator, data, description: SensorDescription
+    ) -> None:
+        """Init sensor."""
+        self.entity_description = description
+        super().__init__(data=data, coordinator=coordinator)
+        self.breaker_data = data
+        self._state = None
+        self._pending_state = None
+
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self.coordinator.last_update_success or self._state is not None
+
+    async def async_added_to_hass(self) -> None:
+        """Handle entity which is added to hass to restore state on startup."""
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        await super().async_added_to_hass()
+        if last_state := await self.async_get_last_state():
+            try:
+                self._state = float(last_state.state)
+            except (ValueError, TypeError):
+                pass
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            if breakers := self.coordinator.data.get("breakers"):
+                if new_data := breakers.get(self.breaker_data["id"]):
+                    raw = new_data.get(self.entity_description.key)
+                    if raw is None:
+                        return  # Field missing — keep last state
+                    new_value = float(raw)
+                    ROUNDING_TOLERANCE = 0.05
+
+                    # First update — accept unconditionally
+                    if self._state is None:
+                        self._state = new_value
+                        self.async_write_ha_state()
+                        return
+
+                    # Decrease guard — TOTAL_INCREASING must never go backward
+                    if (float(self._state) - new_value) > ROUNDING_TOLERANCE:
+                        if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                            _LOGGER.warning(
+                                "Ignoring decreasing value for %s: new=%s, old=%s",
+                                self.entity_id, new_value, self._state
+                            )
+                        return
+
+                    # Hold minor decreases within tolerance
+                    if new_value < float(self._state):
+                        new_value = float(self._state)
+
+                    # Spike detection — same logic as CT version
+                    is_potential_spike = False
+                    if float(self._state) <= 1 and new_value > 100:
+                        is_potential_spike = True
+                    elif float(self._state) > 1 and new_value > (float(self._state) * 1.5):
+                        is_potential_spike = True
+
+                    if is_potential_spike:
+                        if self._pending_state is not None:
+                            if self._pending_state != 0 and abs(new_value - self._pending_state) / abs(self._pending_state) < 0.15:
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
+                                self._state = new_value
+                                self._pending_state = None
+                            else:
+                                if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                    _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
+                                self._pending_state = new_value
+                        else:
+                            if self.coordinator.config_entry.options.get("log_data_warnings", True):
+                                _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
+                            self._pending_state = new_value
+                    else:
+                        self._pending_state = None
+                        self._state = new_value
+                else:
+                    if self.coordinator.config_entry.options.get("log_warnings", True):
+                        _LOGGER.debug("Breaker %s not found in update.", self.breaker_data["id"])
+            else:
+                if self.coordinator.config_entry.options.get("log_warnings", True):
+                    _LOGGER.debug("No 'breakers' data found in coordinator update.")
+
+        except (KeyError, ValueError, TypeError, ZeroDivisionError):
+            if self.coordinator.config_entry.options.get("log_warnings", True):
+                _LOGGER.debug("Invalid value received for %s", self.entity_id)
+            return
+
+        self.async_write_ha_state()
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's name."""
+        return self.entity_description.name
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Suffix to append to the LDATA device's unique ID."""
+        return self.entity_description.unique_id_suffix
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the energy value."""
+        if self._state is not None:
+            return round(self._state, 2)
+        return self._state
 
 
 class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):

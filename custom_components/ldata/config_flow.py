@@ -255,6 +255,16 @@ class OptionsFlow(config_entries.OptionsFlow):
         current_options = self.config_entry.options
         current_data = self.config_entry.data
 
+        # Check if any panel uses power×time fallback (no hw counters).
+        # If ALL panels have hw counters, gap handling options are irrelevant.
+        show_gap_options = True
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        if coordinator and hasattr(coordinator, '_service') and coordinator._service:
+            service = coordinator._service
+            if hasattr(service, '_panel_has_hw_counters') and service._panel_has_hw_counters:
+                # If every panel has hw counters, hide gap options
+                show_gap_options = not all(service._panel_has_hw_counters.values())
+
         options_schema = {
             vol.Optional(
                 HA_INFORM_RATE,
@@ -271,10 +281,14 @@ class OptionsFlow(config_entries.OptionsFlow):
                 ALLOW_BREAKER_CONTROL,
                 default=current_options.get(ALLOW_BREAKER_CONTROL, current_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)),
             ): bool,
-            vol.Optional(
+        }
+
+        # Only show gap handling when at least one panel lacks hw counters
+        if show_gap_options:
+            options_schema[vol.Optional(
                 GAP_HANDLING,
                 default=current_options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT),
-            ): selector.SelectSelector(
+            )] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
                         selector.SelectOptionDict(value="skip", label="Skip — Don't accumulate energy during gaps"),
@@ -283,14 +297,16 @@ class OptionsFlow(config_entries.OptionsFlow):
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )
-            ),
-            vol.Optional(
+            )
+            options_schema[vol.Optional(
                 GAP_THRESHOLD,
                 default=current_options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT),
-            ): vol.All(
+            )] = vol.All(
                 vol.Coerce(float),
                 vol.Range(min=GAP_THRESHOLD_MIN, max=GAP_THRESHOLD_MAX)
-            ),
+            )
+
+        options_schema.update({
             vol.Optional(
                 "log_warnings",
                 default=current_options.get("log_warnings", True),
@@ -311,7 +327,7 @@ class OptionsFlow(config_entries.OptionsFlow):
                 "log_fields",
                 default=current_options.get("log_fields", ""),
             ): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
-        }
+        })
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(options_schema))
 

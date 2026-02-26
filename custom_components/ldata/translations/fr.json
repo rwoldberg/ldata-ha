@@ -1,15 +1,5 @@
 {
     "config": {
-        "abort": {
-            "already_configured": "Le compte est déjà configuré",
-            "reauth_successful": "Réauthentification réussie"
-        },
-        "error": {
-            "cannot_connect": "Échec de la connexion",
-            "invalid_auth": "Authentification invalide",
-            "invalid_2fa": "Code 2FA invalide, veuillez réessayer",
-            "unknown": "Erreur inattendue"
-        },
         "step": {
             "user": {
                 "data": {
@@ -27,35 +17,42 @@
                     "2fa_code": "Code d'authentification"
                 }
             }
+        },
+        "error": {
+            "cannot_connect": "Impossible de se connecter",
+            "invalid_auth": "Authentification invalide",
+            "unknown": "Erreur inconnue",
+            "invalid_2fa": "Code à deux facteurs invalide. Veuillez réessayer.",
+            "2fa_expired": "Code à deux facteurs expiré. Veuillez redémarrer la configuration.",
+            "2fa_required": "Authentification à deux facteurs requise"
+        },
+        "abort": {
+            "already_configured": "L'appareil est déjà configuré"
         }
     },
     "options": {
         "step": {
             "init": {
-                "title": "Options Leviton LDATA",
+                "title": "Configurer LDATA",
                 "data": {
-                    "three_phase": "Système triphasé",
+                    "three_phase": "Alimentation triphasée",
                     "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
-                    "gap_handling": "Gestion des interruptions",
+                    "gap_handling": "Gestion des interruptions (ancien firmware)",
                     "gap_threshold": "Seuil d'interruption (mins)",
                     "ha_inform_rate": "Taux d'information HA (secondes)",
-                    "log_warnings": "Journaliser les erreurs générales d'intégration",
-                    "log_data_warnings": "Journaliser les avertissements de données (pics/réinitialisations)",
-                    "log_all_raw": "Journaliser les données WebSocket complètes",
-                    "enable_specific_logging": "Activer la journalisation de champs spécifiques",
-                    "log_fields": "Champs à journaliser"
+                    "log_warnings": "Journaliser les avertissements",
+                    "log_data_warnings": "Journaliser les avertissements de données",
+                    "log_specific_fields": "Journaliser des champs spécifiques"
                 },
                 "data_description": {
-                    "ha_inform_rate": "Fréquence de mise à jour des capteurs dans Home Assistant (2-600 secondes). Des valeurs plus basses = plus réactif mais charge système et écritures BD plus élevées.",
-                    "three_phase": "Activer pour les installations électriques triphasées.",
-                    "allow_breaker_control": "Lorsqu'activé, HA créera des entités interrupteur permettant de déclencher/réarmer les disjoncteurs. Lorsque désactivé, les disjoncteurs sont uniquement traités comme des capteurs.",
-                    "gap_handling": "Comment les capteurs d'énergie quotidienne gèrent les interruptions sans données. Ignorer : ne pas accumuler d'énergie pendant l'interruption (plus sûr, peut sous-estimer lors de pannes réseau). Extrapoler : supposer que la dernière puissance connue a continué (peut surestimer lors de pannes électriques). Moyenne : utiliser la moyenne de la dernière puissance et celle de reprise (compromis).",
-                    "gap_threshold": "Durée sans données avant activation de la gestion des interruptions (1-30 minutes). Les mises à jour normales arrivent toutes les 5-30 secondes.",
-                    "log_warnings": "Journaliser les plantages d'intégration ou les erreurs web.",
-                    "log_data_warnings": "Journaliser les avertissements d'incohérences de données de Leviton (pics/réinitialisations).",
-                    "log_all_raw": "Journaliser toutes les données fournies via WebSocket.",
-                    "enable_specific_logging": "Journaliser tout champ spécifié. Les noms de champs peuvent être trouvés en activant brièvement 'Journaliser les données WebSocket complètes'.",
-                    "log_fields": "Pour trouver les noms des champs, activez 'Journaliser toutes les données brutes de l'API' et vérifiez les journaux de Home Assistant. Saisissez-les ci-dessus en les séparant par des virgules."
+                    "three_phase": "Activer la prise en charge de l'alimentation triphasée.",
+                    "allow_breaker_control": "Lorsqu'activé, HA créera des interrupteurs permettant de déclencher/réinitialiser les disjoncteurs.",
+                    "gap_handling": "Repli pour anciens firmwares sans compteurs matériels. Ignorer: plus sûr. Extrapoler: dernière puissance. Moyenne: compromis. Firmware 2.0+ utilise les compteurs matériels.",
+                    "gap_threshold": "Durée sans données avant activation (1-30 minutes). Mode de repli uniquement.",
+                    "ha_inform_rate": "Intervalle en secondes entre les mises à jour envoyées à HA (minimum 2s, maximum 600s).",
+                    "log_warnings": "Journaliser les plantages de l'intégration ou les erreurs Web.",
+                    "log_data_warnings": "Journaliser les données manquantes ou incohérentes.",
+                    "log_specific_fields": "Liste de champs séparés par des virgules à journaliser (par ex. power,current,consumption)."
                 }
             }
         }
