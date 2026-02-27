@@ -1,3 +1,6 @@
+![GitHub Release](https://img.shields.io/github/v/release/rwoldberg/ldata-ha) ![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/rwoldberg/ldata-ha/latest/total)  ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/rwoldberg/ldata-ha/total?label=Total%20Downloads&color=blue)
+
+
 # ldata-ha
 # leviton LDATA and LWHEM integration for Home Assistant (https://my.leviton.com/)
 
