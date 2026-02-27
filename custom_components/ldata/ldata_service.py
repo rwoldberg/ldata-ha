@@ -507,7 +507,10 @@ class LDATAService:
                 return result.json()
             
             clean_msg = self._get_clean_error_msg(result.text)
-            _LOGGER.error(f"[v{self.version}] Unable to get WHEMS breakers! HTTP {result.status_code}: {clean_msg}")
+            if result.status_code >= 500:
+                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} for breakers — will retry next cycle ({clean_msg})")
+            else:
+                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS breakers! HTTP {result.status_code}: {clean_msg}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
@@ -536,7 +539,10 @@ class LDATAService:
                 return result.json()
             
             clean_msg = self._get_clean_error_msg(result.text)
-            _LOGGER.error(f"[v{self.version}] Unable to get WHEMS CTs! HTTP {result.status_code}: {clean_msg}")
+            if result.status_code >= 500:
+                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} for CTs — will retry next cycle ({clean_msg})")
+            else:
+                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS CTs! HTTP {result.status_code}: {clean_msg}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
@@ -673,7 +679,10 @@ class LDATAService:
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid (HTTP {result.status_code}) during {context_str}")
 
             clean_msg = self._get_clean_error_msg(result.text)
-            _LOGGER.error(f"[v{self.version}] Failed to execute {context_str}! HTTP {result.status_code}: {clean_msg}")
+            if result.status_code >= 500:
+                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} during {context_str} — will retry ({clean_msg})")
+            else:
+                _LOGGER.error(f"[v{self.version}] Failed to execute {context_str}! HTTP {result.status_code}: {clean_msg}")
         
         except Exception as e:
             if isinstance(e, LDATAAuthError):
@@ -2189,7 +2198,7 @@ class LDATAService:
                                         pass
                                     except Exception:
                                         pass
-                                asyncio.create_task(_safe_bandwidth_put())
+                                asyncio.create_task(_safe_bandwidth_put(), name="ldata_bandwidth_put")
                                 _LOGGER.debug(f"[v{self.version}] Bandwidth PUT #{bandwidth_put_count} ({len(panel_info)} panels)")
                             
                             # API version heartbeat every 10 seconds (keeps server session alive for v2 firmware)
@@ -2205,7 +2214,7 @@ class LDATAService:
                                         pass
                                     except Exception:
                                         pass
-                                asyncio.create_task(_safe_heartbeat())
+                                asyncio.create_task(_safe_heartbeat(), name="ldata_heartbeat")
                             
                             # Re-subscribe if no data for 60 seconds (max 5 per connection)
                             if current_time - last_data_time >= STALE_DATA_THRESHOLD:

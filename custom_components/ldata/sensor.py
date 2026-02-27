@@ -376,8 +376,11 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             # Midnight resets (val near 0 while _last_reported is high) are
             # allowed — HA handles those natively for TOTAL_INCREASING.
             if self._last_reported is not None and val < self._last_reported:
-                if val > 0.5:  # Not a midnight reset
-                    return self._last_reported
+                # A midnight reset looks like a large drop (e.g. 21.3 → 0.1).
+                # A jitter dip is a tiny drop (e.g. 0.18 → 0.17 or 21.31 → 21.30).
+                # Use ratio: if new value is less than 50% of previous, it's a reset.
+                if self._last_reported > 0 and val / self._last_reported > 0.5:
+                    return self._last_reported  # Jitter — hold previous value
             self._last_reported = val
             return val
         return 0.0
