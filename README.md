@@ -55,6 +55,8 @@ If you do not wish to use HACS, then please download the latest version from the
 Addon is auto reloading on submit.
 - HA Inform Rate (Seconds)
   - How often to update sensors in Home Assistant (2-600 seconds). Lower values = more responsive but higher system load and DB writes.
+ 
+  - The older 1.x you could adjust the "polling rate" or how often to ask Leviton for new data, with Websocket you ask once and it turns on a fuacet of data, as any value changes it's past back to you (@ .5-1 sec rate) so the 'HA infrom rate' listens to the stream but only passes values to HA for DB writing at the rate you set.
 
 - Three phase (default off)
   - For Three phase setups
