@@ -2,9 +2,13 @@
 
 import logging
 
-from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
+    BinarySensorEntity,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, LOGGER_NAME
@@ -27,10 +31,14 @@ async def async_setup_entry(
         for breaker_id in entry.data["breakers"]:
             breaker_data = entry.data["breakers"][breaker_id]
             sensors_to_add.append(LDATABinarySensor(entry, breaker_data))
+            sensors_to_add.append(LDATABreakerOverCurrentSensor(entry, breaker_data))
+            sensors_to_add.append(LDATABreakerUnderVoltageSensor(entry, breaker_data))
 
     if "panels" in entry.data:
         for panel_data in entry.data["panels"]:
             sensors_to_add.append(LdataCloudConnectedSensor(entry, panel_data))
+            sensors_to_add.append(LDATAPanelOverVoltageSensor(entry, panel_data))
+            sensors_to_add.append(LDATAPanelUnderVoltageSensor(entry, panel_data))
 
     async_add_entities(sensors_to_add)
 
@@ -154,3 +162,197 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
     def icon(self) -> str:
         """Return the icon to use in the frontend."""
         return "mdi:cloud-check" if self.is_on else "mdi:cloud-off-outline"
+
+
+# ── Panel alarm sensors ──────────────────────────────────────────────
+
+
+class LDATAPanelOverVoltageSensor(LDATAEntity, BinarySensorEntity):
+    """Panel over-voltage alarm."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, data) -> None:
+        """Init sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.panel_data = data
+        self._state = data.get("overVoltage", False)
+        self._threshold = data.get("overVoltageThreshold")
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            for panel in self.coordinator.data.get("panels", []):
+                if panel["id"] == self.panel_data["id"]:
+                    self._state = panel.get("overVoltage", False)
+                    self._threshold = panel.get("overVoltageThreshold")
+                    break
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if over-voltage alarm is active."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Over Voltage"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "over_voltage"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        attributes = super().extra_state_attributes
+        if self._threshold is not None:
+            attributes["threshold_v"] = self._threshold
+        return attributes
+
+    @property
+    def icon(self) -> str:
+        return "mdi:flash-alert" if self.is_on else "mdi:flash-outline"
+
+
+class LDATAPanelUnderVoltageSensor(LDATAEntity, BinarySensorEntity):
+    """Panel under-voltage alarm."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, data) -> None:
+        """Init sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.panel_data = data
+        self._state = data.get("underVoltage", False)
+        self._threshold = data.get("underVoltageThreshold")
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            for panel in self.coordinator.data.get("panels", []):
+                if panel["id"] == self.panel_data["id"]:
+                    self._state = panel.get("underVoltage", False)
+                    self._threshold = panel.get("underVoltageThreshold")
+                    break
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if under-voltage alarm is active."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Under Voltage"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "under_voltage"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        attributes = super().extra_state_attributes
+        if self._threshold is not None:
+            attributes["threshold_v"] = self._threshold
+        return attributes
+
+    @property
+    def icon(self) -> str:
+        return "mdi:flash-alert" if self.is_on else "mdi:flash-outline"
+
+
+# ── Breaker alarm sensors ────────────────────────────────────────────
+
+
+class LDATABreakerOverCurrentSensor(LDATAEntity, BinarySensorEntity):
+    """Breaker over-current alarm."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, data) -> None:
+        """Init sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.breaker_data = data
+        self._state = data.get("overCurrent", False)
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            if breakers := self.coordinator.data.get("breakers"):
+                if new_data := breakers.get(self.breaker_data["id"]):
+                    self._state = new_data.get("overCurrent", False)
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if over-current alarm is active."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Over Current"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "over_current"
+
+    @property
+    def icon(self) -> str:
+        return "mdi:flash-alert" if self.is_on else "mdi:current-ac"
+
+
+class LDATABreakerUnderVoltageSensor(LDATAEntity, BinarySensorEntity):
+    """Breaker under-voltage alarm."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, data) -> None:
+        """Init sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.breaker_data = data
+        self._state = data.get("underVoltage", False)
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            if breakers := self.coordinator.data.get("breakers"):
+                if new_data := breakers.get(self.breaker_data["id"]):
+                    self._state = new_data.get("underVoltage", False)
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if under-voltage alarm is active."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Under Voltage"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "under_voltage"
+
+    @property
+    def icon(self) -> str:
+        return "mdi:flash-alert" if self.is_on else "mdi:flash-outline"

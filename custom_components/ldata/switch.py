@@ -1,6 +1,5 @@
 """Switch support for an LDATA devices."""
 
-import asyncio
 import logging
 from typing import Any
 

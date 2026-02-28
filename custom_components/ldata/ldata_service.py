@@ -627,8 +627,7 @@ class LDATAService:
                             # Brief delay after toggle to let the cloud receive
                             # fresh values from the panel hardware before we fetch.
                             if is_connected:
-                                import time as _time
-                                _time.sleep(2)
+                                time.sleep(2)
                             panel["residentialBreakers"] = self.get_Whems_breakers(panel["id"])
                             panel["CTs"] = self.get_Whems_CT(panel["id"])
                         
@@ -885,6 +884,13 @@ class LDATAService:
         """
         if three_phase is None:
             three_phase = self._three_phase
+
+        def _field(key, cached):
+            """Extract float from raw if present and non-None, else return cached."""
+            if key in raw and raw[key] is not None:
+                return float(raw[key])
+            return cached
+
         # Cached values for partial update handling
         # Coerce None → 0 so arithmetic below never fails; initial parse_panels
         # may store None when the API omits power/current fields.
@@ -894,34 +900,22 @@ class LDATAService:
         
         # --- Power fields with leg swap ---
         if leg == 1:
-            if "power" in raw:
-                p1 = float(raw["power"]) if raw["power"] is not None else cached_p1
-            else:
-                p1 = cached_p1
-            if "power2" in raw:
-                p2 = float(raw["power2"]) if raw["power2"] is not None else cached_p2
-            else:
-                p2 = cached_p2
+            p1 = _field("power", cached_p1)
+            p2 = _field("power2", cached_p2)
         else:
             # Leg 2: power -> power2, power2 -> power1 (swapped)
-            if "power" in raw:
-                p2 = float(raw["power"]) if raw["power"] is not None else cached_p2
-            else:
-                p2 = cached_p2
-            if "power2" in raw:
-                p1 = float(raw["power2"]) if raw["power2"] is not None else cached_p1
-            else:
-                p1 = cached_p1
+            p2 = _field("power", cached_p2)
+            p1 = _field("power2", cached_p1)
         
         # --- Current fields with leg swap ---
         cached_c1 = existing.get("current1") or 0
         cached_c2 = existing.get("current2") or 0
         if leg == 1:
-            c1 = float(raw["rmsCurrent"]) if raw.get("rmsCurrent") is not None and "rmsCurrent" in raw else cached_c1
-            c2 = float(raw["rmsCurrent2"]) if raw.get("rmsCurrent2") is not None and "rmsCurrent2" in raw else cached_c2
+            c1 = _field("rmsCurrent", cached_c1)
+            c2 = _field("rmsCurrent2", cached_c2)
         else:
-            c2 = float(raw["rmsCurrent"]) if raw.get("rmsCurrent") is not None and "rmsCurrent" in raw else cached_c2
-            c1 = float(raw["rmsCurrent2"]) if raw.get("rmsCurrent2") is not None and "rmsCurrent2" in raw else cached_c1
+            c2 = _field("rmsCurrent", cached_c2)
+            c1 = _field("rmsCurrent2", cached_c1)
         
         # --- Detect which fields arrived ---
         has_power_field = "power" in raw or "power2" in raw
@@ -965,11 +959,11 @@ class LDATAService:
                 cached_v1 = existing.get("voltage1", 0)
                 cached_v2 = existing.get("voltage2", 0)
                 if leg == 1:
-                    v1 = float(raw["rmsVoltage"]) if raw.get("rmsVoltage") is not None and "rmsVoltage" in raw else cached_v1
-                    v2 = float(raw["rmsVoltage2"]) if raw.get("rmsVoltage2") is not None and "rmsVoltage2" in raw else cached_v2
+                    v1 = _field("rmsVoltage", cached_v1)
+                    v2 = _field("rmsVoltage2", cached_v2)
                 else:
-                    v2 = float(raw["rmsVoltage"]) if raw.get("rmsVoltage") is not None and "rmsVoltage" in raw else cached_v2
-                    v1 = float(raw["rmsVoltage2"]) if raw.get("rmsVoltage2") is not None and "rmsVoltage2" in raw else cached_v1
+                    v2 = _field("rmsVoltage", cached_v2)
+                    v1 = _field("rmsVoltage2", cached_v1)
                 existing["voltage1"] = v1
                 existing["voltage2"] = v2
                 if (not three_phase) or (poles == 1):
@@ -982,11 +976,11 @@ class LDATAService:
                 cached_f1 = existing.get("frequency1", 0)
                 cached_f2 = existing.get("frequency2", 0)
                 if leg == 1:
-                    f1 = float(raw["lineFrequency"]) if raw.get("lineFrequency") is not None and "lineFrequency" in raw else cached_f1
-                    f2 = float(raw["lineFrequency2"]) if raw.get("lineFrequency2") is not None and "lineFrequency2" in raw else cached_f2
+                    f1 = _field("lineFrequency", cached_f1)
+                    f2 = _field("lineFrequency2", cached_f2)
                 else:
-                    f2 = float(raw["lineFrequency"]) if raw.get("lineFrequency") is not None and "lineFrequency" in raw else cached_f2
-                    f1 = float(raw["lineFrequency2"]) if raw.get("lineFrequency2") is not None and "lineFrequency2" in raw else cached_f1
+                    f2 = _field("lineFrequency", cached_f2)
+                    f1 = _field("lineFrequency2", cached_f1)
                 existing["frequency1"] = f1
                 existing["frequency2"] = f2
                 if poles == 2:
@@ -1008,6 +1002,21 @@ class LDATAService:
             existing["remoteState"] = raw["remoteState"]
             if existing["remoteState"] == "":
                 existing["remoteState"] = "RemoteON"
+        
+        # Diagnostic/alarm fields (arrive via WS status-only messages)
+        if "operationalState" in raw:
+            existing["operationalState"] = raw["operationalState"]
+        if "overCurrent" in raw:
+            existing["overCurrent"] = raw["overCurrent"]
+        if "overVoltage" in raw:
+            existing["overVoltage"] = raw["overVoltage"]
+        if "underVoltage" in raw:
+            existing["underVoltage"] = raw["underVoltage"]
+        if "bleRSSI" in raw and raw["bleRSSI"] is not None:
+            try:
+                existing["bleRSSI"] = float(raw["bleRSSI"])
+            except (ValueError, TypeError):
+                pass
         
         # Capture energy counters (hardware-measured, not yet exposed as sensors)
         if "energyConsumption" in raw or "energyConsumption2" in raw:
@@ -1197,6 +1206,13 @@ class LDATAService:
             if panel.get("model") == "DAU" and panel.get("status") == "READY":
                 panel_data["connected"] = True
             
+            # Panel-level diagnostic/alarm fields
+            panel_data["overVoltage"] = panel.get("overVoltage", False)
+            panel_data["underVoltage"] = panel.get("underVoltage", False)
+            panel_data["overVoltageThreshold"] = panel.get("overVoltageThreshold")
+            panel_data["underVoltageThreshold"] = panel.get("underVoltageThreshold")
+            panel_data["rssi"] = self._none_or_float(panel, "rssi")
+            
             # Detect if this panel needs REST polling for breaker/CT data.
             # LWHEM firmware >= 2.0 no longer sends breaker data via WebSocket.
             # We use firmware version as an initial hint, then confirm via WS detection.
@@ -1326,6 +1342,12 @@ class LDATAService:
                                 breaker_data["remoteState"] = "RemoteON"
                         else:
                             breaker_data["remoteState"] = "RemoteON"
+                        # Diagnostic/alarm fields
+                        breaker_data["operationalState"] = breaker.get("operationalState", "Normal")
+                        breaker_data["overCurrent"] = breaker.get("overCurrent", False)
+                        breaker_data["overVoltage"] = breaker.get("overVoltage", False)
+                        breaker_data["underVoltage"] = breaker.get("underVoltage", False)
+                        breaker_data["bleRSSI"] = self._none_or_float(breaker, "bleRSSI")
                         _p1_raw = self._none_or_float(breaker, "power")
                         _p2_raw = self._none_or_float(breaker, "power2")
                         if _p1_raw is None and _p2_raw is None:
@@ -1439,7 +1461,6 @@ class LDATAService:
             has_hw = False
             for b_id, b_data in breakers.items():
                 if b_data.get("panel_id") == panel["id"]:
-                    ec = breaker.get("energyConsumption") if hasattr(breaker, 'get') else None
                     # Check our parsed data — consumption > 0 means counters exist
                     if b_data.get("consumption", 0) > 0 or b_data.get("consumption1", 0) > 0:
                         has_hw = True
@@ -1868,7 +1889,10 @@ class LDATAService:
                                     panel["voltage2"] = float(v2)
                                 
                                 if panel.get("voltage1") is not None and panel.get("voltage2") is not None:
-                                    panel["voltage"] = panel["voltage1"] + panel["voltage2"]
+                                    if not self._three_phase:
+                                        panel["voltage"] = (panel["voltage1"] + panel["voltage2"]) / 2.0
+                                    else:
+                                        panel["voltage"] = (panel["voltage1"] * 0.866025403784439) + (panel["voltage2"] * 0.866025403784439)
                             
                             # Update frequency
                             if "frequencyA" in data or "frequencyB" in data:
@@ -1879,6 +1903,23 @@ class LDATAService:
                                 
                                 if panel.get("frequency1") is not None and panel.get("frequency2") is not None:
                                     panel["frequency"] = (panel["frequency1"] + panel["frequency2"]) / 2
+                            
+                            # Update panel alarm states
+                            if "overVoltage" in data:
+                                panel["overVoltage"] = data["overVoltage"]
+                            if "underVoltage" in data:
+                                panel["underVoltage"] = data["underVoltage"]
+                            if "overVoltageThreshold" in data:
+                                panel["overVoltageThreshold"] = data["overVoltageThreshold"]
+                            if "underVoltageThreshold" in data:
+                                panel["underVoltageThreshold"] = data["underVoltageThreshold"]
+                            
+                            # Update WiFi signal strength
+                            if "rssi" in data and data["rssi"] is not None:
+                                try:
+                                    panel["rssi"] = float(data["rssi"])
+                                except (ValueError, TypeError):
+                                    pass
                             
                             panels[i] = panel
                             new_status_data["panels"] = panels
