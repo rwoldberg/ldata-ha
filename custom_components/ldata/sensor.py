@@ -1616,7 +1616,7 @@ class LDATABreakerBleRSSISensor(LDATAEntity, SensorEntity):
             if breakers := self.coordinator.data.get("breakers"):
                 if new_data := breakers.get(self.breaker_data["id"]):
                     val = new_data.get("bleRSSI")
-                    if val is not None:
+                    if val is not None and val < 0:
                         self._state = val
         except (KeyError, TypeError):
             pass

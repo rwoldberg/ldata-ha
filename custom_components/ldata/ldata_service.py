@@ -1014,7 +1014,10 @@ class LDATAService:
             existing["underVoltage"] = raw["underVoltage"]
         if "bleRSSI" in raw and raw["bleRSSI"] is not None:
             try:
-                existing["bleRSSI"] = float(raw["bleRSSI"])
+                val = float(raw["bleRSSI"])
+                # 0 dBm is not a real BLE signal — 2-pole breakers report 0
+                if val < 0:
+                    existing["bleRSSI"] = val
             except (ValueError, TypeError):
                 pass
         
@@ -1347,7 +1350,9 @@ class LDATAService:
                         breaker_data["overCurrent"] = breaker.get("overCurrent", False)
                         breaker_data["overVoltage"] = breaker.get("overVoltage", False)
                         breaker_data["underVoltage"] = breaker.get("underVoltage", False)
-                        breaker_data["bleRSSI"] = self._none_or_float(breaker, "bleRSSI")
+                        _ble_rssi = self._none_or_float(breaker, "bleRSSI")
+                        # 0 dBm is not a real BLE signal — 2-pole breakers report 0
+                        breaker_data["bleRSSI"] = _ble_rssi if _ble_rssi is not None and _ble_rssi < 0 else None
                         _p1_raw = self._none_or_float(breaker, "power")
                         _p2_raw = self._none_or_float(breaker, "power2")
                         if _p1_raw is None and _p2_raw is None:
