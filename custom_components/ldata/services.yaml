@@ -1,0 +1,30 @@
+reset_energy_baseline:
+  name: Reset energy sensor baseline
+  description: >-
+    Reset a stuck LDATA energy sensor. Check the Home Assistant log for
+    the current value before and after the reset. For lifetime sensors
+    (consumption/import), the sensor will accept the next API reading.
+    For daily sensors, baselines are cleared and the sensor re-establishes
+    from the current API values.
+  fields:
+    entity_id:
+      name: Entity
+      description: The LDATA energy sensor to reset.
+      required: true
+      selector:
+        entity:
+          integration: ldata
+          domain: sensor
+          device_class: energy
+    value:
+      name: New value in kWh (optional)
+      description: >-
+        Force a specific kWh value instead of using the current API reading.
+        Leave blank to accept whatever the API reports on the next update.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1000000
+          step: 0.01
+          mode: box
