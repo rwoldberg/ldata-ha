@@ -64,20 +64,24 @@ class LDATACTEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         """Return device information about this device."""
         if self._device_id is None:
             return None
+            
+        channel = self.entity_data.get("channel", "Unknown")
 
         return {
             "identifiers": {
                 (DOMAIN, self.entity_data["panel_id"], self.entity_data["id"])
             },
             "name": self.entity_data["name"],
+            "model": f"CT Clamp (Channel {channel})",
             "manufacturer": MANUFACTURER,
+            "via_device": (DOMAIN, self.entity_data["panel_id"]),
         }
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
         """Returns the extra attributes for the breaker."""
         attributes = {}
-        attributes["channel"] = self.entity_data["channel"]
-        attributes["panel_id"] = self.entity_data["panel_id"]
+        attributes["channel"] = self.entity_data.get("channel")
+        attributes["panel_id"] = self.entity_data.get("panel_id")
 
         return attributes
