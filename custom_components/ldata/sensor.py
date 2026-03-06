@@ -367,8 +367,6 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         # --- Hardware counter mode ---
         self._midnight_baseline: float | None = None
         self._last_date: datetime.date | None = None
-        # For panel total: per-breaker baselines {breaker_id: baseline_consumption}
-        self._panel_baselines: dict[str, float] = {}
         # --- Power×time fallback mode ---
         self._last_update_time: float | None = None  # time.time() of last update
         self._last_power: float | None = None  # Last known power in watts
@@ -406,13 +404,6 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                     self._last_date = parsed.date() if parsed else None
                 except (ValueError, TypeError):
                     self._last_date = None
-            # Restore panel baselines
-            if panel_baselines_str := attrs.get("panel_baselines"):
-                try:
-                    import json
-                    self._panel_baselines = {k: float(v) for k, v in json.loads(panel_baselines_str).items()}
-                except (ValueError, TypeError, json.JSONDecodeError):
-                    self._panel_baselines = {}
             # Restore power×time fallback state
             try:
                 self._last_update_time = float(attrs["last_update_time"])
@@ -428,7 +419,6 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes for state restoration."""
-        import json
         attributes = super().extra_state_attributes
         attributes["midnight_baseline"] = self._midnight_baseline
         attributes["last_date"] = self._last_date.isoformat() if self._last_date else None
@@ -437,8 +427,6 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         attributes["panel_energy_key"] = self._panel_energy_key
         if self._last_update_time is not None:
             attributes["last_update_time"] = self._last_update_time
-        if self.panel_total and self._panel_baselines:
-            attributes["panel_baselines"] = json.dumps(self._panel_baselines)
         return attributes
 
     @property
@@ -679,86 +667,104 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self._state = daily
 
     def _update_panel_total_hw(self, today: datetime.date, is_new_day: bool):
-        """Update daily energy for the panel total by summing all breaker deltas.
+        """Update daily energy for the panel total by summing all lifetime counters.
         
-        Uses self._panel_energy_key ("consumption" or "import") for each breaker.
+        This relies natively on the monotonic guard to protect against partial sums 
+        (e.g., if a CT/breaker temporarily drops to 0.0, the sum drops, and the guard 
+        holds the daily total steady).
         """
         key = self._panel_energy_key
-        breakers = self.coordinator.data.get("breakers", {})
-        if not breakers:
+        
+        # 1. Check if we should use CTs instead of breakers
+        cts = self.coordinator.data.get("cts", {})
+        panel_cts = {b_id: b_data for b_id, b_data in cts.items() if b_data.get("panel_id") == self.panel_id}
+        
+        if panel_cts:
+            data_to_sum = panel_cts
+            source_name = "CT"
+        else:
+            breakers = self.coordinator.data.get("breakers", {})
+            data_to_sum = {b_id: b_data for b_id, b_data in breakers.items() if b_data.get("panel_id") == self.panel_id}
+            source_name = "breaker"
+
+        if not data_to_sum:
             return
 
+        # Sum the current lifetime counters of all underlying entities
+        current_lifetime_sum = 0.0
+        for b_id, b_data in data_to_sum.items():
+            val = b_data.get(key)
+            if val is not None:
+                try:
+                    fval = float(val)
+                    current_lifetime_sum += fval
+                except (ValueError, TypeError):
+                    pass
+
+        # ─── Standard Single-Baseline Logic ───
         if is_new_day:
-            new_baselines = {}
-            for b_id, b_data in breakers.items():
-                if b_data.get("panel_id") == self.panel_id:
-                    val = b_data.get(key)
-                    if val is not None:
-                        try:
-                            fval = float(val)
-                            old_baseline = self._panel_baselines.get(b_id)
-                            if old_baseline is not None and old_baseline > 10.0 and fval < 1.0:
-                                _LOGGER.debug(
-                                    "Panel total new-day: keeping old baseline for breaker %s "
-                                    "(value=%.3f, old_baseline=%.3f)",
-                                    b_id, fval, old_baseline
-                                )
-                                new_baselines[b_id] = old_baseline
-                            else:
-                                new_baselines[b_id] = fval
-                        except (ValueError, TypeError):
-                            pass
-            self._panel_baselines = new_baselines
+            if self._midnight_baseline is not None and self._midnight_baseline > 10.0 and current_lifetime_sum < 1.0:
+                if _log_data_warnings_enabled(self.coordinator):
+                    _LOGGER.warning(
+                        "Panel total new-day reset for %s: sum=%.3f is suspiciously low "
+                        "(previous baseline=%.3f) — carrying forward old baseline",
+                        self.entity_id, current_lifetime_sum, self._midnight_baseline
+                    )
+                self._state = 0.0
+                return
+
+            self._midnight_baseline = current_lifetime_sum
             self._state = 0.0
             return
 
-        # Build baselines for new breakers
-        for b_id, b_data in breakers.items():
-            if b_data.get("panel_id") == self.panel_id and b_id not in self._panel_baselines:
-                val = b_data.get(key)
-                if val is not None:
-                    try:
-                        self._panel_baselines[b_id] = float(val)
-                    except (ValueError, TypeError):
-                        pass
+        if self._midnight_baseline is None:
+            # Fallback: attempt to grab the baseline from the external grid sensor
+            grid_sensor = self.hass.states.get("sensor.grid_power_total_daily_energy")
+            if grid_sensor and "midnight_baseline" in grid_sensor.attributes:
+                try:
+                    external_baseline = float(grid_sensor.attributes["midnight_baseline"])
+                    self._midnight_baseline = external_baseline
+                    if _log_data_warnings_enabled(self.coordinator):
+                        _LOGGER.info(
+                            "Recovered missing midnight_baseline (%.3f) for %s from sensor.grid_power_total_daily_energy",
+                            external_baseline, self.entity_id
+                        )
+                except (ValueError, TypeError):
+                    pass
 
-        # Sum deltas
-        total_daily = 0.0
-        for b_id, baseline in self._panel_baselines.items():
-            if b_id in breakers:
-                b_data = breakers[b_id]
-                val = b_data.get(key)
-                if val is not None:
-                    try:
-                        fval = float(val)
-                        if fval == 0.0 and baseline > 1.0:
-                            continue
-                        delta = fval - baseline
-                        if delta > 0:
-                            if delta > MAX_DAILY_ENERGY_KWH:
-                                if _log_data_warnings_enabled(self.coordinator):
-                                    _LOGGER.warning(
-                                        "Panel total: breaker %s delta %.1f kWh exceeds cap — "
-                                        "re-baselining (baseline=%.3f, value=%.3f)",
-                                        b_id, delta, baseline, fval
-                                    )
-                                self._panel_baselines[b_id] = fval
-                                continue
-                            total_daily += delta
-                    except (ValueError, TypeError):
-                        pass
+            # If still None, establish it now
+            if self._midnight_baseline is None:
+                self._midnight_baseline = current_lifetime_sum
+                self._state = 0.0
+                return
 
-        # Monotonic guard: panel daily total can only increase within the
-        # same day.  During breaker reconnect bursts the API returns
-        # energyConsumption=0 for some breakers, which are skipped above
-        # but still cause the sum to drop because those deltas become 0.
-        # However, if re-baselining occurred (e.g. after a sustained data
-        # disruption), the old state may be permanently unreachable.
-        # Release the guard after 5 minutes of sustained rejection.
+        daily = current_lifetime_sum - self._midnight_baseline
+        
+        if daily < 0:
+            if _log_data_warnings_enabled(self.coordinator):
+                _LOGGER.debug(
+                    "Skipping negative daily for %s: sum=%.3f "
+                    "< baseline=%.3f — waiting for correction",
+                    self.entity_id, current_lifetime_sum, self._midnight_baseline
+                )
+            return
+
+        if daily > MAX_DAILY_ENERGY_KWH:
+            if _log_data_warnings_enabled(self.coordinator):
+                _LOGGER.warning(
+                    "Panel total daily %.1f kWh for %s exceeds sanity cap (%.0f kWh) "
+                    "— re-baselining (baseline=%.3f, sum=%.3f)",
+                    daily, self.entity_id, MAX_DAILY_ENERGY_KWH, self._midnight_baseline, current_lifetime_sum
+                )
+            self._midnight_baseline = current_lifetime_sum
+            daily = 0.0
+
+        # Monotonic guard: panel daily total can only increase within the same day.
+        # This naturally protects against partial sums if a CT/breaker temporarily drops to 0.0
         if (
             self._state is not None
             and self._state > 0.5
-            and total_daily < self._state - 0.05
+            and daily < self._state - 0.05
         ):
             if getattr(self, '_monotonic_reject_since', None) is None:
                 self._monotonic_reject_since = time.time()
@@ -768,16 +774,15 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                     _LOGGER.debug(
                         "Rejecting stale panel total for %s: would decrease "
                         "%.2f -> %.2f (rejecting for %.0fs)",
-                        self.entity_id, self._state, total_daily, elapsed
+                        self.entity_id, self._state, daily, elapsed
                     )
                 return
             else:
                 if _log_data_warnings_enabled(self.coordinator):
                     _LOGGER.warning(
                         "Releasing monotonic guard for %s after %.0fs: "
-                        "%.2f -> %.2f (baselines were likely reset after "
-                        "data disruption)",
-                        self.entity_id, elapsed, self._state, total_daily
+                        "%.2f -> %.2f (baselines were likely reset after data disruption)",
+                        self.entity_id, elapsed, self._state, daily
                     )
                 self._monotonic_reject_since = None
 
@@ -785,7 +790,7 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if getattr(self, '_monotonic_reject_since', None) is not None:
             self._monotonic_reject_since = None
 
-        self._state = total_daily
+        self._state = daily
 
     def _update_single_breaker_pxt(self, today: datetime.date, is_new_day: bool):
         """Update daily energy for a single breaker using power×time integration."""
@@ -1112,6 +1117,7 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
         # --- First reading ever (no baseline yet) ---
         if self._midnight_baseline is None:
+            
             # Auto-detect energy key if set to "consumption" but import
             # is the active counter (import >> consumption means the
             # consumption counter is stale/frozen on this CT).

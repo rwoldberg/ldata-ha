@@ -19,11 +19,13 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 SERVICE_RESET_ENERGY = "reset_energy_baseline"
 ATTR_ENTITY_ID = "entity_id"
 ATTR_VALUE = "value"
+ATTR_BASELINE = "baseline"
 
 SERVICE_RESET_ENERGY_SCHEMA = vol.Schema(
     {
         vol.Required(ATTR_ENTITY_ID): cv.entity_id,
         vol.Optional(ATTR_VALUE): vol.Coerce(float),
+        vol.Optional(ATTR_BASELINE): vol.Coerce(float),
     }
 )
 
@@ -59,6 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             """Handle the reset_energy_baseline service call."""
             entity_id = call.data[ATTR_ENTITY_ID]
             new_value = call.data.get(ATTR_VALUE)
+            new_baseline = call.data.get(ATTR_BASELINE)
 
             # Find the entity object through the entity platform
             target_entity = None
@@ -99,6 +102,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Daily sensors need baselines cleared so they re-establish
             is_daily = hasattr(target_entity, '_midnight_baseline')
 
+            # 1. Handle forced baseline
+            if new_baseline is not None:
+                if is_daily:
+                    target_entity._midnight_baseline = new_baseline
+                    # Clear rejection guard so the new delta is accepted immediately
+                    if hasattr(target_entity, '_monotonic_reject_since'):
+                        target_entity._monotonic_reject_since = None
+                    target_entity.async_write_ha_state()
+                    _LOGGER.warning(
+                        "Reset %s: manually forced midnight baseline to %.3f kWh",
+                        entity_id, new_baseline
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Cannot set baseline on %s — it is not a daily sensor",
+                        entity_id
+                    )
+
+            # 2. Handle forced daily value
             if new_value is not None:
                 target_entity._state = new_value
                 target_entity._accept_next_value = False
@@ -111,7 +133,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "Reset %s: %.2f -> %.2f kWh (forced value)",
                     entity_id, current or 0, new_value
                 )
-            else:
+                
+            # 3. Handle full auto-reset (only if NO parameters were passed)
+            elif new_baseline is None and new_value is None:
                 target_entity._accept_next_value = True
                 if hasattr(target_entity, '_consecutive_decrease'):
                     target_entity._consecutive_decrease = 0
@@ -121,10 +145,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     target_entity._midnight_baseline = None
                     if hasattr(target_entity, '_panel_baselines'):
                         target_entity._panel_baselines = {}
+                    if hasattr(target_entity, '_last_breaker_deltas'):
+                        target_entity._last_breaker_deltas = {}
                     target_entity._state = 0.0
                     target_entity.async_write_ha_state()
                     _LOGGER.warning(
-                        "Reset %s: cleared baselines and state — will "
+                        "Reset %s: cleared baselines, cached deltas, and state — will "
                         "re-establish on next update (was %.2f kWh)",
                         entity_id, current or 0
                     )

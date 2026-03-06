@@ -28,3 +28,14 @@ reset_energy_baseline:
           max: 1000000
           step: 0.01
           mode: box
+    baseline:
+      name: Hardware Baseline in kWh (optional)
+      description: >-
+        Manually set the raw hardware counter baseline used for delta calculations on daily sensors.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 10000000
+          step: 0.001
+          mode: box

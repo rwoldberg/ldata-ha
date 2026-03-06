@@ -1313,6 +1313,20 @@ class LDATAService:
                         ct_data["current2"] = self.none_to_zero(ct, "rmsCurrent2")
                         # Add the CT to the list.
                         cts[ct_data["id"]] = ct_data
+                    else:
+                        # Detect if the unconfigured port is physically empty.
+                        # Empty ports report 0W / 0A. We only warn if we see actual electrical activity.
+                        pwr = abs(self.none_to_zero(ct, "activePower")) + abs(self.none_to_zero(ct, "activePower2"))
+                        cur = abs(self.none_to_zero(ct, "rmsCurrent")) + abs(self.none_to_zero(ct, "rmsCurrent2"))
+                        
+                        # Use a tiny noise floor (1W / 0.05A) to prevent ghost readings from triggering it
+                        if pwr > 1.0 or cur > 0.05:
+                            _LOGGER.warning(
+                                f"[v{self.version}] Active CT clamp detected on panel '{panel.get('name', panel['id'])}' "
+                                f"(Channel {ct.get('channel', '?')}) measuring {round(pwr, 1)}W / {round(cur, 2)}A, "
+                                f"but no 'Usage Type' is configured in the Leviton app! "
+                                f"This CT will be ignored until you assign it a type (like 'Grid' or 'Solar')."
+                            )   
             else:
                 _LOGGER.debug(f"[v{self.version}] Panel {panel.get('name', panel['id'])} ({panel.get('ModuleType', 'unknown')}): No CTs key or empty CTs (CTs key present: {'CTs' in panel}, value: {type(panel.get('CTs')).__name__})")
             totalPower = 0.0
