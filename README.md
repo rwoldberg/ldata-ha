@@ -10,9 +10,13 @@ This is a home assistant integration for the LDATA and LWHEM hubs for levitons s
 
 <br>
 
-If this integration has been useful to you, please consider chipping in and buying me a coffee!
+If this integration has been useful to you, please consider chipping in and buying us a coffee!
 
+RWoldberg
 [!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/RWoldberg)
+
+MrToast99
+[!["Buy Me A Coffee"](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/mrtoast99)
 
 ## Install
 
