@@ -5,7 +5,7 @@
                 "data": {
                     "username": "Nom d'utilisateur my.leviton.com",
                     "password": "Mot de passe my.leviton.com",
-                    "three_phase": "Alimentation triphasée",
+                    "three_phase": "Service réseau 120/208V (Appartement/Condo)",
                     "allow_breaker_control": "Autoriser le contrôle des disjoncteurs"
                 },
                 "title": "Configurer LDATA"
@@ -35,7 +35,7 @@
             "init": {
                 "title": "Configurer LDATA",
                 "data": {
-                    "three_phase": "Alimentation triphasée",
+                    "three_phase": "Service réseau 120/208V (Appartement/Condo)",
                     "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
                     "gap_handling": "Gestion des interruptions (ancien firmware)",
                     "gap_threshold": "Seuil d'interruption (mins)",
@@ -46,7 +46,7 @@
                     "log_fields": "Champs à journaliser"
                 },
                 "data_description": {
-                    "three_phase": "Activer la prise en charge de l'alimentation triphasée.",
+                    "three_phase": "Activez cette option UNIQUEMENT si vous vivez dans un appartement ou un immeuble avec une installation réseau 120/208V. Cela calcule correctement les tensions des disjoncteurs bipolaires en utilisant la formule 208V au lieu de 240V. Ne pas activer pour une maison résidentielle standard.",
                     "allow_breaker_control": "Lorsqu'activé, HA créera des interrupteurs permettant de déclencher/réinitialiser les disjoncteurs.",
                     "gap_handling": "Repli pour anciens firmwares sans compteurs matériels. Ignorer: plus sûr. Extrapoler: dernière puissance. Moyenne: compromis. Firmware 2.0+ utilise les compteurs matériels.",
                     "gap_threshold": "Durée sans données avant activation (1-30 minutes). Mode de repli uniquement.",
