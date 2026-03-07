@@ -135,8 +135,11 @@ class LDATAHttpClient:
                     if result.status == 200:
                         if not self.account_id:
                             json_data = await result.json()
-                            if json_data:
-                                self.account_id = json_data[0].get("residentialAccountId")
+                            for item in (json_data or []):
+                                acct = item.get("residentialAccountId")
+                                if acct is not None:
+                                    self.account_id = acct
+                                    break
                         return True
                     if result.status in (401, 403, 406):
                         if attempts < 2:
@@ -160,10 +163,13 @@ class LDATAHttpClient:
             async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as result:
                 if result.status == 200:
                     json_data = await result.json()
-                    if json_data:
-                        self.account_id = json_data[0].get("residentialAccountId")
-                        self.userid = json_data[0].get("userId", self.userid)
-                        return True
+                    for item in (json_data or []):
+                        acct = item.get("residentialAccountId")
+                        if acct is not None:
+                            self.account_id = acct
+                            # Grab userId from the same item if present
+                            self.userid = item.get("userId", self.userid)
+                            return True
             self.clear_tokens()
         except Exception as ex:
             _LOGGER.debug("[v%s] Error getting residential account: %s", self.version, ex)
@@ -219,6 +225,36 @@ class LDATAHttpClient:
     async def get_Whems_CT(self, panel_id: str) -> list | None:
         url = f"https://my.leviton.com/api/IotWhems/{panel_id}/iotCts"
         return await self._get_request(url)
+
+    async def get_ldata_panels(self, residence_id: str) -> list | None:
+        """Fetch LDATA panels (residentialBreakerPanels) for a residence."""
+        url = f"https://my.leviton.com/api/Residences/{residence_id}/residentialBreakerPanels"
+        headers = {**self.default_headers, "authorization": self.auth_token, "filter": '{"include":["residentialBreakers"]}'}
+        try:
+            async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as result:
+                if result.status in (401, 403, 406):
+                    raise LDATAAuthError("Auth token invalid during LDATA panel fetch")
+                if result.status == 200:
+                    return await result.json()
+        except LDATAAuthError: raise
+        except Exception as ex:
+            _LOGGER.debug("[v%s] GET LDATA panels failed for residence %s: %s", self.version, residence_id, ex)
+        return None
+
+    async def get_whems_panels(self, residence_id: str) -> list | None:
+        """Fetch WHEMS panels (iotWhems) for a residence."""
+        url = f"https://my.leviton.com/api/Residences/{residence_id}/iotWhems"
+        headers = {**self.default_headers, "authorization": self.auth_token, "filter": "{}"}
+        try:
+            async with self.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as result:
+                if result.status in (401, 403, 406):
+                    raise LDATAAuthError("Auth token invalid during WHEMS panel fetch")
+                if result.status == 200:
+                    return await result.json()
+        except LDATAAuthError: raise
+        except Exception as ex:
+            _LOGGER.debug("[v%s] GET WHEMS panels failed for residence %s: %s", self.version, residence_id, ex)
+        return None
 
     async def get_panel(self, panel_id: str, panel_type: str) -> dict | None:
         url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}" if panel_type == "LDATA" else f"https://my.leviton.com/api/IotWhems/{panel_id}"

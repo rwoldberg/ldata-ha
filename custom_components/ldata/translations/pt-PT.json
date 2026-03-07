@@ -33,28 +33,32 @@
     "options": {
         "step": {
             "init": {
-                "title": "Configurar LDATA",
+                "title": "Opções Leviton LDATA",
                 "data": {
                     "three_phase": "Serviço de Rede 120/208V (Apartamento/Condomínio)",
                     "allow_breaker_control": "Permitir controlo de disjuntores",
                     "gap_handling": "Gestão de Interrupções (firmware antigo)",
                     "gap_threshold": "Limiar de Interrupção (mins)",
                     "ha_inform_rate": "Taxa de informação HA (segundos)",
-                    "log_warnings": "Registar avisos",
-                    "log_data_warnings": "Registar avisos de dados",
+                    "log_warnings": "Registar erros gerais de integração",
+                    "log_data_warnings": "Registar avisos de dados (Picos/Reposições)",
+                    "log_all_raw": "Registar String WebSocket Bruta",
+                    "log_parsed_data": "Registar Todos os Dados Analisados",
                     "enable_specific_logging": "Ativar o registo de campos específicos",
                     "log_fields": "Campos a registar"
                 },
                 "data_description": {
+                    "ha_inform_rate": "Com que frequência atualizar os sensores no Home Assistant (2-600 segundos).",
                     "three_phase": "Ative esta opção APENAS se viver num apartamento ou edifício com uma instalação de rede 120/208V. Isto calcula corretamente as tensões dos disjuntores bipolares utilizando a matemática de 208V em vez de 240V. Não ative esta opção para uma casa residencial padrão.",
                     "allow_breaker_control": "Quando ativado, o HA criará interruptores para acionar/repor disjuntores.",
-                    "gap_handling": "Reserva para firmware antigo sem contadores. Ignorar: mais seguro. Extrapolar: última potência. Média: compromisso. Firmware 2.0+ usa contadores de hardware.",
+                    "gap_handling": "Reserva para firmware antigo sem contadores. Ignorar: mais seguro. Extrapolar: última potência. Média: compromisso. Firmware 2.0+ usa contadores de hardware e ignora isto.",
                     "gap_threshold": "Tempo sem dados antes da ativação (1-30 minutos). Apenas modo de reserva.",
-                    "ha_inform_rate": "Intervalo em segundos entre atualizações enviadas ao HA (mínimo 2s, máximo 600s).",
                     "log_warnings": "Registar falhas da integração ou erros web.",
                     "log_data_warnings": "Registar dados em falta ou inconsistentes.",
-                    "enable_specific_logging": "Registar qualquer campo especificado.",
-                    "log_fields": "Lista de campos separados por vírgulas para registar (ex: power,current,consumption)."
+                    "log_all_raw": "Registar a string JSON exata e não analisada recebida diretamente do WebSocket Leviton (AVISO: Contém tokens/IDs não ocultados).",
+                    "log_parsed_data": "Registar o dicionário completo de dados analisados (após ocultação) que a integração retém da API/WebSocket.",
+                    "enable_specific_logging": "Registar qualquer campo especificado. Os nomes dos campos podem ser encontrados ativando brevemente 'Registar Todos os Dados Analisados'.",
+                    "log_fields": "Para encontrar os nomes dos campos, ative 'Registar Todos os Dados Analisados' e verifique os registos do Home Assistant. Introduza acima separados por vírgulas."
                 }
             }
         }

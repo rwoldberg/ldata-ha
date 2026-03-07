@@ -286,6 +286,10 @@ class OptionsFlow(config_entries.OptionsFlow):
                 default=current_options.get("log_all_raw", False),
             ): bool,
             vol.Optional(
+                "log_parsed_data",
+                default=current_options.get("log_parsed_data", False),
+            ): bool,
+            vol.Optional(
                 "enable_specific_logging",
                 default=current_options.get("enable_specific_logging", False),
             ): bool,

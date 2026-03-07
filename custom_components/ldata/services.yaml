@@ -6,16 +6,12 @@ reset_energy_baseline:
     (consumption/import), the sensor will accept the next API reading.
     For daily sensors, baselines are cleared and the sensor re-establishes
     from the current API values.
+  target:
+    entity:
+      integration: ldata
+      domain: sensor
+      device_class: energy
   fields:
-    entity_id:
-      name: Entity
-      description: The LDATA energy sensor to reset.
-      required: true
-      selector:
-        entity:
-          integration: ldata
-          domain: sensor
-          device_class: energy
     value:
       name: New value in kWh (optional)
       description: >-

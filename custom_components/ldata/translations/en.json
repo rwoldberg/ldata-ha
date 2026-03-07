@@ -41,7 +41,8 @@
                     "ha_inform_rate": "HA Inform Rate (seconds)",
                     "log_warnings": "Log General Integration Errors",
                     "log_data_warnings": "Log Data Value Warnings (Spikes/Resets)",
-                    "log_all_raw": "Log Full WebSocket Data",
+                    "log_all_raw": "Log Raw WebSocket String",
+                    "log_parsed_data": "Log All Parsed Data",
                     "enable_specific_logging": "Enable Specific Field Logging",
                     "log_fields": "Fields to Log"
                 },
@@ -53,9 +54,10 @@
                     "gap_threshold": "Time without data before gap handling activates (1-30 minutes). Only for power×time fallback.",
                     "log_warnings": "Log integration crashes or web errors.",
                     "log_data_warnings": "Log warnings of data inconsistencies from Leviton (spikes/resets).",
-                    "log_all_raw": "Log all data provided via WebSocket.",
-                    "enable_specific_logging": "Log any specified field. Field names can be found by briefly enabling 'Log Full WebSocket Data'.",
-                    "log_fields": "To find field names, enable 'Log Full WebSocket Data' and check Home Assistant logs. Enter above as comma separated."
+                    "log_all_raw": "Log the exact, unparsed JSON string received directly from the Leviton WebSocket (WARNING: Contains unredacted tokens/IDs).",
+                    "log_parsed_data": "Log the complete parsed data dictionary (after redaction) that the integration retains from the API/WebSocket.",
+                    "enable_specific_logging": "Log any specified field. Field names can be found by briefly enabling 'Log All Parsed Data'.",
+                    "log_fields": "To find field names, enable 'Log All Parsed Data' and check Home Assistant logs. Enter above as comma separated."
                 }
             }
         }

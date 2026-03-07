@@ -199,15 +199,11 @@ async def async_setup_entry(
         entities_to_add.append(LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[0]))
         entities_to_add.append(LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[2]))
         entities_to_add.append(LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[5]))
-        breaker_import = float(breaker_data.get("import", 0) or 0)
-        breaker_consumption = float(breaker_data.get("consumption", 0) or 0)
-        # Solar breakers have import > consumption. Skip import sensors only when
-        # we can definitively tell it's not solar: consumption is accumulating but
-        # import is still zero.
-        has_import = breaker_import > 0 or breaker_consumption == 0
-        if has_import:
-            entities_to_add.append(LDATADailyUsageSensor(coordinator, breaker_data, False, "", breaker_energy_key="import"))
-            entities_to_add.append(LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[4]))
+        # Always create import sensors — solar breakers may have import=0 at
+        # startup (e.g. nighttime) and the sensors handle zero-import gracefully
+        # at runtime via the _breaker_energy_key="import" fallback logic.
+        entities_to_add.append(LDATADailyUsageSensor(coordinator, breaker_data, False, "", breaker_energy_key="import"))
+        entities_to_add.append(LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[4]))
         entities_to_add.append(LDATABreakerOperationalStateSensor(coordinator, breaker_data))
         entities_to_add.append(LDATABreakerBleRSSISensor(coordinator, breaker_data))
 
@@ -255,6 +251,19 @@ async def async_setup_entry(
 
 
 class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
+    """Sensor that tracks daily energy usage for an LDATA device.
+
+    Dual-mode operation:
+    1. Hardware counters (primary): Uses energyConsumption/energyImport lifetime
+       kWh totals. Daily energy = current_consumption - midnight_baseline.
+       Available on firmware 2.0+ panels.
+    2. Power×time integration (fallback): For older firmware without hardware
+       counters. Integrates power over time with configurable gap handling.
+
+    Mode is auto-detected per panel based on whether energyConsumption data
+    is available.
+    """
+
     _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR

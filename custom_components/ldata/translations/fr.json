@@ -33,28 +33,32 @@
     "options": {
         "step": {
             "init": {
-                "title": "Configurer LDATA",
+                "title": "Options Leviton LDATA",
                 "data": {
                     "three_phase": "Service réseau 120/208V (Appartement/Condo)",
                     "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
                     "gap_handling": "Gestion des interruptions (ancien firmware)",
                     "gap_threshold": "Seuil d'interruption (mins)",
                     "ha_inform_rate": "Taux d'information HA (secondes)",
-                    "log_warnings": "Journaliser les avertissements",
-                    "log_data_warnings": "Journaliser les avertissements de données",
+                    "log_warnings": "Journaliser les erreurs générales d'intégration",
+                    "log_data_warnings": "Journaliser les avertissements de données (Piques/Réinitialisations)",
+                    "log_all_raw": "Journaliser la chaîne WebSocket brute",
+                    "log_parsed_data": "Journaliser toutes les données analysées",
                     "enable_specific_logging": "Activer la journalisation de champs spécifiques",
                     "log_fields": "Champs à journaliser"
                 },
                 "data_description": {
+                    "ha_inform_rate": "Fréquence de mise à jour des capteurs dans Home Assistant (2-600 secondes).",
                     "three_phase": "Activez cette option UNIQUEMENT si vous vivez dans un appartement ou un immeuble avec une installation réseau 120/208V. Cela calcule correctement les tensions des disjoncteurs bipolaires en utilisant la formule 208V au lieu de 240V. Ne pas activer pour une maison résidentielle standard.",
                     "allow_breaker_control": "Lorsqu'activé, HA créera des interrupteurs permettant de déclencher/réinitialiser les disjoncteurs.",
-                    "gap_handling": "Repli pour anciens firmwares sans compteurs matériels. Ignorer: plus sûr. Extrapoler: dernière puissance. Moyenne: compromis. Firmware 2.0+ utilise les compteurs matériels.",
+                    "gap_handling": "Repli pour anciens firmwares sans compteurs matériels. Ignorer: plus sûr. Extrapoler: dernière puissance. Moyenne: compromis. Firmware 2.0+ utilise les compteurs matériels et ignore ceci.",
                     "gap_threshold": "Durée sans données avant activation (1-30 minutes). Mode de repli uniquement.",
-                    "ha_inform_rate": "Intervalle en secondes entre les mises à jour envoyées à HA (minimum 2s, maximum 600s).",
                     "log_warnings": "Journaliser les plantages de l'intégration ou les erreurs Web.",
                     "log_data_warnings": "Journaliser les données manquantes ou incohérentes.",
-                    "enable_specific_logging": "Journaliser n'importe quel champ spécifié.",
-                    "log_fields": "Liste de champs séparés par des virgules à journaliser (par ex. power,current,consumption)."
+                    "log_all_raw": "Journaliser la chaîne JSON exacte et non analysée reçue directement du WebSocket Leviton (ATTENTION: Contient des jetons/ID non masqués).",
+                    "log_parsed_data": "Journaliser le dictionnaire complet des données analysées (après masquage) que l'intégration conserve à partir de l'API/WebSocket.",
+                    "enable_specific_logging": "Journaliser n'importe quel champ spécifié. Les noms des champs peuvent être trouvés en activant brièvement 'Journaliser toutes les données analysées'.",
+                    "log_fields": "Pour trouver les noms des champs, activez 'Journaliser toutes les données analysées' et vérifiez les journaux de Home Assistant. Entrez-les ci-dessus séparés par des virgules."
                 }
             }
         }

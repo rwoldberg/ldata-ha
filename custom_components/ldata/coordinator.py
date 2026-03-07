@@ -17,7 +17,12 @@ from .ldata_service import LDATAService, LDATAAuthError
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 REST_POLL_INTERVAL = 60
+# Grace period (seconds) before REST poll loops start actively polling.
+# This gives the WebSocket time to connect, subscribe, and prove whether
+# it delivers breaker data. If WS delivers breaker data within this window,
+# REST polling stays disabled.
 WS_DETECTION_GRACE_PERIOD = 45
+
 
 class LDATAUpdateCoordinator(DataUpdateCoordinator):
     """LDATAUpdateCoordinator to handle fetching new data about the LDATA module."""
@@ -39,6 +44,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._websocket_connected = False
         self._websocket_ever_connected = False
 
+        # No polling interval — WebSocket + REST polling handle updates
         super().__init__(
             hass,
             _LOGGER,
@@ -47,6 +53,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             config_entry=entry,
         )
         
+        # Start the WebSocket Listener — this is the PRIMARY data source
         self._websocket_task = self.config_entry.async_create_background_task(
             self._hass, 
             self._service.async_run_websocket(
@@ -56,12 +63,17 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             "ldata_websocket"
         )
         
+        # Start the REST polling task as a FALLBACK for breaker/CT data.
+        # WS-first: these loops wait for the WS auto-detection grace period
+        # before polling. If WS delivers all data, they remain idle.
         self._rest_poll_task = self.config_entry.async_create_background_task(
             self._hass,
             self._rest_poll_loop(),
             "ldata_rest_poll"
         )
         
+        # Start the slow poll loop as a FALLBACK for CT energy data and
+        # a periodic refresh for panel-level diagnostics (rssi, voltage).
         self._ct_poll_task = self.config_entry.async_create_background_task(
             self._hass,
             self._ct_poll_loop(),
@@ -116,6 +128,12 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._debounce_timer = None
 
     async def _rest_poll_loop(self):
+        """Periodically poll the REST API for fresh breaker data.
+
+        WS-FIRST STRATEGY: This loop is a FALLBACK. It waits for the WebSocket
+        auto-detection grace period before starting. Only panels where WS
+        demonstrably fails to deliver breaker data will be polled via REST.
+        """
         while not self._service.status_data and not self._service._shutdown_requested:
             await asyncio.sleep(5)
         
@@ -154,7 +172,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 
                 refreshed = await self._service.refresh_breaker_data()
                 if refreshed:
-                    self._handle_websocket_update()
+                    self._handle_websocket_update("Scheduled/REST")
                     
             except asyncio.CancelledError:
                 break
@@ -168,6 +186,13 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         _LOGGER.debug("[v%s] REST poll loop stopped", self._service.version)
 
     async def _ct_poll_loop(self):
+        """Slow poll loop for CT energy data and panel-level diagnostics.
+
+        CT energy counters require a bandwidth toggle (1→0→1) to refresh.
+        This loop also refreshes panel-level data (rssi, voltage, frequency)
+        regardless of whether CT polling is needed. Only activates CT REST
+        polling for panels where WS doesn't deliver CT energy counters.
+        """
         while not self._service.status_data and not self._service._shutdown_requested:
             await asyncio.sleep(5)
         
@@ -210,7 +235,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                         refreshed = True
                 
                 if refreshed:
-                    self._handle_websocket_update()
+                    self._handle_websocket_update("Scheduled/REST")
                     
             except asyncio.CancelledError:
                 break
@@ -223,7 +248,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         _LOGGER.debug("[v%s] Slow poll loop stopped", self._service.version)
 
-    def _handle_websocket_update(self):
+    def _handle_websocket_update(self, source="Scheduled/REST"):
         if self._debounce_timer is None:
             inform_rate = max(
                 HA_INFORM_RATE_MIN,
@@ -231,10 +256,11 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             )
             self._debounce_timer = self._hass.loop.call_later(
                 inform_rate, 
-                self._apply_debounced_update
+                self._apply_debounced_update,
+                source
             )
 
-    def _apply_debounced_update(self):
+    def _apply_debounced_update(self, source="Scheduled/REST"):
         self._debounce_timer = None
         
         try:
@@ -242,7 +268,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             if not data:
                 return
             
-            self._log_data_if_enabled(data, "WebSocket")
+            self._log_data_if_enabled(data, source)
             
             inform_rate = max(
                 HA_INFORM_RATE_MIN,
@@ -269,14 +295,18 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 )
                 self._debounce_timer = self._hass.loop.call_later(
                     inform_rate,
-                    self._apply_debounced_update
+                    self._apply_debounced_update,
+                    "WebSocket Loop"
                 )
 
     def _log_data_if_enabled(self, data, source: str = ""):
         options = self.config_entry.options
-        if options.get("log_all_raw", False):
+        
+        # --- LOG PARSED DATA ---
+        if options.get("log_parsed_data", False):
             redacted_data = self._redact_data(data)
-            _LOGGER.warning("Leviton %s Full Data: %s", source, redacted_data)
+            _LOGGER.warning("Leviton %s Parsed Data: %s", source, redacted_data)
+            
         elif options.get("enable_specific_logging", False):
             if fields_to_log_str := options.get("log_fields", ""):
                 fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
@@ -321,6 +351,13 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             return data
 
     async def _async_update_data(self):
+        """Fetch data from LDATA Controller.
+
+        WebSocket is the PRIMARY data source. This method is only called for
+        the initial data fetch at startup. After that, WebSocket handles all
+        updates, with REST polling as a fallback only for panels where WS
+        doesn't deliver breaker/CT data.
+        """
         if self._websocket_connected and self.data is not None:
             return self.data
         

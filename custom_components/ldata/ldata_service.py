@@ -7,7 +7,6 @@ import asyncio
 import os
 import json
 
-import aiohttp
 
 from .const import _LEG1_POSITIONS, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT
 from .api.exceptions import LDATAAuthError, TwoFactorRequired
@@ -24,7 +23,12 @@ except Exception:
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 class LDATAService:
-    """The LDATAService object handles data normalization and gap logic."""
+    """The LDATAService Data Orchestrator.
+
+    Handles data normalization, zero-transition protection, and gap logic.
+    HTTP and WebSocket transport are delegated to api/http_client and
+    api/websocket_client respectively.
+    """
 
     def __init__(self, username, password, entry, session) -> None:
         """Init LDATAService."""
@@ -36,25 +40,51 @@ class LDATAService:
         if entry:
             self.http.refresh_token = entry.data.get("refresh_token", "")
             self.http.userid = entry.data.get("userid", "")
+            # Three-phase voltage calculation mode — cached from options so all
+            # update paths (REST, WS direct, WS embedded) use the same formula.
             self._three_phase = entry.options.get(
                 THREE_PHASE, entry.data.get(THREE_PHASE, THREE_PHASE_DEFAULT)
             )
         else:
             self._three_phase = THREE_PHASE_DEFAULT
             
+        # Lock to serialize REST poll operations. The breaker poll and CT poll
+        # both interact with the bandwidth setting. Without serialization the
+        # CT toggle (bandwidth:0) can corrupt a concurrent breaker GET.
         self._rest_poll_lock = asyncio.Lock()
+        # Cache for the latest status data — shared by WebSocket and REST updates
         self.status_data = None
         
+        # Per-panel REST polling flags.
+        # WS-first: panels start with REST disabled. If WS doesn't deliver
+        # breaker data within the grace period, REST polling activates as fallback.
         self._panel_needs_rest_poll: dict[str, bool] = {}
+        # Track whether panels have hardware energy counters (energyConsumption).
+        # When False, breaker daily sensors fall back to power×time integration.
         self._panel_has_hw_counters: dict[str, bool] = {}
+        # Per-panel CT REST polling flag (independent of breaker REST poll).
+        # CT energy counters require a bandwidth toggle to refresh.
         self._panel_needs_ct_poll: dict[str, bool] = {}
+        # Track how many IotWhem WS messages we've seen per panel without breaker data
         self._ws_iotwhem_count: dict[str, int] = {}
+        # Track when WS last delivered breaker data per panel (for coordinator)
         self._ws_last_breaker_data_time: dict[str, float] = {}
 
+        # ── Unified zero-transition protection ────────────────────────
+        # On V2 firmware the cloud sporadically sends zero power *and/or*
+        # zero rmsCurrent for breakers that actually carry a stable load.
+        # We protect BOTH power and current together: once loaded, all
+        # electrical fields are frozen until the breaker reports zero for
+        # BOTH power AND current for N consecutive updates.
         self._breaker_zero_count: dict[str, int] = {}
         self._ZERO_CONFIRM_THRESHOLD = 3
+        # Timestamp of last zero-counter increment per breaker. If too much
+        # wall-clock time passes between increments, the counter resets.
         self._breaker_zero_last_time: dict[str, float] = {}
         self._ZERO_DECAY_SECONDS = 180.0
+        # Panels currently undergoing a bandwidth toggle. While a panel is
+        # in this set, zero-counter increments are suppressed so the transient
+        # zeros caused by bandwidth:0 don't accumulate.
         self._panels_in_bandwidth_toggle: set[str] = set()
 
     @property
@@ -89,6 +119,12 @@ class LDATAService:
         return await self.http.set_blink_led(breaker_id, enabled)
 
     async def status(self):
+        """Fetch full panel/breaker/CT data from the Leviton cloud API.
+
+        This is only called for the initial data fetch at startup. After that,
+        WebSocket handles all live updates, with REST polling as a fallback
+        only for panels where WS doesn't deliver breaker/CT data.
+        """
         try:
             if not await self.http.refresh_auth():
                 raise LDATAAuthError(f"[v{self.version}] Token validation failed.")
@@ -111,31 +147,37 @@ class LDATAService:
         
         panels_json = None
         for res_id in self.http.residence_id_list:
-            headers = {**self.http.default_headers, "authorization": self.http.auth_token, "filter": '{"include":["residentialBreakers"]}'}
-            url = f"https://my.leviton.com/api/Residences/{res_id}/residentialBreakerPanels"
+            # Fetch LDATA panels via http_client (auth-error aware)
             try:
-                async with self.http.session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as result:
-                    if result.status == 200:
-                        panels_json = await result.json()
-                        for p in panels_json: p["ModuleType"] = "LDATA"
-            except Exception: pass
+                ldata_panels = await self.http.get_ldata_panels(res_id)
+                if ldata_panels:
+                    for p in ldata_panels:
+                        p["ModuleType"] = "LDATA"
+                    panels_json = ldata_panels
+            except LDATAAuthError:
+                raise
+            except Exception as ex:
+                _LOGGER.warning("[v%s] Failed to fetch LDATA panels for residence %s: %s", self.version, res_id, ex)
             
-            headers["filter"] = "{}"
-            url_whem = f"https://my.leviton.com/api/Residences/{res_id}/iotWhems"
+            # Fetch WHEMS panels via http_client (auth-error aware)
             try:
-                async with self.http.session.get(url_whem, headers=headers, timeout=aiohttp.ClientTimeout(total=15)) as result:
-                    if result.status == 200:
-                        whem_data = await result.json()
-                        for p in whem_data: 
-                            p["ModuleType"] = "WHEMS"
-                            p["rmsVoltage"] = p.get("rmsVoltageA")
-                            p["rmsVoltage2"] = p.get("rmsVoltageB")
-                            p["updateVersion"] = p.get("version")
-                            p["residentialBreakers"] = await self.http.get_Whems_breakers(p["id"])
-                            p["CTs"] = await self.http.get_Whems_CT(p["id"])
-                        if panels_json is None: panels_json = whem_data
-                        else: panels_json.extend(whem_data)
-            except Exception: pass
+                whem_data = await self.http.get_whems_panels(res_id)
+                if whem_data:
+                    for p in whem_data: 
+                        p["ModuleType"] = "WHEMS"
+                        p["rmsVoltage"] = p.get("rmsVoltageA")
+                        p["rmsVoltage2"] = p.get("rmsVoltageB")
+                        p["updateVersion"] = p.get("version")
+                        p["residentialBreakers"] = await self.http.get_Whems_breakers(p["id"])
+                        p["CTs"] = await self.http.get_Whems_CT(p["id"])
+                    if panels_json is None:
+                        panels_json = whem_data
+                    else:
+                        panels_json.extend(whem_data)
+            except LDATAAuthError:
+                raise
+            except Exception as ex:
+                _LOGGER.warning("[v%s] Failed to fetch WHEMS panels for residence %s: %s", self.version, res_id, ex)
 
         return self.parse_panels(panels_json)
 
@@ -325,6 +367,7 @@ class LDATAService:
         return status_data
 
     async def _bandwidth_toggle(self, panel_id: str, panel_type: str = "WHEMS"):
+        """Toggle bandwidth 1→0→1 to force CT energy counter refresh."""
         self._panels_in_bandwidth_toggle.add(panel_id)
         try:
             await self.http.put_bandwidth(panel_id, panel_type, 1)
@@ -334,6 +377,12 @@ class LDATAService:
             self._panels_in_bandwidth_toggle.discard(panel_id)
 
     def _check_zero_transition(self, breaker_id: str, new_power: float, new_current: float, old_power: float, old_current: float, source: str = "?", power_from_msg: bool = True, current_from_msg: bool = True, panel_id: str | None = None) -> bool:
+        """Unified zero-transition guard.
+
+        Returns True if the electrical update should be accepted, False if it
+        should be suppressed (breaker was loaded, arrived values are all zero,
+        and the consecutive-zero count hasn't reached the confirmation threshold).
+        """
         was_loaded = abs(old_power) > 0 or abs(old_current) > 0.01
         if not was_loaded:
             self._breaker_zero_count[breaker_id] = 0
@@ -365,6 +414,12 @@ class LDATAService:
         return True
 
     def _apply_breaker_update(self, breaker_id: str, existing: dict, raw: dict, source: str = "?") -> bool:
+        """Apply a raw breaker update (from WS or REST) to the existing cached breaker dict.
+
+        Handles leg-aware field mapping, zero-transition protection, and
+        selective field updates. Returns True if power changed (caller should
+        recalculate panel total).
+        """
         def _field(key, cached):
             if key in raw and raw[key] is not None: return float(raw[key])
             return cached
@@ -527,11 +582,32 @@ class LDATAService:
         status_data[panel_id + "totalPower"] = total
 
     def _update_from_websocket(self, payload):
+        """Process a WebSocket notification and merge into status_data.
+
+        Handles three model types: ResidentialBreaker (single breaker update),
+        IotCt (single CT update), and IotWhem (bulk panel update that may
+        contain embedded breaker and CT arrays).
+
+        Also drives WS auto-detection: if a panel delivers breaker/CT data
+        via WS, the corresponding REST poll fallback is disabled.
+        """
         if not self.status_data: return None
 
         model_name = payload.get("modelName")
         data = payload.get("data")
         if not data: return None
+
+        try:
+            log_id = data.get("id") or payload.get("modelId", "")
+            log_keys = [k for k in data.keys() if k not in ("id", "modelId", "class", "ResidentialBreaker", "IotCt")]
+            if log_keys:
+                _LOGGER.debug("[v%s] WS %s %s: %s", self.version, model_name, log_id, ", ".join(log_keys))
+            if "ResidentialBreaker" in data:
+                _LOGGER.debug("[v%s] WS %s %s: ResidentialBreaker", self.version, model_name, log_id)
+            if "IotCt" in data:
+                _LOGGER.debug("[v%s] WS %s %s: IotCt", self.version, model_name, log_id)
+        except Exception:
+            pass
 
         new_status_data = self.status_data.copy()
         updated = False
@@ -541,11 +617,17 @@ class LDATAService:
              if breaker_id and breaker_id in new_status_data["breakers"]:
                   breakers = new_status_data["breakers"].copy()
                   breaker = breakers[breaker_id].copy()
+                  
+                  # FIX: If WS successfully delivers breaker data, disable the REST poll fallback loop
+                  panel_id = breaker.get("panel_id")
+                  if panel_id and self._panel_needs_rest_poll.get(panel_id):
+                      self._panel_needs_rest_poll[panel_id] = False
+                      _LOGGER.info("[v%s] WS delivering Breaker data for panel %s — disabling REST poll", self.version, panel_id)
+
                   power_changed = self._apply_breaker_update(breaker_id, breaker, data, source="WS")
                   breakers[breaker_id] = breaker
                   new_status_data["breakers"] = breakers
                   if power_changed:
-                      panel_id = breaker.get("panel_id")
                       if panel_id: self._recalc_total_power(new_status_data, panel_id)
                   updated = True
 
@@ -582,6 +664,11 @@ class LDATAService:
                  if has_electrical_data:
                      self._ws_last_breaker_data_time[panel_id] = time.time()
                      self._ws_iotwhem_count[panel_id] = 0
+                     
+                     # Disable REST poll fallback if breaker array arrives inside an IotWhem bulk payload
+                     if self._panel_needs_rest_poll.get(panel_id):
+                         self._panel_needs_rest_poll[panel_id] = False
+                         _LOGGER.info("[v%s] WS delivering Breaker data (via IotWhem) for panel %s — disabling REST poll", self.version, panel_id)
                  else:
                      self._ws_iotwhem_count[panel_id] = self._ws_iotwhem_count.get(panel_id, 0) + 1
              
