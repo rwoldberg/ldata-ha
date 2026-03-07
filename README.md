@@ -62,8 +62,8 @@ Addon is auto reloading on submit.
  
   - The older 1.x you could adjust the "polling rate" or how often to ask Leviton for new data, with Websocket you ask once and it turns on a fuacet of data, as any value changes it's past back to you (@ .5-1 sec rate) so the 'HA infrom rate' listens to the stream but only passes values to HA for DB writing at the rate you set.
 
-- Three phase (default off)
-  - For Three phase setups
+- 120/208V Network Service (Apartment/Condo) (default off)
+  - Enable this ONLY if you live in an apartment or building with a 120/208V Network setup. This correctly calculates 2-pole breaker voltages using 208V math instead of 240V. Do not enable this for a standard residential house.
 
 - Allow Breaker Control (default off)
   - HA will not create Switch entities for breaker control (Breakers are only treated as Sensors)
@@ -73,14 +73,26 @@ Addon is auto reloading on submit.
 
 - Log Data Validation Warning (Spikes/Resets)
   - Outputs Warnings of Data inconsistancies from Leviton to log
+
+- Log Raw WebSocket String
+  - Log the exact, unparsed JSON string received directly from the Leviton WebSocket (WARNING: Contains unredacted tokens/IDs).
   
-- Log Full WebSocket Data
-  - Outputs all data provided
+- Log All Parsed Data
+  - Log the complete parsed data dictionary (after redaction) that the integration retains from the API/WebSocket.
 
 - Enable Specific Field Logging
   - Outputs any specified field to log (field names can be seen by breifly enabling and looking at "Log Full WebSocket Data")
 
-<img width="586" height="873" alt="image" src="https://github.com/user-attachments/assets/3c563e92-ca67-432b-a7c1-01ec247001cf" />
+<img width="548" height="914" alt="options" src="https://github.com/user-attachments/assets/4d756e48-0c5e-4a97-8a2f-073d1a97f563" />
+
+<br>
+<br>
+<br>
+
+# Known Issues (Leviton Lacking support)
+
+- CT clamp values are only available during Polling no WS support
+- BLErssi on 2-pole breakers always 0 due to not reporting from Leviton
 
 <br>
 <br>
