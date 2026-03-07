@@ -199,11 +199,17 @@ async def async_setup_entry(
         entities_to_add.append(LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[0]))
         entities_to_add.append(LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[2]))
         entities_to_add.append(LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[5]))
-        # Always create import sensors — solar breakers may have import=0 at
-        # startup (e.g. nighttime) and the sensors handle zero-import gracefully
-        # at runtime via the _breaker_energy_key="import" fallback logic.
-        entities_to_add.append(LDATADailyUsageSensor(coordinator, breaker_data, False, "", breaker_energy_key="import"))
-        entities_to_add.append(LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[4]))
+        breaker_import = float(breaker_data.get("import", 0) or 0)
+        breaker_consumption = float(breaker_data.get("consumption", 0) or 0)
+        # Solar breakers have import > consumption. Skip import sensors only
+        # when we can definitively tell it's not solar: consumption is
+        # accumulating but import is still zero. When both are zero (e.g.
+        # panel just powered on, or nighttime startup), we create the sensors
+        # — they'll sit harmlessly at 0 until the next reload confirms.
+        has_import = breaker_import > 0 or breaker_consumption == 0
+        if has_import:
+            entities_to_add.append(LDATADailyUsageSensor(coordinator, breaker_data, False, "", breaker_energy_key="import"))
+            entities_to_add.append(LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[4]))
         entities_to_add.append(LDATABreakerOperationalStateSensor(coordinator, breaker_data))
         entities_to_add.append(LDATABreakerBleRSSISensor(coordinator, breaker_data))
 
