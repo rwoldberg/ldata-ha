@@ -27,15 +27,14 @@ async def async_setup_entry(
     entry = hass.data[DOMAIN][config_entry.entry_id]
     sensors_to_add = []
 
-    if "breakers" in entry.data:
-        for breaker_id in entry.data["breakers"]:
-            breaker_data = entry.data["breakers"][breaker_id]
+    if breakers := entry.data.get("breakers"):
+        for breaker_data in breakers.values():
             sensors_to_add.append(LDATABinarySensor(entry, breaker_data))
             sensors_to_add.append(LDATABreakerOverCurrentSensor(entry, breaker_data))
             sensors_to_add.append(LDATABreakerUnderVoltageSensor(entry, breaker_data))
 
-    if "panels" in entry.data:
-        for panel_data in entry.data["panels"]:
+    if panels := entry.data.get("panels"):
+        for panel_data in panels:
             sensors_to_add.append(LdataCloudConnectedSensor(entry, panel_data))
             sensors_to_add.append(LDATAPanelOverVoltageSensor(entry, panel_data))
             sensors_to_add.append(LDATAPanelUnderVoltageSensor(entry, panel_data))
@@ -46,32 +45,38 @@ async def async_setup_entry(
 class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     """LDATA binary sensor class."""
 
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
     def __init__(self, coordinator, data) -> None:
         """Init LDATABinarySensor."""
         super().__init__(data=data, coordinator=coordinator)
         self._attr_unique_id = f"{data['id']}_status"
         self.breaker_data = data
         self._state = None
-        if current_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
+        
+        breakers = self.coordinator.data.get("breakers", {})
+        if current_data := breakers.get(self.breaker_data["id"]):
             if (
-                current_data["state"] == "ManualON"
-                and current_data["remoteState"] == "RemoteON"
+                current_data.get("state") == "ManualON"
+                and current_data.get("remoteState") == "RemoteON"
             ):
                 self._state = True
             else:
                 self._state = False
-        # Subscribe to updates.
+                
+    async def async_added_to_hass(self) -> None:
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        await super().async_added_to_hass()
 
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            if breakers := self.coordinator.data["breakers"]:
-                if new_data := breakers[self.breaker_data["id"]]:
+            if breakers := self.coordinator.data.get("breakers"):
+                if new_data := breakers.get(self.breaker_data["id"]):
                     if (
-                        new_data["state"] == "ManualON"
-                        and new_data["remoteState"] == "RemoteON"
+                        new_data.get("state") == "ManualON"
+                        and new_data.get("remoteState") == "RemoteON"
                     ):
                         self._state = True
                     else:
@@ -84,15 +89,15 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     def extra_state_attributes(self) -> dict[str, str]:
         """Returns the extra attributes for the breaker."""
         attributes = super().extra_state_attributes
-        attributes["id"] = self.breaker_data["id"]
-        attributes["rating"] = self.breaker_data["rating"]
-        attributes["position"] = self.breaker_data["position"]
-        attributes["model"] = self.breaker_data["model"]
-        attributes["poles"] = self.breaker_data["poles"]
-        attributes["serialNumber"] = self.breaker_data["serialNumber"]
-        attributes["hardware"] = self.breaker_data["hardware"]
-        attributes["firmware"] = self.breaker_data["firmware"]
-        attributes["panel_id"] = self.breaker_data["panel_id"]
+        attributes["id"] = self.breaker_data.get("id")
+        attributes["rating"] = self.breaker_data.get("rating")
+        attributes["position"] = self.breaker_data.get("position")
+        attributes["model"] = self.breaker_data.get("model")
+        attributes["poles"] = self.breaker_data.get("poles")
+        attributes["serialNumber"] = self.breaker_data.get("serialNumber")
+        attributes["hardware"] = self.breaker_data.get("hardware")
+        attributes["firmware"] = self.breaker_data.get("firmware")
+        attributes["panel_id"] = self.breaker_data.get("panel_id")
 
         return attributes
 
@@ -109,6 +114,8 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
 class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
     """LDATA Cloud Connection binary sensor for a specific panel."""
 
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
     def __init__(self, coordinator, data) -> None:
         """Init LdataCloudConnectedSensor."""
         super().__init__(data=data, coordinator=coordinator)
@@ -117,8 +124,10 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         self._consecutive_update_failures = 0
         
         self._update_state() # Set initial state
-        # Subscribe to updates.
+
+    async def async_added_to_hass(self) -> None:
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        await super().async_added_to_hass()
 
     @callback
     def _state_update(self):
@@ -129,21 +138,19 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
     def _update_state(self):
         """Update the internal state of the sensor."""
         try:
-            # Find the specific panel's data in the latest update
             found = False
-            for panel in self.coordinator.data["panels"]:
-                if panel["id"] == self.panel_data["id"]:
-                    self._state = panel["connected"]
-                    self._consecutive_update_failures = 0 # Reset failure count
+            for panel in self.coordinator.data.get("panels", []):
+                if panel.get("id") == self.panel_data["id"]:
+                    self._state = panel.get("connected")
+                    self._consecutive_update_failures = 0
                     found = True
-                    return # Exit after finding the panel
+                    return
             
             # Only set to None after multiple failures to prevent flickering
             if not found:
                 self._consecutive_update_failures += 1
                 if self._consecutive_update_failures > 5:
                     self._state = None
-                # Else: keep the last known self._state
                 
         except (KeyError, TypeError, AttributeError):
             self._state = None
@@ -179,14 +186,17 @@ class LDATAPanelOverVoltageSensor(LDATAEntity, BinarySensorEntity):
         self.panel_data = data
         self._state = data.get("overVoltage", False)
         self._threshold = data.get("overVoltageThreshold")
+
+    async def async_added_to_hass(self) -> None:
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        await super().async_added_to_hass()
 
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
             for panel in self.coordinator.data.get("panels", []):
-                if panel["id"] == self.panel_data["id"]:
+                if panel.get("id") == self.panel_data["id"]:
                     self._state = panel.get("overVoltage", False)
                     self._threshold = panel.get("overVoltageThreshold")
                     break
@@ -231,14 +241,17 @@ class LDATAPanelUnderVoltageSensor(LDATAEntity, BinarySensorEntity):
         self.panel_data = data
         self._state = data.get("underVoltage", False)
         self._threshold = data.get("underVoltageThreshold")
+
+    async def async_added_to_hass(self) -> None:
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        await super().async_added_to_hass()
 
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
             for panel in self.coordinator.data.get("panels", []):
-                if panel["id"] == self.panel_data["id"]:
+                if panel.get("id") == self.panel_data["id"]:
                     self._state = panel.get("underVoltage", False)
                     self._threshold = panel.get("underVoltageThreshold")
                     break
@@ -285,7 +298,10 @@ class LDATABreakerOverCurrentSensor(LDATAEntity, BinarySensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("overCurrent", False)
+
+    async def async_added_to_hass(self) -> None:
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        await super().async_added_to_hass()
 
     @callback
     def _state_update(self):
@@ -327,7 +343,10 @@ class LDATABreakerUnderVoltageSensor(LDATAEntity, BinarySensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("underVoltage", False)
+
+    async def async_added_to_hass(self) -> None:
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        await super().async_added_to_hass()
 
     @callback
     def _state_update(self):

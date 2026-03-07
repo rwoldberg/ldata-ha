@@ -12,6 +12,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
     DOMAIN,
@@ -56,31 +57,25 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.service: LDATAService | None = None
         self.user_data: dict[str, Any] | None = None
-        # Add this to store the entry being re-authenticated
         self.reauth_entry: config_entries.ConfigEntry | None = None
 
     async def _validate_input(self, hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
         """Validate the user input allows us to connect."""
-        
-        # Pass None for entry during initial setup
-        self.service = LDATAService(data[CONF_USERNAME], data[CONF_PASSWORD], None) 
+        session = async_get_clientsession(hass)
+        self.service = LDATAService(data[CONF_USERNAME], data[CONF_PASSWORD], None, session) 
         try:
-            result = await hass.async_add_executor_job(self.service.auth_with_credentials)
+            result = await self.service.auth_with_credentials()
         
         except TwoFactorRequired:
-            # This is not an error, it's the next step
             raise
         except LDATAAuthError as ex:
-            # This is an invalid auth error
             _LOGGER.error("Invalid credentials: %s", ex)
             raise InvalidAuth from ex
-        
         except Exception as ex:
             _LOGGER.error("Error validating credentials: %s", ex)
             raise CannotConnect from ex
     
         if not result:
-            # This path should not be reachable if auth_with_credentials raises
             _LOGGER.error("Failed to authenticate with Leviton API")
             raise InvalidAuth
         
@@ -88,13 +83,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         """Handle re-authentication."""
-        # Store the entry for later update
         self.reauth_entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
-        
-        # Store the existing config to pre-fill the form
         self.user_data = dict(entry_data)
-        
-        # Forward to the user step, which will be shown
         return await self.async_step_user(user_input=None)
 
     async def async_step_user(
@@ -104,9 +94,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         if user_input is not None:
             
-            # If this is a reauth, user_data is pre-filled.
-            # We merge the new user_input (username/password)
-            # with the old data (three_phase, allow_breaker_control).
             if self.user_data:
                 self.user_data.update(user_input)
                 input_to_validate = self.user_data
@@ -114,7 +101,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 input_to_validate = user_input
 
             try:
-                # Store user data in case we need it for the 2FA step
                 self.user_data = input_to_validate
                 info = await self._validate_input(self.hass, input_to_validate)
                 
@@ -123,17 +109,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except TwoFactorRequired:
-                # 2FA is needed. Move to the 2FA step.
                 return await self.async_step_2fa()
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                # 2FA was not required, create or update entry
-                
                 if self.reauth_entry:
                     _LOGGER.debug("Re-auth (no 2FA) successful, updating entry.")
-                    # Explicitly update data
                     new_data = self.reauth_entry.data.copy()
                     new_data[CONF_USERNAME] = self.user_data[CONF_USERNAME]
                     new_data[CONF_PASSWORD] = self.user_data[CONF_PASSWORD]
@@ -145,7 +127,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     await self.hass.config_entries.async_reload(self.reauth_entry.entry_id)
                     return self.async_abort(reason="reauth_successful")
                 
-                # This is a new setup
                 if self.service:
                     self.user_data["refresh_token"] = self.service.refresh_token
                     self.user_data["userid"] = self.service.userid
@@ -154,7 +135,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title=info["title"], data=self.user_data)
 
-        # Pre-fill the form with data if it's a re-auth
         schema = STEP_USER_DATA_SCHEMA
         if self.user_data:
             schema = vol.Schema({
@@ -166,7 +146,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=schema, # Use the potentially modified schema
+            data_schema=schema,
             errors=errors,
         )
 
@@ -176,25 +156,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             if not self.service or not self.user_data:
-                # Something went wrong, start over
                 return self.async_abort(reason="unknown")
 
             try:
                 code = user_input["2fa_code"]
-                # Call the new complete_2fa method
-                result = await self.hass.async_add_executor_job(
-                    self.service.complete_2fa, code
-                )
+                result = await self.service.complete_2fa(code)
                 
                 if not result:
-                    # This should not be reachable if complete_2fa raises LDATAAuthError
                     errors["base"] = "invalid_2fa"
                 else:
-                    # 2FA was successful, create or update entry
-                    
                     if self.reauth_entry:
                         _LOGGER.debug("Re-auth (with 2FA) successful, updating entry.")
-                        # Explicitly update data
                         new_data = self.reauth_entry.data.copy()
                         new_data[CONF_USERNAME] = self.user_data[CONF_USERNAME]
                         new_data[CONF_PASSWORD] = self.user_data[CONF_PASSWORD]
@@ -206,7 +178,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         await self.hass.config_entries.async_reload(self.reauth_entry.entry_id)
                         return self.async_abort(reason="reauth_successful")
 
-                    # This is a new setup
                     username = self.user_data[CONF_USERNAME]
                     self.user_data["refresh_token"] = self.service.refresh_token
                     self.user_data["userid"] = self.service.userid
@@ -224,7 +195,6 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected error during 2FA validation")
                 errors["base"] = "unknown"
         
-        # Show the 2FA form
         return self.async_show_form(
             step_id="2fa",
             data_schema=vol.Schema({vol.Required("2fa_code"): str}),
@@ -255,14 +225,11 @@ class OptionsFlow(config_entries.OptionsFlow):
         current_options = self.config_entry.options
         current_data = self.config_entry.data
 
-        # Check if any panel uses power×time fallback (no hw counters).
-        # If ALL panels have hw counters, gap handling options are irrelevant.
         show_gap_options = True
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         if coordinator and hasattr(coordinator, '_service') and coordinator._service:
             service = coordinator._service
             if hasattr(service, '_panel_has_hw_counters') and service._panel_has_hw_counters:
-                # If every panel has hw counters, hide gap options
                 show_gap_options = not all(service._panel_has_hw_counters.values())
 
         options_schema = {
@@ -283,7 +250,6 @@ class OptionsFlow(config_entries.OptionsFlow):
             ): bool,
         }
 
-        # Only show gap handling when at least one panel lacks hw counters
         if show_gap_options:
             options_schema[vol.Optional(
                 GAP_HANDLING,

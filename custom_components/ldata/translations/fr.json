@@ -42,7 +42,8 @@
                     "ha_inform_rate": "Taux d'information HA (secondes)",
                     "log_warnings": "Journaliser les avertissements",
                     "log_data_warnings": "Journaliser les avertissements de données",
-                    "log_specific_fields": "Journaliser des champs spécifiques"
+                    "enable_specific_logging": "Activer la journalisation de champs spécifiques",
+                    "log_fields": "Champs à journaliser"
                 },
                 "data_description": {
                     "three_phase": "Activer la prise en charge de l'alimentation triphasée.",
@@ -52,7 +53,8 @@
                     "ha_inform_rate": "Intervalle en secondes entre les mises à jour envoyées à HA (minimum 2s, maximum 600s).",
                     "log_warnings": "Journaliser les plantages de l'intégration ou les erreurs Web.",
                     "log_data_warnings": "Journaliser les données manquantes ou incohérentes.",
-                    "log_specific_fields": "Liste de champs séparés par des virgules à journaliser (par ex. power,current,consumption)."
+                    "enable_specific_logging": "Journaliser n'importe quel champ spécifié.",
+                    "log_fields": "Liste de champs séparés par des virgules à journaliser (par ex. power,current,consumption)."
                 }
             }
         }

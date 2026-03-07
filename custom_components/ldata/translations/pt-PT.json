@@ -42,7 +42,8 @@
                     "ha_inform_rate": "Taxa de informação HA (segundos)",
                     "log_warnings": "Registar avisos",
                     "log_data_warnings": "Registar avisos de dados",
-                    "log_specific_fields": "Registar campos específicos"
+                    "enable_specific_logging": "Ativar o registo de campos específicos",
+                    "log_fields": "Campos a registar"
                 },
                 "data_description": {
                     "three_phase": "Ativar suporte para alimentação trifásica.",
@@ -52,7 +53,8 @@
                     "ha_inform_rate": "Intervalo em segundos entre atualizações enviadas ao HA (mínimo 2s, máximo 600s).",
                     "log_warnings": "Registar falhas da integração ou erros web.",
                     "log_data_warnings": "Registar dados em falta ou inconsistentes.",
-                    "log_specific_fields": "Lista de campos separados por vírgulas para registar (ex: power,current,consumption)."
+                    "enable_specific_logging": "Registar qualquer campo especificado.",
+                    "log_fields": "Lista de campos separados por vírgulas para registar (ex: power,current,consumption)."
                 }
             }
         }

@@ -73,6 +73,8 @@ class LDATACTEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
             },
             "name": self.entity_data["name"],
             "model": f"CT Clamp (Channel {channel})",
+            "hw_version": self.entity_data.get("hardware"),
+            "sw_version": self.entity_data.get("firmware"),
             "manufacturer": MANUFACTURER,
             "via_device": (DOMAIN, self.entity_data["panel_id"]),
         }
