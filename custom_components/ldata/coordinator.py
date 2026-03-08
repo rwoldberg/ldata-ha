@@ -11,7 +11,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, CT_POLL_INTERVAL
+from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN
 from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -157,30 +157,31 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         while not self._service._shutdown_requested:
             try:
-                poll_interval = max(
-                    HA_INFORM_RATE_MIN,
-                    self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
-                )
+                refreshed = False
                 
-                await asyncio.sleep(poll_interval)
+                # 1. DO THE WORK FIRST (Startup Sync)
+                # Always refresh panel-level data (rssi, voltage, frequency)
+                if await self._service.refresh_panel_data():
+                    refreshed = True
                 
-                if self._service._shutdown_requested:
-                    break
+                # Only run CT REST poll if WS isn't delivering CT energy
+                if self._service.needs_ct_poll:
+                    if await self._service.refresh_ct_data():
+                        refreshed = True
                 
-                if not self._service.needs_rest_poll:
-                    continue
-                
-                refreshed = await self._service.refresh_breaker_data()
                 if refreshed:
                     self._handle_websocket_update("Scheduled/REST")
                     
+                # 2. THEN GO TO SLEEP FOR AN HOUR
+                await asyncio.sleep(3600)
+                
             except asyncio.CancelledError:
                 break
             except LDATAAuthError as ex:
-                _LOGGER.warning("[v%s] Auth error during REST poll: %s", self._service.version, ex)
+                _LOGGER.warning("[v%s] Auth error during slow poll: %s", self._service.version, ex)
                 await asyncio.sleep(60)
             except Exception as ex:
-                _LOGGER.warning("[v%s] REST poll error: %s", self._service.version, ex)
+                _LOGGER.warning("[v%s] Slow poll error: %s", self._service.version, ex)
                 await asyncio.sleep(30)
         
         _LOGGER.debug("[v%s] REST poll loop stopped", self._service.version)
@@ -205,8 +206,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         if self._service.needs_ct_poll:
             _LOGGER.info(
-                "[v%s] Slow poll loop started (interval=%ss, panels needing CT REST poll: %s)",
-                self._service.version, CT_POLL_INTERVAL,
+                "[v%s] Slow poll loop started (interval=3600s, panels needing CT REST poll: %s)",
+                self._service.version, 
                 [pid for pid, need in self._service._panel_needs_ct_poll.items() if need],
             )
         else:
@@ -214,11 +215,12 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 "[v%s] Slow poll loop: WS delivering CT energy data for all panels — CT REST poll not needed",
                 self._service.version,
             )
-        _LOGGER.debug("[v%s] Slow poll loop: panel status refresh enabled (interval=%ss)", self._service.version, CT_POLL_INTERVAL)
+        _LOGGER.debug("[v%s] Slow poll loop: panel status refresh enabled (interval=3600s)", self._service.version)
         
         while not self._service._shutdown_requested:
             try:
-                await asyncio.sleep(CT_POLL_INTERVAL)
+                # HOURLY HARDWARE SYNC
+                await asyncio.sleep(3600)
                 
                 if self._service._shutdown_requested:
                     break
@@ -351,13 +353,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             return data
 
     async def _async_update_data(self):
-        """Fetch data from LDATA Controller.
-
-        WebSocket is the PRIMARY data source. This method is only called for
-        the initial data fetch at startup. After that, WebSocket handles all
-        updates, with REST polling as a fallback only for panels where WS
-        doesn't deliver breaker/CT data.
-        """
+        """Fetch data from LDATA Controller."""
         if self._websocket_connected and self.data is not None:
             return self.data
         

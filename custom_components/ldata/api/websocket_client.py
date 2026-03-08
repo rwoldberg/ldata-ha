@@ -59,6 +59,45 @@ class LDATAWebsocketClient:
                 _LOGGER.error("WS closed unexpectedly during authentication. Type: %s", msg.type)
                 return False
 
+    async def _bandwidth_keepalive(self, session: aiohttp.ClientSession):
+        """Send bandwidth:1 PUT to every panel to keep the cloud pushing data.
+
+        The Leviton web app sends two bandwidth:1 PUTs back-to-back every 50
+        seconds. Without this, the cloud reduces the WS data rate to only
+        push changes for breakers with significant load changes.
+
+        Uses the dedicated WS session so the server associates the bandwidth
+        setting with the same connection as the WebSocket.
+        """
+        if not self.service.status_data or not self.service.status_data.get("panels"):
+            return
+        headers = {
+            "Authorization": self.http.auth_token,
+            "Content-Type": "application/json",
+            "Origin": "https://myapp.leviton.com",
+            "Referer": "https://myapp.leviton.com/",
+        }
+        for _round in range(2):
+            for panel in self.service.status_data["panels"]:
+                panel_id = panel.get("id")
+                panel_type = panel.get("panel_type", "WHEMS")
+                if not panel_id:
+                    continue
+                url = (
+                    f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
+                    if panel_type == "LDATA"
+                    else f"https://my.leviton.com/api/IotWhems/{panel_id}"
+                )
+                try:
+                    async with session.put(
+                        url, headers=headers, json={"bandwidth": 1},
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as resp:
+                        _LOGGER.debug("[v%s] Bandwidth PUT %s panel %s (round %d): %s",
+                                      self.service.version, panel_type, panel_id, _round + 1, resp.status)
+                except Exception as ex:
+                    _LOGGER.debug("[v%s] Bandwidth PUT panel %s failed: %s", self.service.version, panel_id, ex)
+
     async def _ws_send_subscriptions(self, ws):
         subscriptions = []
         for res_id in self.http.residence_id_list:
@@ -66,16 +105,30 @@ class LDATAWebsocketClient:
             subscriptions.append({"type": "subscribe", "subscription": {"modelName": "Residence", "modelId": formatted_id}})
         
         if self.service.status_data:
-            for panel in self.service.status_data.get("panels", []):
+            panels = self.service.status_data.get("panels", [])
+            breakers = self.service.status_data.get("breakers", {})
+            cts = self.service.status_data.get("cts", {})
+            
+            for panel in panels:
                 subscriptions.append({"type": "subscribe", "subscription": {"modelName": "IotWhem", "modelId": panel["id"]}})
                 
-            for b_id in self.service.status_data.get("breakers", {}):
+            for b_id in breakers:
+                # REVERTED: Breaker IDs must be strictly sent as strings, identical to v2.0.3
                 subscriptions.append({"type": "subscribe", "subscription": {"modelName": "ResidentialBreaker", "modelId": b_id}})
                 
-            for ct_id in self.service.status_data.get("cts", {}):
-                subscriptions.append({"type": "subscribe", "subscription": {"modelName": "IotCt", "modelId": int(ct_id)}})
-        
-        _LOGGER.debug("Sending %s WebSocket subscriptions...", len(subscriptions))
+            for ct_id in cts:
+                subscriptions.append({"type": "subscribe", "subscription": {"modelName": "IotCt", "modelId": ct_id}})
+            
+            _LOGGER.debug(
+                "Sending %s WebSocket subscriptions: %s residences, %s panels, %s breakers, %s CTs",
+                len(subscriptions), len(self.http.residence_id_list), len(panels), len(breakers), len(cts),
+            )
+        else:
+            _LOGGER.warning(
+                "WebSocket subscribing with NO status_data — only %s residence subscriptions will be sent. "
+                "Panel/breaker/CT subscriptions require status_data from initial API fetch.",
+                len(subscriptions),
+            )
         for sub in subscriptions:
             if ws.closed:
                 _LOGGER.error("Failed to send subscription, WS is closed.")
@@ -88,6 +141,12 @@ class LDATAWebsocketClient:
         return True
 
     async def async_run_websocket(self, update_callback, connection_callback=None):
+        """Run the WebSocket connection loop — PRIMARY data source.
+
+        Uses a dedicated aiohttp.ClientSession (not HA's shared session) so
+        that bandwidth PUTs and the WS connection share the same TCP/cookie
+        context. The Leviton cloud associates bandwidth settings per-session.
+        """
         reconnect_delay = 10
         max_delay = 300
         
@@ -105,108 +164,152 @@ class LDATAWebsocketClient:
                     await asyncio.sleep(10)
                     continue
                 
-                try:
-                    ws_headers = dict(self.http.default_headers)
-                    ws_headers.pop("host", None)
-                    ws_headers.pop("Host", None)
-                    
-                    if "Origin" not in ws_headers and "origin" not in ws_headers:
-                        ws_headers["Origin"] = "https://myapp.leviton.com"
-                        
-                    ws = await self.http.session.ws_connect(self.uri, headers=ws_headers, compress=15)
-                except Exception as ex:
-                    _LOGGER.error("WebSocket connection failed to establish: %s", ex)
-                    notify_connection(False)
-                    await asyncio.sleep(reconnect_delay)
-                    reconnect_delay = min(reconnect_delay * 2, max_delay)
-                    continue
-                
-                _heartbeat_task: asyncio.Task | None = None
-                try:
-                    if not await self._ws_authenticate(ws): 
-                        continue
-                    
-                    retry_count = 0
-                    while not self.service.status_data and retry_count < 15:
-                        await asyncio.sleep(2)
-                        retry_count += 1
-                        
-                    if not await self._ws_send_subscriptions(ws): 
-                        continue
-                    
-                    notify_connection(True)
-                    
-                    async def apiversion_heartbeat():
-                        try: 
-                            async with self.http.session.get(
-                                "https://my.leviton.com/apiversion", 
-                                headers={**self.http.default_headers, "authorization": self.http.auth_token}, 
-                                timeout=aiohttp.ClientTimeout(total=10)
-                            ) as resp:
-                                _LOGGER.debug("[v%s] API version heartbeat: %s", self.service.version, resp.status)
-                        except Exception: pass
+                # Dedicated session per WS cycle — bandwidth PUTs, apiversion
+                # heartbeats, and the WS connection all share this session so
+                # the Leviton cloud associates them together.
+                async with aiohttp.ClientSession(
+                    headers={
+                        "User-Agent": self.http.default_headers.get("user-agent", "LDATA Integration"),
+                        "Accept-Language": "en-US,en;q=0.5",
+                        "Accept-Encoding": "gzip, deflate, br, zstd",
+                    }
+                ) as session:
+                    try:
+                        ws_headers = {
+                            "Origin": "https://myapp.leviton.com",
+                            "Cache-Control": "no-cache",
+                            "Pragma": "no-cache",
+                            "Sec-WebSocket-Extensions": "permessage-deflate",
+                            "Sec-Fetch-Dest": "empty",
+                            "Sec-Fetch-Mode": "websocket",
+                            "Sec-Fetch-Site": "cross-site",
+                            "DNT": "1",
+                            "Sec-GPC": "1",
+                        }
 
-                    loop = asyncio.get_running_loop()
-                    start_time = loop.time()
-                    last_heartbeat_time = start_time
-                    last_data_time = start_time
-                    resubscribe_count = 0
+                        # Wait for status_data so we know which panels to prime
+                        retry_count = 0
+                        while not self.service.status_data and retry_count < 15:
+                            await asyncio.sleep(2)
+                            retry_count += 1
+
+                        # Initial bandwidth PUT — primes the cloud to send data
+                        await self._bandwidth_keepalive(session)
+
+                        # Initial apiversion heartbeat
+                        await self._apiversion_heartbeat(session)
+
+                        ws = await session.ws_connect(self.uri, headers=ws_headers, compress=15)
+                    except Exception as ex:
+                        _LOGGER.error("WebSocket connection failed to establish: %s", ex)
+                        notify_connection(False)
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(reconnect_delay * 2, max_delay)
+                        continue
                     
-                    while True:
-                        current_time = loop.time()
-                        
-                        if current_time - last_heartbeat_time >= 15:
-                            last_heartbeat_time = current_time
-                            if _heartbeat_task is None or _heartbeat_task.done():
-                                _heartbeat_task = asyncio.create_task(apiversion_heartbeat())
-                        
-                        if current_time - last_data_time >= 60:
-                            resubscribe_count += 1
-                            last_data_time = current_time
-                            if resubscribe_count <= 5: 
-                                if not await self._ws_send_subscriptions(ws): 
-                                    break
-                            else: 
-                                break
-                        
-                        if current_time - start_time >= 3300: 
-                            break 
-                        
-                        try:
-                            msg = await asyncio.wait_for(ws.receive(), timeout=15.0)
-                        except asyncio.TimeoutError:
+                    _heartbeat_task: asyncio.Task | None = None
+                    _bandwidth_task: asyncio.Task | None = None
+                    try:
+                        if not await self._ws_authenticate(ws): 
                             continue
-                        except Exception:
-                            break
                         
-                        if msg.type == aiohttp.WSMsgType.TEXT:
-                            last_data_time = current_time
+                        if not await self._ws_send_subscriptions(ws): 
+                            continue
+                        
+                        notify_connection(True)
+
+                        loop = asyncio.get_running_loop()
+                        start_time = loop.time()
+                        last_heartbeat_time = start_time
+                        last_data_time = start_time
+                        last_bandwidth_time = start_time
+                        resubscribe_count = 0
+                        
+                        while True:
+                            current_time = loop.time()
                             
-                            # --- LOG RAW WEBSOCKET STRING ---
-                            if self.service.entry and self.service.entry.options.get("log_all_raw", False):
-                                _LOGGER.warning("Leviton Raw WebSocket Data: %s", msg.data)
-                                
+                            # API version heartbeat every 15 seconds — keeps auth fresh
+                            if current_time - last_heartbeat_time >= 15:
+                                last_heartbeat_time = current_time
+                                if _heartbeat_task is None or _heartbeat_task.done():
+                                    _heartbeat_task = asyncio.create_task(
+                                        self._apiversion_heartbeat(session))
+                            
+                            # Bandwidth keepalive PUT every 50 seconds — tells the
+                            # cloud to keep pushing breaker data at full rate
+                            if current_time - last_bandwidth_time >= 50:
+                                last_bandwidth_time = current_time
+                                if _bandwidth_task is None or _bandwidth_task.done():
+                                    _bandwidth_task = asyncio.create_task(
+                                        self._bandwidth_keepalive(session))
+                            
+                            # Resubscribe if no data for 60 seconds (max 5 per connection)
+                            if current_time - last_data_time >= 60:
+                                resubscribe_count += 1
+                                last_data_time = current_time
+                                if resubscribe_count <= 5: 
+                                    if not await self._ws_send_subscriptions(ws): 
+                                        break
+                                else: 
+                                    break
+                            
+                            # Force reconnect after 55 minutes to refresh everything
+                            if current_time - start_time >= 3300: 
+                                break 
+                            
                             try:
-                                payload = json.loads(msg.data)
-                                if payload.get("type") == "notification":
-                                    if self.service._update_from_websocket(payload.get("notification", {})):
-                                        try: 
-                                            update_callback("True WebSocket Push")
-                                        except Exception as cb_err: 
-                                            _LOGGER.error("WebSocket Callback Error: %s", cb_err)
+                                msg = await asyncio.wait_for(ws.receive(), timeout=15.0)
+                            except asyncio.TimeoutError:
+                                continue
+                            except Exception:
+                                break
+                            
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                last_data_time = current_time
+                                
+                                # --- LOG RAW WEBSOCKET STRING ---
+                                if self.service.entry and self.service.entry.options.get("log_all_raw", False):
+                                    _LOGGER.warning("Leviton Raw WebSocket Data: %s", msg.data)
+                                    
+                                try:
+                                    payload = json.loads(msg.data)
+                                    if payload.get("type") == "notification":
+                                        if self.service._update_from_websocket(payload.get("notification", {})):
+                                            try: 
+                                                update_callback("True WebSocket Push")
+                                            except Exception as cb_err: 
+                                                _LOGGER.error("WebSocket Callback Error: %s", cb_err)
+                                except Exception: pass
+                            elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE):
+                                break
+                    finally:
+                        notify_connection(False)
+                        if _heartbeat_task and not _heartbeat_task.done():
+                            _heartbeat_task.cancel()
+                        if _bandwidth_task and not _bandwidth_task.done():
+                            _bandwidth_task.cancel()
+                        if not ws.closed:
+                            try: await ws.close()
                             except Exception: pass
-                        elif msg.type in (aiohttp.WSMsgType.ERROR, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.CLOSE):
-                            break
-                finally:
-                    notify_connection(False)
-                    if _heartbeat_task and not _heartbeat_task.done():
-                        _heartbeat_task.cancel()
-                    if not ws.closed:
-                        try: await ws.close()
-                        except Exception: pass
                 reconnect_delay = 10
             except Exception:
                 notify_connection(False)
             
             await asyncio.sleep(reconnect_delay)
             reconnect_delay = min(reconnect_delay * 2, max_delay)
+
+    async def _apiversion_heartbeat(self, session: aiohttp.ClientSession):
+        """Send apiversion GET to keep server-side session warm."""
+        try: 
+            async with session.get(
+                "https://my.leviton.com/apiversion", 
+                headers={
+                    "Authorization": self.http.auth_token,
+                    "Origin": "https://myapp.leviton.com",
+                    "Referer": "https://myapp.leviton.com/",
+                    "Accept": "application/json, text/plain, */*",
+                },
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                _LOGGER.debug("[v%s] API version heartbeat: %s", self.service.version, resp.status)
+        except Exception: pass

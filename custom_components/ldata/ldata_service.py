@@ -69,6 +69,9 @@ class LDATAService:
         self._ws_iotwhem_count: dict[str, int] = {}
         # Track when WS last delivered breaker data per panel (for coordinator)
         self._ws_last_breaker_data_time: dict[str, float] = {}
+        # Panel type lookup: "LDATA" for old v1 panels, "WHEMS" for v2 panels.
+        # Used to scope energy counter guards to unreliable v1 panels only.
+        self._panel_type: dict[str, str] = {}
 
         # ── Unified zero-transition protection ────────────────────────
         # On V2 firmware the cloud sporadically sends zero power *and/or*
@@ -86,6 +89,15 @@ class LDATAService:
         # in this set, zero-counter increments are suppressed so the transient
         # zeros caused by bandwidth:0 don't accumulate.
         self._panels_in_bandwidth_toggle: set[str] = set()
+
+        # ── Energy counter monotonic protection ──────────────────────
+        # Lifetime energy counters should only increase. Transient drops
+        # (reconnect bursts, partial payloads) are rejected. But genuine
+        # counter resets (firmware update, factory reset) are persistent —
+        # if the same breaker+field reports a lower value for N consecutive
+        # updates, we accept it as a real reset.
+        self._energy_decrease_count: dict[str, int] = {}
+        self._ENERGY_DECREASE_ACCEPT_THRESHOLD = 5
 
     @property
     def auth_token(self): return self.http.auth_token
@@ -223,6 +235,8 @@ class LDATAService:
                 self._panel_needs_rest_poll[panel_id] = False
                 self._panel_needs_ct_poll[panel_id] = False
                 self._ws_iotwhem_count[panel_id] = 0
+            
+            self._panel_type[panel_id] = panel.get("ModuleType", "WHEMS")
 
             panel_data["voltage1"] = self._parse_float(panel, "rmsVoltage", 0.0)
             panel_data["voltage2"] = self._parse_float(panel, "rmsVoltage2", 0.0)
@@ -413,6 +427,35 @@ class LDATAService:
         self._breaker_zero_count[breaker_id] = 0
         return True
 
+    def _guard_energy_counter(self, key: str, new_val: float, cached_val: float) -> float:
+        """Monotonic guard for a single energy counter field.
+
+        Returns new_val if it's >= cached, or if the counter has been
+        consistently lower for enough consecutive updates to indicate a
+        genuine hardware reset. Otherwise returns cached_val.
+        """
+        if new_val >= cached_val:
+            # Normal case — counter increased or stayed the same
+            self._energy_decrease_count.pop(key, None)
+            return new_val
+
+        # Counter decreased — track consecutive drops
+        count = self._energy_decrease_count.get(key, 0) + 1
+        self._energy_decrease_count[key] = count
+
+        if count >= self._ENERGY_DECREASE_ACCEPT_THRESHOLD:
+            # Persistent decrease — accept as genuine counter reset
+            self._energy_decrease_count.pop(key, None)
+            _LOGGER.info(
+                "[v%s] Energy counter %s accepted decrease after %d consecutive "
+                "readings: %.3f -> %.3f (likely genuine reset)",
+                self.version, key, count, cached_val, new_val,
+            )
+            return new_val
+
+        # Transient decrease — hold cached value
+        return cached_val
+
     def _apply_breaker_update(self, breaker_id: str, existing: dict, raw: dict, source: str = "?") -> bool:
         """Apply a raw breaker update (from WS or REST) to the existing cached breaker dict.
 
@@ -528,41 +571,161 @@ class LDATAService:
                 val = float(raw["bleRSSI"])
                 if val < 0: existing["bleRSSI"] = val
             except (ValueError, TypeError): pass
+        # --- NEW BREAKER RIEMANN SUM DRIFT LOGIC ---
+        import time
+        now = time.time()
+        last_time = existing.get("last_power_time")
+        if last_time:
+            time_diff_hours = (now - last_time) / 3600.0
+            power_w = existing.get("power", 0)
+            
+            if power_w > 0:
+                kw = power_w / 1000.0
+                existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+            elif power_w < 0:
+                kw = abs(power_w) / 1000.0
+                existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                
+        existing["last_power_time"] = now
         
+        # ── Energy counter updates (lifetime — must be monotonically increasing) ──
+        panel_id = existing.get("panel_id")
+        use_energy_guard = self._panel_type.get(panel_id) == "LDATA"
+
+        # CONSUMPTION TRUE-UP
         if "energyConsumption" in raw or "energyConsumption2" in raw:
             cached_ec1 = existing.get("consumption1", 0)
             cached_ec2 = existing.get("consumption2", 0)
-            if "energyConsumption" in raw: existing["consumption1"] = float(raw["energyConsumption"]) if raw["energyConsumption"] is not None else cached_ec1
-            if "energyConsumption2" in raw: existing["consumption2"] = float(raw["energyConsumption2"]) if raw["energyConsumption2"] is not None else cached_ec2
-            existing["consumption"] = existing["consumption1"] + existing["consumption2"]
+            old_base_cons = cached_ec1 + cached_ec2
+            
+            if "energyConsumption" in raw:
+                new_ec1 = float(raw["energyConsumption"]) if raw["energyConsumption"] is not None else cached_ec1
+                existing["consumption1"] = self._guard_energy_counter(breaker_id + ":ec1", new_ec1, cached_ec1) if use_energy_guard else new_ec1
+            if "energyConsumption2" in raw:
+                new_ec2 = float(raw["energyConsumption2"]) if raw["energyConsumption2"] is not None else cached_ec2
+                existing["consumption2"] = self._guard_energy_counter(breaker_id + ":ec2", new_ec2, cached_ec2) if use_energy_guard else new_ec2
+            
+            new_base_cons = existing.get("consumption1", 0) + existing.get("consumption2", 0)
+            
+            # Smooth True-Up
+            if new_base_cons > old_base_cons:
+                hardware_delta = new_base_cons - old_base_cons
+                current_drift = existing.get("drift_accumulator_consumption", 0.0)
+                existing["drift_accumulator_consumption"] = max(0.0, current_drift - hardware_delta)
+                
+        # Apply consumption = Baseline Hardware Counter + Software Drift
+        base_consumption = existing.get("consumption1", 0) + existing.get("consumption2", 0)
+        existing["consumption"] = base_consumption + existing.get("drift_accumulator_consumption", 0.0)
         
+        # IMPORT TRUE-UP
         if "energyImport" in raw or "energyImport2" in raw:
             cached_ei1 = existing.get("import1", 0)
             cached_ei2 = existing.get("import2", 0)
-            if "energyImport" in raw: existing["import1"] = float(raw["energyImport"]) if raw["energyImport"] is not None else cached_ei1
-            if "energyImport2" in raw: existing["import2"] = float(raw["energyImport2"]) if raw["energyImport2"] is not None else cached_ei2
-            existing["import"] = existing["import1"] + existing["import2"]
+            old_base_imp = cached_ei1 + cached_ei2
+            
+            if "energyImport" in raw:
+                new_ei1 = float(raw["energyImport"]) if raw["energyImport"] is not None else cached_ei1
+                existing["import1"] = self._guard_energy_counter(breaker_id + ":ei1", new_ei1, cached_ei1) if use_energy_guard else new_ei1
+            if "energyImport2" in raw:
+                new_ei2 = float(raw["energyImport2"]) if raw["energyImport2"] is not None else cached_ei2
+                existing["import2"] = self._guard_energy_counter(breaker_id + ":ei2", new_ei2, cached_ei2) if use_energy_guard else new_ei2
+            
+            new_base_imp = existing.get("import1", 0) + existing.get("import2", 0)
+            
+            # Smooth True-Up
+            if new_base_imp > old_base_imp:
+                hardware_delta = new_base_imp - old_base_imp
+                current_drift = existing.get("drift_accumulator_import", 0.0)
+                existing["drift_accumulator_import"] = max(0.0, current_drift - hardware_delta)
+                
+        # Apply import = Baseline Hardware Counter + Software Drift
+        base_import = existing.get("import1", 0) + existing.get("import2", 0)
+        existing["import"] = base_import + existing.get("drift_accumulator_import", 0.0)
         
         return power_changed
 
     def _apply_ct_update(self, existing: dict, raw: dict) -> None:
+        import time
+        now = time.time()
+        
         if "activePower" in raw or "activePower2" in raw:
             cached_p1, cached_p2 = existing.get("power1", 0), existing.get("power2", 0)
             if "activePower" in raw: existing["power1"] = float(raw["activePower"]) if raw["activePower"] is not None else cached_p1
             if "activePower2" in raw: existing["power2"] = float(raw["activePower2"]) if raw["activePower2"] is not None else cached_p2
             existing["power"] = existing["power1"] + existing["power2"]
-        
+            
+            # RIEMANN SUM INTEGRAL LOGIC
+            last_time = existing.get("last_power_time")
+            if last_time:
+                time_diff_hours = (now - last_time) / 3600.0
+                power_w = existing["power"]
+                
+                # CORRECTED DIRECTIONAL LOGIC
+                if power_w > 0:
+                    # Positive power: Pulling from grid -> Add ONLY to Consumption
+                    kw = power_w / 1000.0
+                    existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+                elif power_w < 0:
+                    # Negative power: Exporting to grid -> Add ONLY to Import
+                    kw = abs(power_w) / 1000.0
+                    existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                
+            existing["last_power_time"] = now
+
+        ct_panel_id = existing.get("panel_id")
+        use_ct_guard = self._panel_type.get(ct_panel_id) == "LDATA"
+
+        # CONSUMPTION TRUE-UP
         if "energyConsumption" in raw or "energyConsumption2" in raw:
+            ct_id = existing.get("id", "?")
             cached_c1, cached_c2 = existing.get("consumption1", 0), existing.get("consumption2", 0)
-            if "energyConsumption" in raw: existing["consumption1"] = float(raw["energyConsumption"]) if raw["energyConsumption"] is not None else cached_c1
-            if "energyConsumption2" in raw: existing["consumption2"] = float(raw["energyConsumption2"]) if raw["energyConsumption2"] is not None else cached_c2
-            existing["consumption"] = existing["consumption1"] + existing["consumption2"]
+            old_base_cons = cached_c1 + cached_c2
+            
+            if "energyConsumption" in raw:
+                new_c1 = float(raw["energyConsumption"]) if raw["energyConsumption"] is not None else cached_c1
+                existing["consumption1"] = self._guard_energy_counter("ct:" + ct_id + ":ec1", new_c1, cached_c1) if use_ct_guard else new_c1
+            if "energyConsumption2" in raw:
+                new_c2 = float(raw["energyConsumption2"]) if raw["energyConsumption2"] is not None else cached_c2
+                existing["consumption2"] = self._guard_energy_counter("ct:" + ct_id + ":ec2", new_c2, cached_c2) if use_ct_guard else new_c2
+            
+            new_base_cons = existing.get("consumption1", 0) + existing.get("consumption2", 0)
+            
+            # Smooth True-Up: Deduct the exact hardware catch-up amount
+            if new_base_cons > old_base_cons:
+                hardware_delta = new_base_cons - old_base_cons
+                current_drift = existing.get("drift_accumulator_consumption", 0.0)
+                existing["drift_accumulator_consumption"] = max(0.0, current_drift - hardware_delta)
+                _LOGGER.info("[CT TRUE-UP] Hardware caught up by %.3f kWh. Reduced software drift from %.3f to %.3f", hardware_delta, current_drift, existing["drift_accumulator_consumption"])
+
+        # Apply consumption = Baseline Hardware + Software Drift
+        base_consumption = existing.get("consumption1", 0) + existing.get("consumption2", 0)
+        existing["consumption"] = base_consumption + existing.get("drift_accumulator_consumption", 0.0)
         
+        # IMPORT TRUE-UP
         if "energyImport" in raw or "energyImport2" in raw:
+            ct_id = existing.get("id", "?")
             cached_i1, cached_i2 = existing.get("import1", 0), existing.get("import2", 0)
-            if "energyImport" in raw: existing["import1"] = float(raw["energyImport"]) if raw["energyImport"] is not None else cached_i1
-            if "energyImport2" in raw: existing["import2"] = float(raw["energyImport2"]) if raw["energyImport2"] is not None else cached_i2
-            existing["import"] = existing["import1"] + existing["import2"]
+            old_base_imp = cached_i1 + cached_i2
+            
+            if "energyImport" in raw:
+                new_i1 = float(raw["energyImport"]) if raw["energyImport"] is not None else cached_i1
+                existing["import1"] = self._guard_energy_counter("ct:" + ct_id + ":ei1", new_i1, cached_i1) if use_ct_guard else new_i1
+            if "energyImport2" in raw:
+                new_i2 = float(raw["energyImport2"]) if raw["energyImport2"] is not None else cached_i2
+                existing["import2"] = self._guard_energy_counter("ct:" + ct_id + ":ei2", new_i2, cached_i2) if use_ct_guard else new_i2
+            
+            new_base_imp = existing.get("import1", 0) + existing.get("import2", 0)
+            
+            # Smooth True-Up: Deduct the exact hardware catch-up amount
+            if new_base_imp > old_base_imp:
+                hardware_delta = new_base_imp - old_base_imp
+                current_drift = existing.get("drift_accumulator_import", 0.0)
+                existing["drift_accumulator_import"] = max(0.0, current_drift - hardware_delta)
+                _LOGGER.info("[CT IMPORT TRUE-UP] Hardware caught up by %.3f kWh. Reduced software drift from %.3f to %.3f", hardware_delta, current_drift, existing["drift_accumulator_import"])
+            
+        # Apply import = Baseline Hardware + Software Drift
+        base_import = existing.get("import1", 0) + existing.get("import2", 0)
+        existing["import"] = base_import + existing.get("drift_accumulator_import", 0.0)
         
         if "rmsCurrent" in raw or "rmsCurrent2" in raw:
             cached_cur1, cached_cur2 = existing.get("current1", 0), existing.get("current2", 0)
@@ -587,9 +750,6 @@ class LDATAService:
         Handles three model types: ResidentialBreaker (single breaker update),
         IotCt (single CT update), and IotWhem (bulk panel update that may
         contain embedded breaker and CT arrays).
-
-        Also drives WS auto-detection: if a panel delivers breaker/CT data
-        via WS, the corresponding REST poll fallback is disabled.
         """
         if not self.status_data: return None
 
@@ -618,11 +778,7 @@ class LDATAService:
                   breakers = new_status_data["breakers"].copy()
                   breaker = breakers[breaker_id].copy()
                   
-                  # FIX: If WS successfully delivers breaker data, disable the REST poll fallback loop
                   panel_id = breaker.get("panel_id")
-                  if panel_id and self._panel_needs_rest_poll.get(panel_id):
-                      self._panel_needs_rest_poll[panel_id] = False
-                      _LOGGER.info("[v%s] WS delivering Breaker data for panel %s — disabling REST poll", self.version, panel_id)
 
                   power_changed = self._apply_breaker_update(breaker_id, breaker, data, source="WS")
                   breakers[breaker_id] = breaker
@@ -636,15 +792,6 @@ class LDATAService:
              if ct_id and ct_id in new_status_data["cts"]:
                   cts = new_status_data["cts"].copy()
                   ct = cts[ct_id].copy()
-                  # If WS delivers energy counters, no need for CT REST poll on this panel
-                  if "energyImport" in data or "energyConsumption" in data:
-                      panel_id = ct.get("panel_id")
-                      if panel_id and self._panel_needs_ct_poll.get(panel_id):
-                          self._panel_needs_ct_poll[panel_id] = False
-                          _LOGGER.info(
-                              "[v%s] WS delivering CT energy data for panel %s — disabling CT REST poll",
-                              self.version, panel_id,
-                          )
                   self._apply_ct_update(ct, data)
                   cts[ct_id] = ct
                   new_status_data["cts"] = cts
@@ -664,11 +811,6 @@ class LDATAService:
                  if has_electrical_data:
                      self._ws_last_breaker_data_time[panel_id] = time.time()
                      self._ws_iotwhem_count[panel_id] = 0
-                     
-                     # Disable REST poll fallback if breaker array arrives inside an IotWhem bulk payload
-                     if self._panel_needs_rest_poll.get(panel_id):
-                         self._panel_needs_rest_poll[panel_id] = False
-                         _LOGGER.info("[v%s] WS delivering Breaker data (via IotWhem) for panel %s — disabling REST poll", self.version, panel_id)
                  else:
                      self._ws_iotwhem_count[panel_id] = self._ws_iotwhem_count.get(panel_id, 0) + 1
              
@@ -693,14 +835,6 @@ class LDATAService:
                   for ct_data_item in data["IotCt"]:
                        ct_id = str(ct_data_item.get("id"))
                        if ct_id and ct_id in cts:
-                            # If WS delivers energy counters inline, no need for CT REST poll
-                            if "energyImport" in ct_data_item or "energyConsumption" in ct_data_item:
-                                if panel_id and self._panel_needs_ct_poll.get(panel_id):
-                                    self._panel_needs_ct_poll[panel_id] = False
-                                    _LOGGER.info(
-                                        "[v%s] WS delivering CT energy data (via IotWhem) for panel %s — disabling CT REST poll",
-                                        self.version, panel_id,
-                                    )
                             ct = cts[ct_id].copy()
                             self._apply_ct_update(ct, ct_data_item)
                             cts[ct_id] = ct
@@ -911,8 +1045,18 @@ class LDATAService:
             if not panel_id or not self._panel_needs_ct_poll.get(panel_id, False): continue
             
             try:
+                # STARTUP SYNC: Execute the bandwidth toggle exactly once upon HA boot 
+                # to fetch the true hardware baseline, then never run it again to save the hardware.
                 panel_type = panel_data.get("panel_type", "WHEMS")
-                await self._bandwidth_toggle(panel_id, panel_type)
+                toggle_flag = f"_startup_toggled_{panel_id}"
+                
+                if not getattr(self, toggle_flag, False):
+                    _LOGGER.info("[v%s] Performing one-time startup bandwidth toggle for panel %s to sync hardware CT counters.", self.version, panel_id)
+                    await self._bandwidth_toggle(panel_id, panel_type)
+                    setattr(self, toggle_flag, True)
+                    import asyncio
+                    await asyncio.sleep(5)  # Wait for cloud to ingest the fresh panel data
+                
                 raw_cts = await self.http.get_Whems_CT(panel_id)
                 if raw_cts:
                     for ct in raw_cts:
