@@ -249,6 +249,9 @@ class LDATAService:
                         # Initialize timestamps so the continuous integrator starts immediately
                         ct_data["last_power_time"] = time.time()
                         ct_data["last_ws_event_time"] = time.time()
+                        ct_data["last_ws_power"] = ct_data["power"]
+                        ct_data["speculative_kwh_consumption"] = 0.0
+                        ct_data["speculative_kwh_import"] = 0.0
                         
                         cts[ct_data["id"]] = ct_data
 
@@ -327,6 +330,9 @@ class LDATAService:
                         # Initialize timestamps so the continuous integrator starts immediately
                         breaker_data["last_power_time"] = time.time()
                         breaker_data["last_ws_event_time"] = time.time()
+                        breaker_data["last_ws_power"] = breaker_data["power"] if breaker_data["power"] is not None else 0.0
+                        breaker_data["speculative_kwh_consumption"] = 0.0
+                        breaker_data["speculative_kwh_import"] = 0.0
                         
                         breakers[breaker["id"]] = breaker_data
                         if breaker_data["power"] is not None:
@@ -396,11 +402,15 @@ class LDATAService:
             
             if power_w > 0:
                 kw = power_w / 1000.0
-                b_data["drift_accumulator_consumption"] = b_data.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+                added = kw * time_diff_hours
+                b_data["drift_accumulator_consumption"] = b_data.get("drift_accumulator_consumption", 0.0) + added
+                b_data["speculative_kwh_consumption"] = b_data.get("speculative_kwh_consumption", 0.0) + added
                 device_updated = True
             elif power_w < 0:
                 kw = abs(power_w) / 1000.0
-                b_data["drift_accumulator_import"] = b_data.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                added = kw * time_diff_hours
+                b_data["drift_accumulator_import"] = b_data.get("drift_accumulator_import", 0.0) + added
+                b_data["speculative_kwh_import"] = b_data.get("speculative_kwh_import", 0.0) + added
                 device_updated = True
                 
             if device_updated:
@@ -426,11 +436,15 @@ class LDATAService:
             
             if power_w > 0:
                 kw = power_w / 1000.0
-                ct_data["drift_accumulator_consumption"] = ct_data.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+                added = kw * time_diff_hours
+                ct_data["drift_accumulator_consumption"] = ct_data.get("drift_accumulator_consumption", 0.0) + added
+                ct_data["speculative_kwh_consumption"] = ct_data.get("speculative_kwh_consumption", 0.0) + added
                 device_updated = True
             elif power_w < 0:
                 kw = abs(power_w) / 1000.0
-                ct_data["drift_accumulator_import"] = ct_data.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                added = kw * time_diff_hours
+                ct_data["drift_accumulator_import"] = ct_data.get("drift_accumulator_import", 0.0) + added
+                ct_data["speculative_kwh_import"] = ct_data.get("speculative_kwh_import", 0.0) + added
                 device_updated = True
                 
             if device_updated:
@@ -448,21 +462,19 @@ class LDATAService:
         """Apply a raw breaker update (from WS or REST) to the existing cached breaker dict."""
         
         now = time.time()
-        last_time = existing.get("last_power_time")
-        if last_time:
-            time_diff_secs = now - last_time
+        last_ws_time = existing.get("last_ws_event_time")
+        if last_ws_time:
+            time_diff_secs = now - last_ws_time
             time_diff_hours = time_diff_secs / 3600.0
             
-            old_power_w = existing.get("power", 0)
-            if old_power_w is None: 
-                old_power_w = 0.0
+            old_ws_power = existing.get("last_ws_power", existing.get("power", 0) or 0)
                 
             p1 = float(raw.get("power", existing.get("power1", 0)) or 0)
             p2 = float(raw.get("power2", existing.get("power2", 0)) or 0)
             new_power_w = p1 + p2
 
-            # TRAPEZOIDAL INTEGRATOR: Averages old and new power to cleanly smooth motor inrush spikes.
-            calc_power_w = (old_power_w + new_power_w) / 2.0
+            # TRAPEZOIDAL INTEGRATOR: Average for the entire gap since the last REAL websocket event
+            calc_power_w = (old_ws_power + new_power_w) / 2.0
 
             # --- GAP HANDLING LOGIC ---
             gap_threshold_secs = 300
@@ -473,21 +485,38 @@ class LDATAService:
                 
             is_v1 = self._panel_type.get(existing.get("panel_id")) == "LDATA"
 
-            if time_diff_secs > gap_threshold_secs and is_v1:
+            # V1 Panels don't send events during steady loads. 
+            # Only trigger Gap Handler if the background tick stopped (i.e. integration went offline)
+            time_since_tick = now - existing.get("last_power_time", now)
+            was_offline = time_since_tick > 60
+            
+            if time_diff_secs > gap_threshold_secs and is_v1 and was_offline:
                 if gap_mode == GAP_HANDLING_SKIP:
                     time_diff_hours = 0.0
                 elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
-                    calc_power_w = old_power_w
+                    calc_power_w = old_ws_power
+
+            # 1. UNDO the speculative Left sums added by the continuous tick
+            existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) - existing.get("speculative_kwh_consumption", 0.0)
+            existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) - existing.get("speculative_kwh_import", 0.0)
             
+            existing["speculative_kwh_consumption"] = 0.0
+            existing["speculative_kwh_import"] = 0.0
+            
+            # 2. APPLY the true mathematically correct Trapezoidal sum
             if calc_power_w > 0 and time_diff_hours > 0:
                 kw = calc_power_w / 1000.0
-                existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+                existing["drift_accumulator_consumption"] += (kw * time_diff_hours)
             elif calc_power_w < 0 and time_diff_hours > 0:
                 kw = abs(calc_power_w) / 1000.0
-                existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                existing["drift_accumulator_import"] += (kw * time_diff_hours)
                 
         existing["last_power_time"] = now
         existing["last_ws_event_time"] = now
+        
+        p1 = float(raw.get("power", existing.get("power1", 0)) or 0)
+        p2 = float(raw.get("power2", existing.get("power2", 0)) or 0)
+        existing["last_ws_power"] = p1 + p2
 
         def _field(key, cached):
             if key in raw and raw[key] is not None: return float(raw[key])
@@ -640,21 +669,19 @@ class LDATAService:
 
     def _apply_ct_update(self, existing: dict, raw: dict) -> None:
         now = time.time()
-        last_time = existing.get("last_power_time")
-        if last_time:
-            time_diff_secs = now - last_time
+        last_ws_time = existing.get("last_ws_event_time")
+        if last_ws_time:
+            time_diff_secs = now - last_ws_time
             time_diff_hours = time_diff_secs / 3600.0
             
-            old_power_w = existing.get("power", 0)
-            if old_power_w is None: 
-                old_power_w = 0.0
+            old_ws_power = existing.get("last_ws_power", existing.get("power", 0) or 0)
                 
             p1 = float(raw.get("activePower", existing.get("power1", 0)) or 0)
             p2 = float(raw.get("activePower2", existing.get("power2", 0)) or 0)
             new_power_w = p1 + p2
 
-            # TRAPEZOIDAL INTEGRATOR: Averages old and new power to cleanly smooth motor inrush spikes.
-            calc_power_w = (old_power_w + new_power_w) / 2.0
+            # TRAPEZOIDAL INTEGRATOR: Average for the entire gap since the last REAL websocket event
+            calc_power_w = (old_ws_power + new_power_w) / 2.0
 
             # --- GAP HANDLING LOGIC ---
             gap_threshold_secs = 300
@@ -665,21 +692,34 @@ class LDATAService:
                 
             is_v1 = self._panel_type.get(existing.get("panel_id")) == "LDATA"
 
-            if time_diff_secs > gap_threshold_secs and is_v1:
+            time_since_tick = now - existing.get("last_power_time", now)
+            was_offline = time_since_tick > 60
+
+            if time_diff_secs > gap_threshold_secs and is_v1 and was_offline:
                 if gap_mode == GAP_HANDLING_SKIP:
                     time_diff_hours = 0.0
                 elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
-                    calc_power_w = old_power_w
+                    calc_power_w = old_ws_power
+            
+            existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) - existing.get("speculative_kwh_consumption", 0.0)
+            existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) - existing.get("speculative_kwh_import", 0.0)
+            
+            existing["speculative_kwh_consumption"] = 0.0
+            existing["speculative_kwh_import"] = 0.0
             
             if calc_power_w > 0 and time_diff_hours > 0:
                 kw = calc_power_w / 1000.0
-                existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+                existing["drift_accumulator_consumption"] += (kw * time_diff_hours)
             elif calc_power_w < 0 and time_diff_hours > 0:
                 kw = abs(calc_power_w) / 1000.0
-                existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                existing["drift_accumulator_import"] += (kw * time_diff_hours)
                 
         existing["last_power_time"] = now
         existing["last_ws_event_time"] = now
+        
+        p1 = float(raw.get("activePower", existing.get("power1", 0)) or 0)
+        p2 = float(raw.get("activePower2", existing.get("power2", 0)) or 0)
+        existing["last_ws_power"] = p1 + p2
 
         if "activePower" in raw or "activePower2" in raw:
             cached_p1, cached_p2 = existing.get("power1", 0), existing.get("power2", 0)

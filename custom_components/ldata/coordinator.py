@@ -79,6 +79,11 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             else:
                 _LOGGER.debug("[v%s] WebSocket connected", self._service.version)
                 self._websocket_ever_connected = True
+                
+            # FORCE START THE CONTINUOUS INTEGRATOR LOOP!
+            # This ensures V1 panels start accumulating immediately even if loads are steady.
+            self._handle_websocket_update("Connection Established")
+            
         elif not connected and was_connected:
             _LOGGER.debug("[v%s] WebSocket disconnected", self._service.version)
             if self._debounce_timer:
