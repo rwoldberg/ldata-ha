@@ -15,15 +15,12 @@ HA_INFORM_RATE_DEFAULT = 60.0
 HA_INFORM_RATE_MIN = 2.0
 HA_INFORM_RATE_MAX = 600.0
 
-# CT-only poll interval for v2 firmware panels.
-# The bandwidth toggle (1→0→1) needed to refresh CT energy counters can
-# cause brief zero readings on breakers. Use 30s to balance CT freshness
-# against breaker stability. The WS still delivers power every ~5-6s.
-CT_POLL_INTERVAL = 60.0
-
 # WebSocket heartbeat interval. Sends a lightweight GET /apiversion to
 # keep the connection alive and the auth token fresh.
 WS_HEARTBEAT_INTERVAL = 60.0
+
+# Websocket initialzation grace period
+WS_DETECTION_GRACE_PERIOD = 30
 
 # Gap handling for breaker daily energy sensors (power×time fallback).
 # When no data arrives for longer than the threshold, power×time integration

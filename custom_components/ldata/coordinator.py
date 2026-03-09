@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import time
 
 import aiohttp
 
@@ -11,17 +10,17 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN
+from .const import (
+    DOMAIN, 
+    LOGGER_NAME, 
+    HA_INFORM_RATE, 
+    HA_INFORM_RATE_DEFAULT, 
+    HA_INFORM_RATE_MIN,
+    WS_DETECTION_GRACE_PERIOD
+)
 from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
-
-REST_POLL_INTERVAL = 60
-# Grace period (seconds) before REST poll loops start actively polling.
-# This gives the WebSocket time to connect, subscribe, and prove whether
-# it delivers breaker data. If WS delivers breaker data within this window,
-# REST polling stays disabled.
-WS_DETECTION_GRACE_PERIOD = 45
 
 
 class LDATAUpdateCoordinator(DataUpdateCoordinator):
@@ -38,13 +37,12 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._available = True
         self.config_entry = entry
         self._websocket_task = None
-        self._rest_poll_task = None
         self._ct_poll_task = None
         self._debounce_timer = None
         self._websocket_connected = False
         self._websocket_ever_connected = False
 
-        # No polling interval — WebSocket + REST polling handle updates
+        # No polling interval — WebSocket + slow hourly sync handle updates
         super().__init__(
             hass,
             _LOGGER,
@@ -63,17 +61,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             "ldata_websocket"
         )
         
-        # Start the REST polling task as a FALLBACK for breaker/CT data.
-        # WS-first: these loops wait for the WS auto-detection grace period
-        # before polling. If WS delivers all data, they remain idle.
-        self._rest_poll_task = self.config_entry.async_create_background_task(
-            self._hass,
-            self._rest_poll_loop(),
-            "ldata_rest_poll"
-        )
-        
-        # Start the slow poll loop as a FALLBACK for CT energy data and
-        # a periodic refresh for panel-level diagnostics (rssi, voltage).
+        # Start the slow poll loop for the hourly hardware True-Up
         self._ct_poll_task = self.config_entry.async_create_background_task(
             self._hass,
             self._ct_poll_loop(),
@@ -98,16 +86,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 self._debounce_timer = None
 
     async def async_shutdown(self):
-        """Gracefully shutdown the WebSocket connection and REST polling."""
+        """Gracefully shutdown the WebSocket connection and tasks."""
         _LOGGER.debug("Shutting down LDATA coordinator")
         self._service._shutdown_requested = True
-        
-        if self._rest_poll_task:
-            self._rest_poll_task.cancel()
-            try:
-                await self._rest_poll_task
-            except asyncio.CancelledError:
-                pass
         
         if self._ct_poll_task:
             self._ct_poll_task.cancel()
@@ -127,44 +108,37 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._debounce_timer.cancel()
             self._debounce_timer = None
 
-    async def _rest_poll_loop(self):
-        """Periodically poll the REST API for fresh breaker data.
+    async def _ct_poll_loop(self):
+        """Slow poll loop for the Hourly Hardware True-Up.
 
-        WS-FIRST STRATEGY: This loop is a FALLBACK. It waits for the WebSocket
-        auto-detection grace period before starting. Only panels where WS
-        demonstrably fails to deliver breaker data will be polled via REST.
+        Executes the bandwidth toggle (1→0→1) to fetch true hardware
+        CT counters, and refreshes panel-level diagnostics.
         """
         while not self._service.status_data and not self._service._shutdown_requested:
             await asyncio.sleep(5)
         
+        # Wait for WS to connect before firing the startup true-up
         _LOGGER.debug(
-            "[v%s] REST poll loop: waiting %ss for WebSocket auto-detection before enabling fallback polling",
+            "[v%s] Waiting %ss for WebSocket to stabilize before Startup Sync",
             self._service.version, WS_DETECTION_GRACE_PERIOD,
         )
         await asyncio.sleep(WS_DETECTION_GRACE_PERIOD)
         
-        if self._service.needs_rest_poll:
-            _LOGGER.info(
-                "[v%s] REST poll loop: WS did not deliver breaker data for panels %s — enabling breaker-only REST polling as fallback",
-                self._service.version,
-                [pid for pid, need in self._service._panel_needs_rest_poll.items() if need],
-            )
-        else:
-            _LOGGER.debug(
-                "[v%s] REST poll loop: all panels receiving breaker data via WS — REST polling not needed (will continue monitoring)",
-                self._service.version,
-            )
+        _LOGGER.info(
+            "[v%s] Slow poll loop starting (interval=3600s, panels needing CT sync: %s)",
+            self._service.version, 
+            [pid for pid, need in self._service._panel_needs_ct_poll.items() if need],
+        )
         
         while not self._service._shutdown_requested:
             try:
                 refreshed = False
                 
-                # 1. DO THE WORK FIRST (Startup Sync)
                 # Always refresh panel-level data (rssi, voltage, frequency)
                 if await self._service.refresh_panel_data():
                     refreshed = True
                 
-                # Only run CT REST poll if WS isn't delivering CT energy
+                # Fire the Bandwidth Toggle and fetch the hardware true-up
                 if self._service.needs_ct_poll:
                     if await self._service.refresh_ct_data():
                         refreshed = True
@@ -172,72 +146,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 if refreshed:
                     self._handle_websocket_update("Scheduled/REST")
                     
-                # 2. THEN GO TO SLEEP FOR AN HOUR
+                # Sleep for 1 hour before the next true-up
                 await asyncio.sleep(3600)
-                
-            except asyncio.CancelledError:
-                break
-            except LDATAAuthError as ex:
-                _LOGGER.warning("[v%s] Auth error during slow poll: %s", self._service.version, ex)
-                await asyncio.sleep(60)
-            except Exception as ex:
-                _LOGGER.warning("[v%s] Slow poll error: %s", self._service.version, ex)
-                await asyncio.sleep(30)
-        
-        _LOGGER.debug("[v%s] REST poll loop stopped", self._service.version)
-
-    async def _ct_poll_loop(self):
-        """Slow poll loop for CT energy data and panel-level diagnostics.
-
-        CT energy counters require a bandwidth toggle (1→0→1) to refresh.
-        This loop also refreshes panel-level data (rssi, voltage, frequency)
-        regardless of whether CT polling is needed. Only activates CT REST
-        polling for panels where WS doesn't deliver CT energy counters.
-        """
-        while not self._service.status_data and not self._service._shutdown_requested:
-            await asyncio.sleep(5)
-        
-        # Wait for WS to potentially deliver CT energy data before deciding
-        _LOGGER.debug(
-            "[v%s] Slow poll loop: waiting %ss for WS CT energy auto-detection",
-            self._service.version, WS_DETECTION_GRACE_PERIOD,
-        )
-        await asyncio.sleep(WS_DETECTION_GRACE_PERIOD)
-        
-        if self._service.needs_ct_poll:
-            _LOGGER.info(
-                "[v%s] Slow poll loop started (interval=3600s, panels needing CT REST poll: %s)",
-                self._service.version, 
-                [pid for pid, need in self._service._panel_needs_ct_poll.items() if need],
-            )
-        else:
-            _LOGGER.debug(
-                "[v%s] Slow poll loop: WS delivering CT energy data for all panels — CT REST poll not needed",
-                self._service.version,
-            )
-        _LOGGER.debug("[v%s] Slow poll loop: panel status refresh enabled (interval=3600s)", self._service.version)
-        
-        while not self._service._shutdown_requested:
-            try:
-                # HOURLY HARDWARE SYNC
-                await asyncio.sleep(3600)
-                
-                if self._service._shutdown_requested:
-                    break
-                
-                refreshed = False
-                
-                # Always refresh panel-level data (rssi, voltage, frequency)
-                if await self._service.refresh_panel_data():
-                    refreshed = True
-                
-                # Only run CT REST poll if WS isn't delivering CT energy
-                if self._service.needs_ct_poll:
-                    if await self._service.refresh_ct_data():
-                        refreshed = True
-                
-                if refreshed:
-                    self._handle_websocket_update("Scheduled/REST")
                     
             except asyncio.CancelledError:
                 break
@@ -266,6 +176,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._debounce_timer = None
         
         try:
+            # Continuously advance the software energy drift in the background!
+            if hasattr(self._service, "advance_all_drift"):
+                self._service.advance_all_drift()
+                
             data = self._service.status_data
             if not data:
                 return
@@ -304,7 +218,6 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
     def _log_data_if_enabled(self, data, source: str = ""):
         options = self.config_entry.options
         
-        # --- LOG PARSED DATA ---
         if options.get("log_parsed_data", False):
             redacted_data = self._redact_data(data)
             _LOGGER.warning("Leviton %s Parsed Data: %s", source, redacted_data)

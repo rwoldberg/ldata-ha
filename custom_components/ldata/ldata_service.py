@@ -7,8 +7,12 @@ import asyncio
 import os
 import json
 
-
-from .const import _LEG1_POSITIONS, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT
+from .const import (
+    _LEG1_POSITIONS, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
+    GAP_HANDLING, GAP_HANDLING_DEFAULT, GAP_HANDLING_SKIP, 
+    GAP_HANDLING_EXTRAPOLATE, GAP_HANDLING_AVERAGE, 
+    GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT
+)
 from .api.exceptions import LDATAAuthError, TwoFactorRequired
 from .api.http_client import LDATAHttpClient
 from .api.websocket_client import LDATAWebsocketClient
@@ -53,25 +57,12 @@ class LDATAService:
         # Cache for the latest status data — shared by WebSocket and REST updates
         self.status_data = None
         
-        # Per-panel REST polling flags.
-        self._panel_needs_rest_poll: dict[str, bool] = {}
-        # Track whether panels have hardware energy counters (energyConsumption).
-        self._panel_has_hw_counters: dict[str, bool] = {}
-        # Per-panel CT REST polling flag (independent of breaker REST poll).
+        # Per-panel CT REST polling flag.
         self._panel_needs_ct_poll: dict[str, bool] = {}
-        # Track how many IotWhem WS messages we've seen per panel without breaker data
-        self._ws_iotwhem_count: dict[str, int] = {}
-        # Track when WS last delivered breaker data per panel (for coordinator)
-        self._ws_last_breaker_data_time: dict[str, float] = {}
         # Panel type lookup: "LDATA" for old v1 panels, "WHEMS" for v2 panels.
         self._panel_type: dict[str, str] = {}
-
+        self._panel_has_hw_counters: dict[str, bool] = {}
         # ── Energy counter monotonic protection ──────────────────────
-        # Lifetime energy counters should only increase. Transient drops
-        # (reconnect bursts, partial payloads) are rejected. But genuine
-        # counter resets (firmware update, factory reset) are persistent —
-        # if the same breaker+field reports a lower value for N consecutive
-        # updates, we accept it as a real reset.
         self._energy_decrease_count: dict[str, int] = {}
         self._ENERGY_DECREASE_ACCEPT_THRESHOLD = 5
 
@@ -107,12 +98,7 @@ class LDATAService:
         return await self.http.set_blink_led(breaker_id, enabled)
 
     async def status(self):
-        """Fetch full panel/breaker/CT data from the Leviton cloud API.
-
-        This is only called for the initial data fetch at startup. After that,
-        WebSocket handles all live updates, with REST polling as a fallback
-        only for panels where WS doesn't deliver breaker/CT data.
-        """
+        """Fetch full panel/breaker/CT data from the Leviton cloud API."""
         try:
             if not await self.http.refresh_auth():
                 raise LDATAAuthError(f"[v{self.version}] Token validation failed.")
@@ -207,11 +193,7 @@ class LDATAService:
             if panel.get("model") == "DAU" and panel.get("status") == "READY":
                 panel_data["connected"] = True
             
-            if panel_id not in self._panel_needs_rest_poll:
-                self._panel_needs_rest_poll[panel_id] = False
-                self._panel_needs_ct_poll[panel_id] = False
-                self._ws_iotwhem_count[panel_id] = 0
-            
+            self._panel_needs_ct_poll[panel_id] = False
             self._panel_type[panel_id] = panel.get("ModuleType", "WHEMS")
 
             panel_data["voltage1"] = self._parse_float(panel, "rmsVoltage", 0.0)
@@ -263,6 +245,11 @@ class LDATAService:
                         ct_data["current1"] = self._parse_float(ct, "rmsCurrent", 0.0)
                         ct_data["current2"] = self._parse_float(ct, "rmsCurrent2", 0.0)
                         ct_data["current"] = (ct_data["current1"] + ct_data["current2"]) / 2.0
+                        
+                        # Initialize timestamps so the continuous integrator starts immediately
+                        ct_data["last_power_time"] = time.time()
+                        ct_data["last_ws_event_time"] = time.time()
+                        
                         cts[ct_data["id"]] = ct_data
 
             total_power = 0.0
@@ -337,6 +324,10 @@ class LDATAService:
                         breaker_data["import2"] = self._parse_float(breaker, "energyImport2", 0.0)
                         breaker_data["import"] = breaker_data["import1"] + breaker_data["import2"]
                         
+                        # Initialize timestamps so the continuous integrator starts immediately
+                        breaker_data["last_power_time"] = time.time()
+                        breaker_data["last_ws_event_time"] = time.time()
+                        
                         breakers[breaker["id"]] = breaker_data
                         if breaker_data["power"] is not None:
                             total_power += breaker_data["power"]
@@ -365,40 +356,139 @@ class LDATAService:
             _LOGGER.debug("[v%s] Bandwidth toggle failed for %s: %s", self.version, panel_id, ex)
 
     def _guard_energy_counter(self, key: str, new_val: float, cached_val: float) -> float:
-        """Monotonic guard for a single energy counter field.
-
-        Returns new_val if it's >= cached, or if the counter has been
-        consistently lower for enough consecutive updates to indicate a
-        genuine hardware reset. Otherwise returns cached_val.
-        """
+        """Monotonic guard for a single energy counter field."""
         if new_val >= cached_val:
-            # Normal case — counter increased or stayed the same
             self._energy_decrease_count.pop(key, None)
             return new_val
 
-        # Counter decreased — track consecutive drops
         count = self._energy_decrease_count.get(key, 0) + 1
         self._energy_decrease_count[key] = count
 
         if count >= self._ENERGY_DECREASE_ACCEPT_THRESHOLD:
-            # Persistent decrease — accept as genuine counter reset
             self._energy_decrease_count.pop(key, None)
             _LOGGER.info(
-                "[v%s] Energy counter %s accepted decrease after %d consecutive "
-                "readings: %.3f -> %.3f (likely genuine reset)",
-                self.version, key, count, cached_val, new_val,
+                "[v%s] Energy counter %s accepted decrease after %d consecutive readings",
+                self.version, key, count
             )
             return new_val
 
-        # Transient decrease — hold cached value
         return cached_val
 
-    def _apply_breaker_update(self, breaker_id: str, existing: dict, raw: dict, source: str = "?") -> bool:
-        """Apply a raw breaker update (from WS or REST) to the existing cached breaker dict.
+    def advance_all_drift(self):
+        """Continuously update the Riemann sums for all active breakers and CTs."""
+        if not self.status_data:
+            return False
+            
+        now = time.time()
+        updated = False
 
-        Handles leg-aware field mapping and selective field updates. 
-        Returns True if power changed (caller should recalculate panel total).
-        """
+        # 1. Advance all Breakers
+        for b_id, b_data in self.status_data.get("breakers", {}).items():
+            last_time = b_data.get("last_power_time")
+            if not last_time: continue
+            
+            time_diff_secs = now - last_time
+            if time_diff_secs < 1.0: continue
+
+            power_w = b_data.get("power", 0) or 0
+            time_diff_hours = time_diff_secs / 3600.0
+            device_updated = False
+            
+            if power_w > 0:
+                kw = power_w / 1000.0
+                b_data["drift_accumulator_consumption"] = b_data.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+                device_updated = True
+            elif power_w < 0:
+                kw = abs(power_w) / 1000.0
+                b_data["drift_accumulator_import"] = b_data.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                device_updated = True
+                
+            if device_updated:
+                base_consumption = b_data.get("consumption1", 0) + b_data.get("consumption2", 0)
+                b_data["consumption"] = base_consumption + b_data.get("drift_accumulator_consumption", 0.0)
+                base_import = b_data.get("import1", 0) + b_data.get("import2", 0)
+                b_data["import"] = base_import + b_data.get("drift_accumulator_import", 0.0)
+                updated = True
+                
+            b_data["last_power_time"] = now
+
+        # 2. Advance all CTs
+        for ct_id, ct_data in self.status_data.get("cts", {}).items():
+            last_time = ct_data.get("last_power_time")
+            if not last_time: continue
+            
+            time_diff_secs = now - last_time
+            if time_diff_secs < 1.0: continue
+
+            power_w = ct_data.get("power", 0) or 0
+            time_diff_hours = time_diff_secs / 3600.0
+            device_updated = False
+            
+            if power_w > 0:
+                kw = power_w / 1000.0
+                ct_data["drift_accumulator_consumption"] = ct_data.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+                device_updated = True
+            elif power_w < 0:
+                kw = abs(power_w) / 1000.0
+                ct_data["drift_accumulator_import"] = ct_data.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                device_updated = True
+                
+            if device_updated:
+                base_consumption = ct_data.get("consumption1", 0) + ct_data.get("consumption2", 0)
+                ct_data["consumption"] = base_consumption + ct_data.get("drift_accumulator_consumption", 0.0)
+                base_import = ct_data.get("import1", 0) + ct_data.get("import2", 0)
+                ct_data["import"] = base_import + ct_data.get("drift_accumulator_import", 0.0)
+                updated = True
+                
+            ct_data["last_power_time"] = now
+            
+        return updated
+
+    def _apply_breaker_update(self, breaker_id: str, existing: dict, raw: dict, source: str = "?") -> bool:
+        """Apply a raw breaker update (from WS or REST) to the existing cached breaker dict."""
+        
+        now = time.time()
+        last_time = existing.get("last_power_time")
+        if last_time:
+            time_diff_secs = now - last_time
+            time_diff_hours = time_diff_secs / 3600.0
+            
+            old_power_w = existing.get("power", 0)
+            if old_power_w is None: 
+                old_power_w = 0.0
+                
+            p1 = float(raw.get("power", existing.get("power1", 0)) or 0)
+            p2 = float(raw.get("power2", existing.get("power2", 0)) or 0)
+            new_power_w = p1 + p2
+
+            # TRAPEZOIDAL INTEGRATOR: Averages old and new power to cleanly smooth motor inrush spikes.
+            calc_power_w = (old_power_w + new_power_w) / 2.0
+
+            # --- GAP HANDLING LOGIC ---
+            gap_threshold_secs = 300
+            gap_mode = "skip"
+            if self.entry and self.entry.options:
+                gap_threshold_secs = self.entry.options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT) * 60
+                gap_mode = self.entry.options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT)
+                
+            is_v1 = self._panel_type.get(existing.get("panel_id")) == "LDATA"
+
+            if time_diff_secs > gap_threshold_secs and is_v1:
+                if gap_mode == GAP_HANDLING_SKIP:
+                    time_diff_hours = 0.0
+                elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
+                    calc_power_w = old_power_w
+            
+            if calc_power_w > 0 and time_diff_hours > 0:
+                kw = calc_power_w / 1000.0
+                existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+            elif calc_power_w < 0 and time_diff_hours > 0:
+                kw = abs(calc_power_w) / 1000.0
+                existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                
+        existing["last_power_time"] = now
+        existing["last_ws_event_time"] = now
+
         def _field(key, cached):
             if key in raw and raw[key] is not None: return float(raw[key])
             return cached
@@ -494,30 +584,7 @@ class LDATAService:
                 if val < 0: existing["bleRSSI"] = val
             except (ValueError, TypeError): pass
             
-        # --- BREAKER RIEMANN SUM DRIFT LOGIC ---
-        import time
-        now = time.time()
-        last_time = existing.get("last_power_time")
-        if last_time:
-            time_diff_hours = (now - last_time) / 3600.0
-            power_w = existing.get("power", 0)
-            
-            # Safely handle breakers reporting 'None'
-            if power_w is None: 
-                power_w = 0.0
-            
-            if power_w > 0:
-                kw = power_w / 1000.0
-                existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
-            elif power_w < 0:
-                kw = abs(power_w) / 1000.0
-                existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
-                
-        existing["last_power_time"] = now
-        
-        # ── Energy counter updates (lifetime — must be monotonically increasing) ──
-        panel_id = existing.get("panel_id")
-        use_energy_guard = self._panel_type.get(panel_id) == "LDATA"
+        use_energy_guard = True
 
         # CONSUMPTION TRUE-UP
         if "energyConsumption" in raw or "energyConsumption2" in raw:
@@ -572,39 +639,55 @@ class LDATAService:
         return power_changed
 
     def _apply_ct_update(self, existing: dict, raw: dict) -> None:
-        import time
         now = time.time()
-        
+        last_time = existing.get("last_power_time")
+        if last_time:
+            time_diff_secs = now - last_time
+            time_diff_hours = time_diff_secs / 3600.0
+            
+            old_power_w = existing.get("power", 0)
+            if old_power_w is None: 
+                old_power_w = 0.0
+                
+            p1 = float(raw.get("activePower", existing.get("power1", 0)) or 0)
+            p2 = float(raw.get("activePower2", existing.get("power2", 0)) or 0)
+            new_power_w = p1 + p2
+
+            # TRAPEZOIDAL INTEGRATOR: Averages old and new power to cleanly smooth motor inrush spikes.
+            calc_power_w = (old_power_w + new_power_w) / 2.0
+
+            # --- GAP HANDLING LOGIC ---
+            gap_threshold_secs = 300
+            gap_mode = "skip"
+            if self.entry and self.entry.options:
+                gap_threshold_secs = self.entry.options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT) * 60
+                gap_mode = self.entry.options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT)
+                
+            is_v1 = self._panel_type.get(existing.get("panel_id")) == "LDATA"
+
+            if time_diff_secs > gap_threshold_secs and is_v1:
+                if gap_mode == GAP_HANDLING_SKIP:
+                    time_diff_hours = 0.0
+                elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
+                    calc_power_w = old_power_w
+            
+            if calc_power_w > 0 and time_diff_hours > 0:
+                kw = calc_power_w / 1000.0
+                existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
+            elif calc_power_w < 0 and time_diff_hours > 0:
+                kw = abs(calc_power_w) / 1000.0
+                existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
+                
+        existing["last_power_time"] = now
+        existing["last_ws_event_time"] = now
+
         if "activePower" in raw or "activePower2" in raw:
             cached_p1, cached_p2 = existing.get("power1", 0), existing.get("power2", 0)
             if "activePower" in raw: existing["power1"] = float(raw["activePower"]) if raw["activePower"] is not None else cached_p1
             if "activePower2" in raw: existing["power2"] = float(raw["activePower2"]) if raw["activePower2"] is not None else cached_p2
             existing["power"] = existing["power1"] + existing["power2"]
-            
-            # RIEMANN SUM INTEGRAL LOGIC
-            last_time = existing.get("last_power_time")
-            if last_time:
-                time_diff_hours = (now - last_time) / 3600.0
-                power_w = existing.get("power", 0)
-                
-                # Safely handle CTs reporting 'None'
-                if power_w is None: 
-                    power_w = 0.0
-                
-                # CORRECTED DIRECTIONAL LOGIC
-                if power_w > 0:
-                    # Positive power: Pulling from grid -> Add ONLY to Consumption
-                    kw = power_w / 1000.0
-                    existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) + (kw * time_diff_hours)
-                elif power_w < 0:
-                    # Negative power: Exporting to grid -> Add ONLY to Import
-                    kw = abs(power_w) / 1000.0
-                    existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) + (kw * time_diff_hours)
-                
-            existing["last_power_time"] = now
 
-        ct_panel_id = existing.get("panel_id")
-        use_ct_guard = self._panel_type.get(ct_panel_id) == "LDATA"
+        use_ct_guard = True
 
         # CONSUMPTION TRUE-UP
         if "energyConsumption" in raw or "energyConsumption2" in raw:
@@ -626,6 +709,7 @@ class LDATAService:
                 hardware_delta = new_base_cons - old_base_cons
                 current_drift = existing.get("drift_accumulator_consumption", 0.0)
                 existing["drift_accumulator_consumption"] = max(0.0, current_drift - hardware_delta)
+                _LOGGER.warning("[CT TRUE-UP] Hardware caught up by %.3f kWh. Reduced software drift from %.3f to %.3f", hardware_delta, current_drift, existing["drift_accumulator_consumption"])
 
         # Apply consumption = Baseline Hardware + Software Drift
         base_consumption = existing.get("consumption1", 0) + existing.get("consumption2", 0)
@@ -651,6 +735,7 @@ class LDATAService:
                 hardware_delta = new_base_imp - old_base_imp
                 current_drift = existing.get("drift_accumulator_import", 0.0)
                 existing["drift_accumulator_import"] = max(0.0, current_drift - hardware_delta)
+                _LOGGER.warning("[CT IMPORT TRUE-UP] Hardware caught up by %.3f kWh. Reduced software drift from %.3f to %.3f", hardware_delta, current_drift, existing["drift_accumulator_import"])
             
         # Apply import = Baseline Hardware + Software Drift
         base_import = existing.get("import1", 0) + existing.get("import2", 0)
@@ -674,7 +759,6 @@ class LDATAService:
         status_data[panel_id + "totalPower"] = total
 
     def _update_from_websocket(self, payload):
-        """Process a WebSocket notification and merge into status_data."""
         if not self.status_data: return None
 
         model_name = payload.get("modelName")
@@ -686,10 +770,6 @@ class LDATAService:
             log_keys = [k for k in data.keys() if k not in ("id", "modelId", "class", "ResidentialBreaker", "IotCt")]
             if log_keys:
                 _LOGGER.debug("[v%s] WS %s %s: %s", self.version, model_name, log_id, ", ".join(log_keys))
-            if "ResidentialBreaker" in data:
-                _LOGGER.debug("[v%s] WS %s %s: ResidentialBreaker", self.version, model_name, log_id)
-            if "IotCt" in data:
-                _LOGGER.debug("[v%s] WS %s %s: IotCt", self.version, model_name, log_id)
         except Exception:
             pass
 
@@ -725,19 +805,6 @@ class LDATAService:
         elif model_name == "IotWhem":
              panel_id = data.get("id")
              has_breaker_data = "ResidentialBreaker" in data
-             has_electrical_data = False
-             if has_breaker_data:
-                 for b_check in data["ResidentialBreaker"]:
-                     if any(k in b_check for k in ("power", "power2", "rmsCurrent", "rmsCurrent2", "rmsVoltage", "rmsVoltage2")):
-                         has_electrical_data = True
-                         break
-             
-             if panel_id and panel_id in self._ws_iotwhem_count:
-                 if has_electrical_data:
-                     self._ws_last_breaker_data_time[panel_id] = time.time()
-                     self._ws_iotwhem_count[panel_id] = 0
-                 else:
-                     self._ws_iotwhem_count[panel_id] = self._ws_iotwhem_count.get(panel_id, 0) + 1
              
              if has_breaker_data:
                   breakers = new_status_data["breakers"].copy()
@@ -805,72 +872,13 @@ class LDATAService:
         return None
 
     @property
-    def needs_rest_poll(self) -> bool:
-        return any(self._panel_needs_rest_poll.values())
-
-    @property
     def needs_ct_poll(self) -> bool:
         return any(self._panel_needs_ct_poll.values())
 
     def panel_has_hw_counters(self, panel_id: str) -> bool:
         return self._panel_has_hw_counters.get(panel_id, False)
 
-    async def refresh_breaker_data(self) -> bool:
-        if not self.status_data or not self.status_data.get("panels"): return False
-        if not self.auth_token: return False
-        if not any(self._panel_needs_rest_poll.values()): return False
-        
-        try:
-            async with asyncio.timeout(30):
-                await self._rest_poll_lock.acquire()
-        except asyncio.TimeoutError:
-            return False
-
-        try:
-            return await self._refresh_breaker_data_locked()
-        finally:
-            self._rest_poll_lock.release()
-
-    async def _refresh_breaker_data_locked(self) -> bool:
-        new_status_data = self.status_data.copy()
-        breakers = new_status_data.get("breakers", {}).copy()
-        updated = False
-        panels_with_power_change = set()
-        
-        for panel_data in new_status_data.get("panels", []):
-            panel_id = panel_data.get("id")
-            
-            if not panel_id or not self._panel_needs_rest_poll.get(panel_id, False):
-                continue
-            
-            try:
-                raw_breakers = await self.http.get_Whems_breakers(panel_id)
-                if raw_breakers:
-                    for breaker in raw_breakers:
-                        if breaker.get("model") is not None and breaker["model"] not in ("NONE-2", "NONE-1"):
-                            b_id = breaker["id"]
-                            if b_id in breakers:
-                                existing = breakers[b_id].copy()
-                                power_changed = self._apply_breaker_update(b_id, existing, breaker, source="REST")
-                                if power_changed:
-                                    panels_with_power_change.add(existing.get("panel_id"))
-                                breakers[b_id] = existing
-                                updated = True
-                
-            except Exception as ex:
-                _LOGGER.debug("[v%s] Breaker refresh error for panel %s: %s", self.version, panel_id, ex)
-        
-        if updated:
-            new_status_data["breakers"] = breakers
-            for pid in panels_with_power_change:
-                if pid:
-                    self._recalc_total_power(new_status_data, pid)
-            self.status_data = new_status_data
-        
-        return updated
-
     async def refresh_panel_data(self) -> bool:
-        """Fetch fresh panel-level data (rssi, voltage, frequency, connected)."""
         if not self.status_data or not self.status_data.get("panels"): return False
         if not self.auth_token: return False
 
@@ -970,14 +978,12 @@ class LDATAService:
             if not panel_id or not self._panel_needs_ct_poll.get(panel_id, False): continue
             
             try:
-                # HOURLY TRUE-UP SYNC: Execute the bandwidth toggle to fetch hardware baseline
                 panel_type = panel_data.get("panel_type", "WHEMS")
                 
-                _LOGGER.info("[v%s] Executing hourly bandwidth toggle for panel %s to sync hardware CT counters.", self.version, panel_id)
+                _LOGGER.warning("[v%s] Executing hourly bandwidth toggle for panel %s to sync hardware CT counters.", self.version, panel_id)
                 await self._bandwidth_toggle(panel_id, panel_type)
                 
-                import asyncio
-                await asyncio.sleep(5)  # Wait for cloud to ingest the fresh panel data
+                await asyncio.sleep(5) 
                 
                 raw_cts = await self.http.get_Whems_CT(panel_id)
                 if raw_cts:
