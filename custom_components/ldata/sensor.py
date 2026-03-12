@@ -236,8 +236,7 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 self._midnight_baseline = None
             if date_str := attrs.get("last_date"):
                 try:
-                    parsed = dt_util.parse_datetime(date_str)
-                    self._last_date = parsed.date() if parsed else None
+                    self._last_date = datetime.date.fromisoformat(date_str)
                 except (ValueError, TypeError):
                     self._last_date = None
             if "energy_key" in attrs:
@@ -333,7 +332,7 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 
             self._last_date = today
         except Exception:
-            pass
+            _LOGGER.debug("Error updating daily usage sensor %s", self.name, exc_info=True)
         self.async_write_ha_state()
 
     def _update_single_breaker(self, today: datetime.date, is_new_day: bool):
@@ -438,8 +437,7 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                 self._midnight_baseline = None
             if date_str := attrs.get("last_date"):
                 try:
-                    parsed = dt_util.parse_datetime(date_str)
-                    self._last_date = parsed.date() if parsed else None
+                    self._last_date = datetime.date.fromisoformat(date_str)
                 except (ValueError, TypeError):
                     self._last_date = None
 
@@ -530,6 +528,7 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
             self._last_date = today
         except Exception:
+            _LOGGER.debug("Error updating CT daily usage sensor %s", self.name, exc_info=True)
             return
         self.async_write_ha_state()
 
@@ -559,8 +558,7 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
                 return 0.0
         total = 0.0
         count = 0
-        for breaker in self.coordinator.data["breakers"].items():
-            breaker_data = breaker[1]
+        for breaker_id, breaker_data in self.coordinator.data["breakers"].items():
             if breaker_data["panel_id"] == self.entity_data["serialNumber"]:
                 current_value = 0.0
                 if self.leg_to_total == "both":
@@ -673,6 +671,7 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = None
+        self._last_reported: float | None = None
 
     @property
     def available(self) -> bool:
@@ -684,6 +683,7 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
+                self._last_reported = self._state
             except (ValueError, TypeError):
                 pass
 
@@ -710,7 +710,11 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     @property
     def native_value(self) -> StateType:
         if self._state is not None:
-            return round(self._state, 2)
+            val = round(self._state, 2)
+            if self._last_reported is not None and val < self._last_reported:
+                return self._last_reported
+            self._last_reported = val
+            return val
         return self._state
 
 
@@ -724,7 +728,7 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
         self.panel_data = data
         try:
             self._state = float(self.panel_data["data"][self.entity_description.key + self.leg_to_total])
-        except ValueError:
+        except (ValueError, KeyError, TypeError):
             self._state = 0.0
 
     async def async_added_to_hass(self) -> None:
@@ -767,7 +771,7 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
         self.ct_data = data
         try:
             self._state = float(self.ct_data[self.entity_description.key])
-        except ValueError:
+        except (ValueError, KeyError, TypeError):
             self._state = 0.0
 
     async def async_added_to_hass(self) -> None:
@@ -814,7 +818,8 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.ct_data = data
         self._state = None
-    
+        self._last_reported: float | None = None
+
     @property
     def available(self) -> bool:
         return self.coordinator.last_update_success or self._state is not None
@@ -825,6 +830,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
+                self._last_reported = self._state
             except (ValueError, TypeError):
                 pass
 
@@ -851,7 +857,11 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
     @property
     def native_value(self) -> StateType:
         if self._state is not None:
-            return round(self._state, 2)
+            val = round(self._state, 2)
+            if self._last_reported is not None and val < self._last_reported:
+                return self._last_reported
+            self._last_reported = val
+            return val
         return self._state
 
 

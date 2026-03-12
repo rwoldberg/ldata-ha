@@ -35,7 +35,7 @@ async def async_setup_entry(
 
     if panels := entry.data.get("panels"):
         for panel_data in panels:
-            sensors_to_add.append(LdataCloudConnectedSensor(entry, panel_data))
+            sensors_to_add.append(LDATACloudConnectedSensor(entry, panel_data))
             sensors_to_add.append(LDATAPanelOverVoltageSensor(entry, panel_data))
             sensors_to_add.append(LDATAPanelUnderVoltageSensor(entry, panel_data))
 
@@ -50,7 +50,6 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     def __init__(self, coordinator, data) -> None:
         """Init LDATABinarySensor."""
         super().__init__(data=data, coordinator=coordinator)
-        self._attr_unique_id = f"{data['id']}_status"
         self.breaker_data = data
         self._state = None
         
@@ -111,13 +110,17 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         """Suffix to append to the LDATA device's name."""
         return "Status"
 
-class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "status"
+
+class LDATACloudConnectedSensor(LDATAEntity, BinarySensorEntity):
     """LDATA Cloud Connection binary sensor for a specific panel."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(self, coordinator, data) -> None:
-        """Init LdataCloudConnectedSensor."""
+        """Init LDATACloudConnectedSensor."""
         super().__init__(data=data, coordinator=coordinator)
         self.panel_data = data
         self._state = None

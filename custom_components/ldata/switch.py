@@ -202,13 +202,15 @@ class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
             result = await self.coordinator.service.set_blink_led(self.breaker_data["id"], True)
         except LDATAAuthError as ex:
             _LOGGER.error("Auth error enabling blink LED for %s: %s", self.name, ex)
+            self.async_write_ha_state()
             return
         except Exception as ex:
             _LOGGER.error("Error enabling blink LED for %s: %s", self.name, ex)
+            self.async_write_ha_state()
             return
         if result:
             self._state = True
-            self.async_write_ha_state()
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable LED blinking."""
@@ -216,13 +218,15 @@ class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
             result = await self.coordinator.service.set_blink_led(self.breaker_data["id"], False)
         except LDATAAuthError as ex:
             _LOGGER.error("Auth error disabling blink LED for %s: %s", self.name, ex)
+            self.async_write_ha_state()
             return
         except Exception as ex:
             _LOGGER.error("Error disabling blink LED for %s: %s", self.name, ex)
+            self.async_write_ha_state()
             return
         if result:
             self._state = False
-            self.async_write_ha_state()
+        self.async_write_ha_state()
 
     @property
     def name_suffix(self) -> str | None:

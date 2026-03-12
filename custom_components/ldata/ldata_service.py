@@ -525,9 +525,9 @@ class LDATAService:
                     calc_power_w = old_ws_power
 
             # 1. UNDO the speculative Left sums added by the continuous tick
-            existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) - existing.get("speculative_kwh_consumption", 0.0)
-            existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) - existing.get("speculative_kwh_import", 0.0)
-            
+            existing["drift_accumulator_consumption"] = max(0.0, existing.get("drift_accumulator_consumption", 0.0) - existing.get("speculative_kwh_consumption", 0.0))
+            existing["drift_accumulator_import"] = max(0.0, existing.get("drift_accumulator_import", 0.0) - existing.get("speculative_kwh_import", 0.0))
+
             existing["speculative_kwh_consumption"] = 0.0
             existing["speculative_kwh_import"] = 0.0
             
@@ -729,22 +729,22 @@ class LDATAService:
                 elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
                     calc_power_w = old_ws_power
             
-            existing["drift_accumulator_consumption"] = existing.get("drift_accumulator_consumption", 0.0) - existing.get("speculative_kwh_consumption", 0.0)
-            existing["drift_accumulator_import"] = existing.get("drift_accumulator_import", 0.0) - existing.get("speculative_kwh_import", 0.0)
-            
+            existing["drift_accumulator_consumption"] = max(0.0, existing.get("drift_accumulator_consumption", 0.0) - existing.get("speculative_kwh_consumption", 0.0))
+            existing["drift_accumulator_import"] = max(0.0, existing.get("drift_accumulator_import", 0.0) - existing.get("speculative_kwh_import", 0.0))
+
             existing["speculative_kwh_consumption"] = 0.0
             existing["speculative_kwh_import"] = 0.0
-            
+
             if calc_power_w > 0 and time_diff_hours > 0:
                 kw = calc_power_w / 1000.0
                 existing["drift_accumulator_consumption"] += (kw * time_diff_hours)
             elif calc_power_w < 0 and time_diff_hours > 0:
                 kw = abs(calc_power_w) / 1000.0
                 existing["drift_accumulator_import"] += (kw * time_diff_hours)
-                
+
         existing["last_power_time"] = now
         existing["last_ws_event_time"] = now
-        
+
         p1 = float(raw.get("activePower", existing.get("power1", 0)) or 0)
         p2 = float(raw.get("activePower2", existing.get("power2", 0)) or 0)
         existing["last_ws_power"] = p1 + p2
@@ -777,7 +777,7 @@ class LDATAService:
                 hardware_delta = new_base_cons - old_base_cons
                 current_drift = existing.get("drift_accumulator_consumption", 0.0)
                 existing["drift_accumulator_consumption"] = max(0.0, current_drift - hardware_delta)
-                _LOGGER.warning("[CT TRUE-UP] Hardware caught up by %.3f kWh. Reduced software drift from %.3f to %.3f", hardware_delta, current_drift, existing["drift_accumulator_consumption"])
+                _LOGGER.info("[Energy Sync] Leviton hardware confirmed %.3f kWh consumed. Reduced software drift from %.3f to %.3f", hardware_delta, current_drift, existing["drift_accumulator_consumption"])
 
         # Apply consumption = Baseline Hardware + Software Drift
         base_consumption = existing.get("consumption1", 0) + existing.get("consumption2", 0)
@@ -803,7 +803,7 @@ class LDATAService:
                 hardware_delta = new_base_imp - old_base_imp
                 current_drift = existing.get("drift_accumulator_import", 0.0)
                 existing["drift_accumulator_import"] = max(0.0, current_drift - hardware_delta)
-                _LOGGER.warning("[CT IMPORT TRUE-UP] Hardware caught up by %.3f kWh. Reduced software drift from %.3f to %.3f", hardware_delta, current_drift, existing["drift_accumulator_import"])
+                _LOGGER.info("[Energy Sync] Leviton hardware confirmed %.3f kWh imported. Reduced software drift from %.3f to %.3f", hardware_delta, current_drift, existing["drift_accumulator_import"])
             
         # Apply import = Baseline Hardware + Software Drift
         base_import = existing.get("import1", 0) + existing.get("import2", 0)
@@ -1005,7 +1005,7 @@ class LDATAService:
                 updated = True
 
             except Exception:
-                pass
+                _LOGGER.debug("[v%s] Failed to refresh panel %s: ", self.version, panel_id, exc_info=True)
 
         if updated:
             new_status_data["panels"] = panels
@@ -1056,8 +1056,8 @@ class LDATAService:
                                 cts[ct_id] = existing_ct
                                 updated = True
             except Exception:
-                pass
-        
+                _LOGGER.debug("[v%s] Failed to refresh CT data for panel %s: ", self.version, panel_id, exc_info=True)
+
         if updated:
             new_status_data["cts"] = cts
             self.status_data = new_status_data

@@ -39,10 +39,10 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
-        vol.Required("username"): str,
-        vol.Required("password"): str,
-        vol.Required("three_phase"): bool,
-        vol.Required("allow_breaker_control"): bool,
+        vol.Required(CONF_USERNAME): str,
+        vol.Required(CONF_PASSWORD): str,
+        vol.Required(THREE_PHASE): bool,
+        vol.Required(ALLOW_BREAKER_CONTROL): bool,
     }
 )
 
