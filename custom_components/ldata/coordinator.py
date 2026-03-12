@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 
 from .const import (
     DOMAIN, 
@@ -22,6 +23,7 @@ from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
+STORAGE_VERSION = 1
 
 class LDATAUpdateCoordinator(DataUpdateCoordinator):
     """LDATAUpdateCoordinator to handle fetching new data about the LDATA module."""
@@ -41,6 +43,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._debounce_timer = None
         self._websocket_connected = False
         self._websocket_ever_connected = False
+        
+        # Setup Home Assistant .storage Disk Persistence
+        self._store = Store(hass, STORAGE_VERSION, f"{DOMAIN}_{entry.entry_id}_energy_data")
+        self._disk_data_loaded = False
 
         # No polling interval — WebSocket + slow hourly sync handle updates
         super().__init__(
@@ -81,7 +87,6 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 self._websocket_ever_connected = True
                 
             # FORCE START THE CONTINUOUS INTEGRATOR LOOP!
-            # This ensures V1 panels start accumulating immediately even if loads are steady.
             self._handle_websocket_update("Connection Established")
             
         elif not connected and was_connected:
@@ -91,9 +96,14 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 self._debounce_timer = None
 
     async def async_shutdown(self):
-        """Gracefully shutdown the WebSocket connection and tasks."""
+        """Gracefully shutdown the WebSocket connection, tasks, and force-save to disk."""
         _LOGGER.debug("Shutting down LDATA coordinator")
         self._service._shutdown_requested = True
+        
+        # Force a hard drive save instantly upon shutdown
+        if self._service.status_data:
+            await self._store.async_save(self._service.status_data)
+            _LOGGER.debug("Successfully saved LDATA accumulator persistence to disk on shutdown")
         
         if self._ct_poll_task:
             self._ct_poll_task.cancel()
@@ -114,19 +124,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._debounce_timer = None
 
     async def _ct_poll_loop(self):
-        """Slow poll loop for the Hourly Hardware True-Up.
-
-        Executes the bandwidth toggle (1→0→1) to fetch true hardware
-        CT counters, and refreshes panel-level diagnostics.
-        """
+        """Slow poll loop for the Hourly Hardware True-Up."""
         while not self._service.status_data and not self._service._shutdown_requested:
             await asyncio.sleep(5)
         
-        # Wait for WS to connect before firing the startup true-up
-        _LOGGER.debug(
-            "[v%s] Waiting %ss for WebSocket to stabilize before Startup Sync",
-            self._service.version, WS_DETECTION_GRACE_PERIOD,
-        )
         await asyncio.sleep(WS_DETECTION_GRACE_PERIOD)
         
         _LOGGER.info(
@@ -138,12 +139,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         while not self._service._shutdown_requested:
             try:
                 refreshed = False
-                
-                # Always refresh panel-level data (rssi, voltage, frequency)
                 if await self._service.refresh_panel_data():
                     refreshed = True
                 
-                # Fire the Bandwidth Toggle and fetch the hardware true-up
                 if self._service.needs_ct_poll:
                     if await self._service.refresh_ct_data():
                         refreshed = True
@@ -151,7 +149,6 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 if refreshed:
                     self._handle_websocket_update("Scheduled/REST")
                     
-                # Sleep for 1 hour before the next true-up
                 await asyncio.sleep(3600)
                     
             except asyncio.CancelledError:
@@ -162,8 +159,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             except Exception as ex:
                 _LOGGER.warning("[v%s] Slow poll error: %s", self._service.version, ex)
                 await asyncio.sleep(30)
-        
-        _LOGGER.debug("[v%s] Slow poll loop stopped", self._service.version)
+
+    def _get_stored_data(self):
+        """Helper function for the delayed disk save."""
+        return self._service.status_data
 
     def _handle_websocket_update(self, source="Scheduled/REST"):
         if self._debounce_timer is None:
@@ -181,7 +180,6 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._debounce_timer = None
         
         try:
-            # Continuously advance the software energy drift in the background!
             if hasattr(self._service, "advance_all_drift"):
                 self._service.advance_all_drift()
                 
@@ -190,20 +188,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 return
             
             self._log_data_if_enabled(data, source)
-            
-            inform_rate = max(
-                HA_INFORM_RATE_MIN,
-                self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
-            )
-            
-            breaker_count = len(data.get("breakers", {})) if data else 0
-            ct_count = len(data.get("cts", {})) if data else 0
-            _LOGGER.debug(
-                "[v%s] Pushing (%ss) update to HA: %s breakers, %s CTs",
-                self._service.version, inform_rate, breaker_count, ct_count,
-            )
-            
             self.async_set_updated_data(data)
+            
+            # TRIGGER DISK SAVE: Write the memory state to hard drive automatically (debounced 60s)
+            self._store.async_delay_save(self._get_stored_data, 60)
         
         except Exception as e:
             _LOGGER.error("[v%s] Error in debounced update: %s", self._service.version, e)
@@ -222,11 +210,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
 
     def _log_data_if_enabled(self, data, source: str = ""):
         options = self.config_entry.options
-        
         if options.get("log_parsed_data", False):
             redacted_data = self._redact_data(data)
             _LOGGER.warning("Leviton %s Parsed Data: %s", source, redacted_data)
-            
         elif options.get("enable_specific_logging", False):
             if fields_to_log_str := options.get("log_fields", ""):
                 fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
@@ -236,17 +222,14 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                         for field in fields_to_log:
                             if field in ct_data:
                                 log_output["CT_%s_%s" % (ct_id, field)] = ct_data[field]
-                    
                     for b_id, b_data in data.get('breakers', {}).items():
                         for field in fields_to_log:
                             if field in b_data:
                                 log_output["Breaker_%s_%s" % (b_data.get('name', b_id), field)] = b_data[field]
-                    
                     for panel in data.get('panels', []):
                         for field in fields_to_log:
                             if field in panel:
                                 log_output["Panel_%s_%s" % (panel.get('name', panel.get('id', '?')), field)] = panel[field]
-                
                 if log_output:
                     _LOGGER.warning("Leviton %s Selected Data: %s", source, log_output)
 
@@ -272,6 +255,18 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_data(self):
         """Fetch data from LDATA Controller."""
+        
+        # INTERCEPT STARTUP: Load previous math accumulators from hard drive before talking to cloud
+        if not self._disk_data_loaded:
+            try:
+                stored = await self._store.async_load()
+                if stored:
+                    _LOGGER.info("Successfully recovered LDATA Riemann integrator state from disk.")
+                    self._service.status_data = stored
+            except Exception as ex:
+                _LOGGER.warning("Failed to load LDATA disk persistence: %s", ex)
+            self._disk_data_loaded = True
+
         if self._websocket_connected and self.data is not None:
             return self.data
         
@@ -280,6 +275,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         try:
             async with asyncio.timeout(30):
                 returnData = await self._service.status()
+                
+            if returnData:
+                self._store.async_delay_save(self._get_stored_data, 1)
+
             self._log_data_if_enabled(returnData, "API")
             return returnData
 

@@ -173,6 +173,10 @@ class LDATAService:
             return status_data
 
         three_phase = self._three_phase
+        
+        # Access the persistence data loaded from the .storage file by the coordinator
+        existing_breakers = self.status_data.get("breakers", {}) if self.status_data else {}
+        existing_cts = self.status_data.get("cts", {}) if self.status_data else {}
 
         for panel in panels_json:
             panel_id = panel.get("id")
@@ -238,20 +242,33 @@ class LDATAService:
                         ct_data["power"] = ct_data["power1"] + ct_data["power2"]
                         ct_data["consumption1"] = self._parse_float(ct, "energyConsumption", 0.0)
                         ct_data["consumption2"] = self._parse_float(ct, "energyConsumption2", 0.0)
-                        ct_data["consumption"] = ct_data["consumption1"] + ct_data["consumption2"]
                         ct_data["import1"] = self._parse_float(ct, "energyImport", 0.0)
                         ct_data["import2"] = self._parse_float(ct, "energyImport2", 0.0)
-                        ct_data["import"] = ct_data["import1"] + ct_data["import2"]
                         ct_data["current1"] = self._parse_float(ct, "rmsCurrent", 0.0)
                         ct_data["current2"] = self._parse_float(ct, "rmsCurrent2", 0.0)
                         ct_data["current"] = (ct_data["current1"] + ct_data["current2"]) / 2.0
                         
-                        # Initialize timestamps so the continuous integrator starts immediately
-                        ct_data["last_power_time"] = time.time()
-                        ct_data["last_ws_event_time"] = time.time()
-                        ct_data["last_ws_power"] = ct_data["power"]
-                        ct_data["speculative_kwh_consumption"] = 0.0
-                        ct_data["speculative_kwh_import"] = 0.0
+                        # --- DISK PERSISTENCE MERGE FOR CTS ---
+                        old_ct = existing_cts.get(ct_data["id"])
+                        if old_ct:
+                            ct_data["drift_accumulator_consumption"] = old_ct.get("drift_accumulator_consumption", 0.0)
+                            ct_data["drift_accumulator_import"] = old_ct.get("drift_accumulator_import", 0.0)
+                            ct_data["speculative_kwh_consumption"] = old_ct.get("speculative_kwh_consumption", 0.0)
+                            ct_data["speculative_kwh_import"] = old_ct.get("speculative_kwh_import", 0.0)
+                            ct_data["last_power_time"] = old_ct.get("last_power_time", time.time())
+                            ct_data["last_ws_event_time"] = old_ct.get("last_ws_event_time", time.time())
+                            ct_data["last_ws_power"] = old_ct.get("last_ws_power", ct_data["power"])
+                        else:
+                            ct_data["drift_accumulator_consumption"] = 0.0
+                            ct_data["drift_accumulator_import"] = 0.0
+                            ct_data["speculative_kwh_consumption"] = 0.0
+                            ct_data["speculative_kwh_import"] = 0.0
+                            ct_data["last_power_time"] = time.time()
+                            ct_data["last_ws_event_time"] = time.time()
+                            ct_data["last_ws_power"] = ct_data["power"]
+                            
+                        ct_data["consumption"] = ct_data["consumption1"] + ct_data["consumption2"] + ct_data["drift_accumulator_consumption"]
+                        ct_data["import"] = ct_data["import1"] + ct_data["import2"] + ct_data["drift_accumulator_import"]
                         
                         cts[ct_data["id"]] = ct_data
 
@@ -322,17 +339,30 @@ class LDATAService:
                         
                         breaker_data["consumption1"] = self._parse_float(breaker, "energyConsumption", 0.0)
                         breaker_data["consumption2"] = self._parse_float(breaker, "energyConsumption2", 0.0)
-                        breaker_data["consumption"] = breaker_data["consumption1"] + breaker_data["consumption2"]
                         breaker_data["import1"] = self._parse_float(breaker, "energyImport", 0.0)
                         breaker_data["import2"] = self._parse_float(breaker, "energyImport2", 0.0)
-                        breaker_data["import"] = breaker_data["import1"] + breaker_data["import2"]
                         
-                        # Initialize timestamps so the continuous integrator starts immediately
-                        breaker_data["last_power_time"] = time.time()
-                        breaker_data["last_ws_event_time"] = time.time()
-                        breaker_data["last_ws_power"] = breaker_data["power"] if breaker_data["power"] is not None else 0.0
-                        breaker_data["speculative_kwh_consumption"] = 0.0
-                        breaker_data["speculative_kwh_import"] = 0.0
+                        # --- DISK PERSISTENCE MERGE FOR BREAKERS ---
+                        old_brk = existing_breakers.get(breaker_data["id"])
+                        if old_brk:
+                            breaker_data["drift_accumulator_consumption"] = old_brk.get("drift_accumulator_consumption", 0.0)
+                            breaker_data["drift_accumulator_import"] = old_brk.get("drift_accumulator_import", 0.0)
+                            breaker_data["speculative_kwh_consumption"] = old_brk.get("speculative_kwh_consumption", 0.0)
+                            breaker_data["speculative_kwh_import"] = old_brk.get("speculative_kwh_import", 0.0)
+                            breaker_data["last_power_time"] = old_brk.get("last_power_time", time.time())
+                            breaker_data["last_ws_event_time"] = old_brk.get("last_ws_event_time", time.time())
+                            breaker_data["last_ws_power"] = old_brk.get("last_ws_power", breaker_data["power"] if breaker_data["power"] is not None else 0.0)
+                        else:
+                            breaker_data["drift_accumulator_consumption"] = 0.0
+                            breaker_data["drift_accumulator_import"] = 0.0
+                            breaker_data["speculative_kwh_consumption"] = 0.0
+                            breaker_data["speculative_kwh_import"] = 0.0
+                            breaker_data["last_power_time"] = time.time()
+                            breaker_data["last_ws_event_time"] = time.time()
+                            breaker_data["last_ws_power"] = breaker_data["power"] if breaker_data["power"] is not None else 0.0
+                            
+                        breaker_data["consumption"] = breaker_data["consumption1"] + breaker_data["consumption2"] + breaker_data["drift_accumulator_consumption"]
+                        breaker_data["import"] = breaker_data["import1"] + breaker_data["import2"] + breaker_data["drift_accumulator_import"]
                         
                         breakers[breaker["id"]] = breaker_data
                         if breaker_data["power"] is not None:
@@ -388,7 +418,6 @@ class LDATAService:
         now = time.time()
         updated = False
 
-        # 1. Advance all Breakers
         for b_id, b_data in self.status_data.get("breakers", {}).items():
             last_time = b_data.get("last_power_time")
             if not last_time: continue
@@ -396,7 +425,7 @@ class LDATAService:
             time_diff_secs = now - last_time
             if time_diff_secs < 1.0: continue
 
-            power_w = b_data.get("power", 0) or 0
+            power_w = b_data.get("last_ws_power", b_data.get("power", 0) or 0)
             time_diff_hours = time_diff_secs / 3600.0
             device_updated = False
             
@@ -422,7 +451,6 @@ class LDATAService:
                 
             b_data["last_power_time"] = now
 
-        # 2. Advance all CTs
         for ct_id, ct_data in self.status_data.get("cts", {}).items():
             last_time = ct_data.get("last_power_time")
             if not last_time: continue
@@ -430,7 +458,7 @@ class LDATAService:
             time_diff_secs = now - last_time
             if time_diff_secs < 1.0: continue
 
-            power_w = ct_data.get("power", 0) or 0
+            power_w = ct_data.get("last_ws_power", ct_data.get("power", 0) or 0)
             time_diff_hours = time_diff_secs / 3600.0
             device_updated = False
             
@@ -731,7 +759,7 @@ class LDATAService:
 
         # CONSUMPTION TRUE-UP
         if "energyConsumption" in raw or "energyConsumption2" in raw:
-            ct_id = existing.get("id", "?")
+            ct_id = str(existing.get("id", "?"))
             cached_c1, cached_c2 = existing.get("consumption1", 0), existing.get("consumption2", 0)
             old_base_cons = cached_c1 + cached_c2
             
@@ -757,7 +785,7 @@ class LDATAService:
         
         # IMPORT TRUE-UP
         if "energyImport" in raw or "energyImport2" in raw:
-            ct_id = existing.get("id", "?")
+            ct_id = str(existing.get("id", "?"))
             cached_i1, cached_i2 = existing.get("import1", 0), existing.get("import2", 0)
             old_base_imp = cached_i1 + cached_i2
             
@@ -804,14 +832,6 @@ class LDATAService:
         model_name = payload.get("modelName")
         data = payload.get("data")
         if not data: return None
-
-        try:
-            log_id = data.get("id") or payload.get("modelId", "")
-            log_keys = [k for k in data.keys() if k not in ("id", "modelId", "class", "ResidentialBreaker", "IotCt")]
-            if log_keys:
-                _LOGGER.debug("[v%s] WS %s %s: %s", self.version, model_name, log_id, ", ".join(log_keys))
-        except Exception:
-            pass
 
         new_status_data = self.status_data.copy()
         updated = False
@@ -984,8 +1004,8 @@ class LDATAService:
                 panels[i] = panel
                 updated = True
 
-            except Exception as ex:
-                _LOGGER.debug("[v%s] Panel refresh error for %s: %s", self.version, panel_id, ex)
+            except Exception:
+                pass
 
         if updated:
             new_status_data["panels"] = panels
@@ -1035,8 +1055,8 @@ class LDATAService:
                                 self._apply_ct_update(existing_ct, ct)
                                 cts[ct_id] = existing_ct
                                 updated = True
-            except Exception as ex:
-                _LOGGER.debug("[v%s] CT refresh error for panel %s: %s", self.version, panel_id, ex)
+            except Exception:
+                pass
         
         if updated:
             new_status_data["cts"] = cts

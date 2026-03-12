@@ -225,6 +225,8 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
+                # PERFECT REBOOT SURVIVAL: Restore the lock from Home Assistant DB
+                self._last_reported = self._state
             except (ValueError, TypeError):
                 pass
             attrs = last_state.attributes or {}
@@ -247,9 +249,11 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             self._midnight_baseline = baseline
         if value is not None:
             self._state = value
+            self._last_reported = value  # Release the lock allowing new manual value
         elif baseline is None and value is None:
             self._midnight_baseline = None
             self._state = 0.0
+            self._last_reported = 0.0  # Release the lock allowing instant flatline drop
         self.async_write_ha_state()
 
     @property
@@ -264,10 +268,10 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     @property
     def name_suffix(self) -> str | None:
         if self.panel_total and self._panel_energy_key == "import":
-            return "Total Daily Import"
+            return "Daily Import"
         if not self.panel_total and self._breaker_energy_key == "import":
             return "Daily Import"
-        return "Total Daily Energy"
+        return "Daily Consumption"
 
     @property
     def unique_id_suffix(self) -> str | None:
@@ -281,9 +285,9 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     def native_value(self) -> StateType:
         if self._state is not None:
             val = round(self._state, 2)
+            # ABSOLUTE MONOTONIC LOCK (Protects graph from software drift wipes)
             if self._last_reported is not None and val < self._last_reported:
-                if self._last_reported > 0 and val / self._last_reported > 0.5:
-                    return self._last_reported
+                return self._last_reported
             self._last_reported = val
             return val
         return 0.0
@@ -340,19 +344,21 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if is_new_day or self._midnight_baseline is None:
             self._midnight_baseline = consumption
             self._state = 0.0
+            self._last_reported = 0.0  # Unlock for midnight flip
             return
 
         daily = consumption - self._midnight_baseline
         if daily < 0:
-            # AUTO-RECOVERY: If HA rebooted and the software drift was wiped, reset baseline
             if daily <= -0.1:
                 self._midnight_baseline = consumption
                 self._state = 0.0
+                self._last_reported = 0.0
             return
             
         if daily > MAX_DAILY_ENERGY_KWH:
             self._midnight_baseline = consumption
             daily = 0.0
+            self._last_reported = 0.0
 
         self._state = daily
 
@@ -382,19 +388,21 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if is_new_day or self._midnight_baseline is None:
             self._midnight_baseline = current_lifetime_sum
             self._state = 0.0
+            self._last_reported = 0.0  # Unlock for midnight flip
             return
 
         daily = current_lifetime_sum - self._midnight_baseline
         if daily < 0:
-            # AUTO-RECOVERY: If HA rebooted and the software drift was wiped, reset baseline
             if daily <= -0.1:
                 self._midnight_baseline = current_lifetime_sum
                 self._state = 0.0
+                self._last_reported = 0.0
             return
             
         if daily > MAX_DAILY_ENERGY_KWH:
             self._midnight_baseline = current_lifetime_sum
             daily = 0.0
+            self._last_reported = 0.0
 
         self._state = daily
 
@@ -419,6 +427,8 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
+                # PERFECT REBOOT SURVIVAL: Restore the lock from Home Assistant DB
+                self._last_reported = self._state
             except (ValueError, TypeError):
                 pass
             attrs = last_state.attributes or {}
@@ -438,16 +448,18 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             self._midnight_baseline = baseline
         if value is not None:
             self._state = value
+            self._last_reported = value  # Release the lock allowing new manual value
         elif baseline is None and value is None:
             self._midnight_baseline = None
             self._state = 0.0
+            self._last_reported = 0.0  # Release the lock allowing instant flatline drop
         self.async_write_ha_state()
 
     @property
     def name_suffix(self) -> str | None:
         if self._energy_key == "import":
             return "Daily Import"
-        return "Total Daily Energy"
+        return "Daily Consumption"
 
     @property
     def unique_id_suffix(self) -> str | None:
@@ -459,9 +471,9 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
     def native_value(self) -> StateType:
         if self._state is not None:
             val = round(self._state, 2)
+            # ABSOLUTE MONOTONIC LOCK (Protects graph from software drift wipes)
             if self._last_reported is not None and val < self._last_reported:
-                if self._last_reported > 0 and val / self._last_reported > 0.5:
-                    return self._last_reported
+                return self._last_reported
             self._last_reported = val
             return val
         return 0.0
@@ -500,17 +512,19 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                 if is_new_day or self._midnight_baseline is None:
                     self._midnight_baseline = consumption
                     self._state = 0.0
+                    self._last_reported = 0.0  # Unlock for midnight flip
                 else:
                     daily = consumption - self._midnight_baseline
                     if daily < 0:
-                        # AUTO-RECOVERY: If HA rebooted and the software drift was wiped, reset baseline
                         if daily <= -0.1:
                             self._midnight_baseline = consumption
                             self._state = 0.0
+                            self._last_reported = 0.0
                     else:
                         if daily > MAX_DAILY_ENERGY_KWH:
                             self._midnight_baseline = consumption
                             self._state = 0.0
+                            self._last_reported = 0.0
                         else:
                             self._state = daily
 
