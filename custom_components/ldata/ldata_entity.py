@@ -72,18 +72,14 @@ class LDATAEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         if self._device_id is None:
             return None
 
-        info = {
+        return {
             "identifiers": {(DOMAIN, self.entity_data["serialNumber"])},
             "name": self.entity_data["name"],
             "model": self.entity_data["model"],
             "hw_version": self.entity_data.get("hardware"),
-            "sw_version": self.entity_data.get("firmware"),
+            "sw_version": self.entity_data["firmware"],
             "manufacturer": MANUFACTURER,
         }
-        # Expose the Leviton breaker/panel ID in the device card
-        if self.entity_data.get("id"):
-            info["serial_number"] = str(self.entity_data["id"])
-        return info
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
