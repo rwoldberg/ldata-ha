@@ -23,6 +23,7 @@ from homeassistant.const import (
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -208,15 +209,23 @@ async def async_setup_entry(
             LDATACTDailyUsageSensor(coordinator, ct_data, energy_key="import")
         )
 
+    ent_reg = er.async_get(hass)
+
     for breaker_id, breaker_data in coordinator.data.get("breakers", {}).items():
         entities_to_add.append(LDATADailyUsageSensor(coordinator, breaker_data, False, ""))
         # Breaker Daily Import: only for solar-capable breakers.
-        # Require import > 0 — positive lifetime import energy confirms this
-        # breaker has seen grid-export (solar/generator). Avoids creating the
-        # entity for pure-consumption breakers whose consumption counter may
-        # temporarily read 0.0 at startup (none_to_zero reconnect artefact).
+        # Primary gate: import > 0 — positive lifetime counter confirms this
+        # breaker has seen grid-export (solar/generator).
+        # Fallback gate: entity already exists in the registry — the counter
+        # was non-zero on a previous run but came back null/0 on this startup
+        # (none_to_zero artefact, or panel briefly offline during first fetch).
+        # Without the fallback, a previously-created import sensor disappears
+        # permanently after any HA restart where the initial REST fetch returns
+        # null for energyImport.
         _imp = float(breaker_data.get("import", 0) or 0)
-        if _imp > 0:
+        _daily_import_uid = f"{coordinator.user}-ldata_{breaker_id}_todaymw_import"
+        _has_daily_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _daily_import_uid) is not None
+        if _imp > 0 or _has_daily_import:
             entities_to_add.append(
                 LDATADailyUsageSensor(coordinator, breaker_data, False, "",
                                       breaker_energy_key="import")
@@ -228,9 +237,11 @@ async def async_setup_entry(
             LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[2])
         )
         # Add lifetime energy sensors. Consumption is created for all breakers.
-        # Import (solar production) is only created when the breaker has a
-        # non-zero import counter — same gate as the Daily Import sensor above.
-        if _imp > 0:
+        # Import (solar production) uses the same gate as Daily Import above,
+        # plus its own registry check.
+        _lifetime_import_uid = f"{coordinator.user}-ldata_{breaker_id}__Import_kWh"
+        _has_lifetime_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _lifetime_import_uid) is not None
+        if _imp > 0 or _has_daily_import or _has_lifetime_import:
             entities_to_add.append(
                 LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[4])
             )
