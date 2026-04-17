@@ -284,7 +284,8 @@ async def async_setup_entry(
             _LOGGER.info("Removed spurious import sensor from registry: %s", eid)
 
     for breaker_id, breaker_data in coordinator.data.get("breakers", {}).items():
-        entities_to_add.append(LDATADailyUsageSensor(coordinator, breaker_data, False, ""))
+        # NOTE: the daily consumption sensor is added AFTER solar classification
+        # so we can pass is_solar_breaker correctly (see below).
 
         # Cache once — called in 3 places below (v1/v2 firmware detection).
         _has_hw_counters = _breaker_has_hw_counters(breaker_data)
@@ -445,6 +446,17 @@ async def async_setup_entry(
             else _is_confirmed_solar
         )
 
+        # ── Breaker Daily Consumption sensor ──────────────────────────────────
+        # For solar breakers: tracks inverter standby draw (max(-power, 0)) so
+        # the sensor accumulates near-zero during the day and a few watts at
+        # night — NOT solar generation.  is_solar_breaker bypasses the fragile
+        # period-counter detection (_detect_energy_key) used for v1 panels.
+        _is_solar = _v2_solar_signal or _is_confirmed_solar or _imp_valid
+        entities_to_add.append(
+            LDATADailyUsageSensor(coordinator, breaker_data, False, "",
+                                  is_solar_breaker=_is_solar)
+        )
+
         # Breaker Daily Import sensor
         if _imp_valid or _v2_solar_signal or _import_fallback:
             entities_to_add.append(
@@ -588,6 +600,7 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self, coordinator: LDATAUpdateCoordinator, data, panelTotal, which_panel: str,
         panel_energy_key: str = "consumption",
         breaker_energy_key: str = "",
+        is_solar_breaker: bool = False,
     ) -> None:
         """Init sensor."""
         self.panel_total = panelTotal
@@ -599,6 +612,10 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if not panelTotal and breaker_energy_key:
             self._energy_key = breaker_energy_key
             self._is_forced_import = (breaker_energy_key == "import")
+        # True when this consumption sensor belongs to a solar/generator breaker.
+        # Used in PXT mode to track inverter standby draw (max(-power, 0)) instead
+        # of abs(power), bypassing the unreliable period-counter detection.
+        self._is_solar_breaker: bool = is_solar_breaker
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state: float | None = None
@@ -1059,14 +1076,17 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             that inverter standby draw (negative watts) does not corrupt the
             daily solar total.
 
-          • _is_forced_import = False, _energy_key == "import" (auto-detected solar)
+          • _is_solar_breaker = True (or _energy_key == "import" on v1 auto-detect)
             → Daily Consumption sensor on a solar breaker.
-            Tracks the opposite direction: power drawn FROM the panel bus through
-            the breaker (inverter standby, typically near 0 W during the day).
-            Clamp to max(-power, 0) so generation does not corrupt the total.
+            Tracks inverter standby draw: power pulled FROM the panel bus through
+            the breaker (negative watts direction, typically near 0 W during the day).
+            Clamped to max(-power, 0) so solar generation (positive watts) is never
+            counted as consumption.
+            _is_solar_breaker is set from branchType / confirmed_solar at setup time,
+            bypassing the unreliable period-counter ratio used by _detect_energy_key.
 
-          • _energy_key == "consumption" (regular load breaker)
-            → always consumes from the panel (positive watts).
+          • Neither flag set → regular load breaker.
+            Always consumes from the panel (positive watts).
             abs() handles the rare firmware transient that briefly sends a negative
             value for a load breaker.
         """
@@ -1080,9 +1100,10 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 # Daily Import sensor: solar generation flows into the panel bus
                 # as positive watts.  Ignore the negative (consumption) direction.
                 current_power = max(raw_power, 0.0)
-            elif self._energy_key == "import":
-                # Daily Consumption sensor on an auto-detected solar breaker.
-                # Track power drawn FROM the panel (negative direction) only.
+            elif self._is_solar_breaker or self._energy_key == "import":
+                # Daily Consumption sensor on a solar breaker.
+                # Inverter standby draw flows FROM the panel (negative watts).
+                # Clamp to max(-power, 0) — generation (positive) must not accumulate here.
                 current_power = max(-raw_power, 0.0)
             else:
                 # Regular load breaker — always positive; abs() covers transients.
