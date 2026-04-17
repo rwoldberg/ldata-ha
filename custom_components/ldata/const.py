@@ -15,11 +15,22 @@ HA_INFORM_RATE_DEFAULT = 60.0
 HA_INFORM_RATE_MIN = 2.0
 HA_INFORM_RATE_MAX = 600.0
 
-# CT-only poll interval for v2 firmware panels.
-# The bandwidth toggle (1→0→1) needed to refresh CT energy counters can
-# cause brief zero readings on breakers. Use 30s to balance CT freshness
-# against breaker stability. The WS still delivers power every ~5-6s.
+# CT REST poll interval (seconds) — v1 firmware panels only.
+# On v2+ firmware, CT energy counters are period counters (not lifetime totals)
+# and CT REST polling is disabled entirely; CT power arrives via WS IotCt events.
+# On v1 panels, a bandwidth toggle (1→0→1) is needed to force the panel to
+# refresh its hardware energy counters before the REST fetch.
 CT_POLL_INTERVAL = 300.0
+
+# Settle delay (seconds) after a bandwidth toggle before fetching CT/breaker data.
+# After bandwidth:0 the panel briefly disconnects; waiting before the REST fetch
+# avoids 502 responses caused by the panel not yet having reconnected.
+CT_BANDWIDTH_SETTLE_SECS = 15
+
+# Retry delays (seconds) for CT/breaker fetch after a 502 / None response.
+# Each entry is a wait before the next attempt, in order.
+# Total extra time if all retries fail: sum(CT_FETCH_RETRY_DELAYS) seconds.
+CT_FETCH_RETRY_DELAYS = [15, 25]  # 2 retries → up to 40s extra per cycle
 
 # Gap handling for breaker daily energy sensors (power×time fallback).
 # When no data arrives for longer than the threshold, power×time integration

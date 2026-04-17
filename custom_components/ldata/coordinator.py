@@ -14,11 +14,6 @@ from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
-# REST polling interval for breaker/CT data (seconds)
-# This is a FALLBACK — only used when WS auto-detection confirms a panel
-# does not deliver breaker data via WebSocket.
-REST_POLL_INTERVAL = 60
-
 # Grace period (seconds) before REST poll loops start actively polling.
 # This gives the WebSocket time to connect, subscribe, and prove whether
 # it delivers breaker data. If WS delivers breaker data within this window,
@@ -158,32 +153,32 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         )
         await asyncio.sleep(WS_DETECTION_GRACE_PERIOD)
         
-        if self._service.needs_rest_poll:
+        if self._service.needs_breaker_poll:
             _LOGGER.info(
-                f"[v{self._service.version}] REST poll loop: WS did not deliver breaker data for panels "
-                f"{[pid for pid, need in self._service._panel_needs_rest_poll.items() if need]} — "
-                f"enabling REST polling as fallback"
+                f"[v{self._service.version}] REST poll loop: enabling breaker energy polling for panels "
+                f"{[pid for pid, need in self._service._panel_needs_breaker_poll.items() if need]} — "
+                f"energyConsumption/energyImport only arrive via REST (not WebSocket)"
             )
         else:
             _LOGGER.debug(
-                f"[v{self._service.version}] REST poll loop: all panels receiving breaker data via WS — "
-                f"REST polling not needed (will continue monitoring)"
+                f"[v{self._service.version}] REST poll loop: no panels with breakers found — "
+                f"REST polling not needed"
             )
-        
+
         while not self._service._shutdown_requested:
             try:
                 poll_interval = max(
                     HA_INFORM_RATE_MIN,
                     self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
                 )
-                
+
                 await asyncio.sleep(poll_interval)
-                
+
                 if self._service._shutdown_requested:
                     break
-                
-                # Only poll if at least one panel needs it
-                if not self._service.needs_rest_poll:
+
+                # Only poll if at least one panel has breakers with energy counters
+                if not self._service.needs_breaker_poll:
                     continue
                 
                 # Run the blocking REST calls in executor
@@ -324,10 +319,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         """Log data based on user options."""
         options = self.config_entry.options
         
-        # Check if "Log All Raw Data" is enabled
-        if options.get("log_all_raw", False):
+        # Check if "Log All Parsed Data" is enabled
+        if options.get("log_parsed_data", False):
             redacted_data = self._redact_data(data)
-            _LOGGER.warning("Leviton %s Full Data: %s", source, redacted_data)
+            _LOGGER.warning("Leviton %s Parsed Data: %s", source, redacted_data)
         
         # Check if specific field logging is enabled
         elif options.get("enable_specific_logging", False):

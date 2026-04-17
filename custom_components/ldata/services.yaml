@@ -39,3 +39,24 @@ reset_energy_baseline:
           max: 10000000
           step: 0.001
           mode: box
+
+reset_panel_energy:
+  name: Reset all panel energy sensors
+  description: >-
+    Reset all daily and lifetime energy sensors for a WHEM panel in one
+    operation. Use this after a panel factory reset, when all hardware energy
+    counters drop to zero simultaneously. All daily sensor baselines are
+    cleared (daily totals restart from 0) and all lifetime sensor guards are
+    released (each will accept the next API reading unconditionally).
+    Select any device that belongs to the panel — the panel itself, a breaker,
+    or a CT. Check the Home Assistant log for a per-sensor reset summary.
+  fields:
+    device_id:
+      name: Panel device
+      description: >-
+        Any device belonging to the WHEM panel — the panel, a breaker, or a CT.
+        All energy sensors for the resolved panel will be reset.
+      required: true
+      selector:
+        device:
+          integration: ldata

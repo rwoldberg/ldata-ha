@@ -5,7 +5,7 @@
                 "data": {
                     "username": "Nome de utilizador my.leviton.com",
                     "password": "Palavra-passe my.leviton.com",
-                    "three_phase": "Serviço de Rede 120/208V (Apartamento/Condomínio)",
+                    "three_phase": "Serviço de rede 120/208V (Apartamento/Condomínio)",
                     "allow_breaker_control": "Permitir controlo de disjuntores"
                 },
                 "title": "Configurar LDATA"
@@ -22,12 +22,11 @@
             "cannot_connect": "Não foi possível conectar",
             "invalid_auth": "Autenticação inválida",
             "unknown": "Erro desconhecido",
-            "invalid_2fa": "Código de dois fatores inválido. Por favor, tente novamente.",
-            "2fa_expired": "Código de dois fatores expirado. Por favor, reinicie a configuração.",
-            "2fa_required": "Autenticação de dois fatores necessária"
+            "invalid_2fa": "Código de dois fatores inválido. Por favor, tente novamente."
         },
         "abort": {
-            "already_configured": "O dispositivo já está configurado"
+            "already_configured": "O dispositivo já está configurado",
+            "reauth_successful": "Reautenticação bem-sucedida"
         }
     },
     "options": {
@@ -35,30 +34,30 @@
             "init": {
                 "title": "Opções Leviton LDATA",
                 "data": {
-                    "three_phase": "Serviço de Rede 120/208V (Apartamento/Condomínio)",
+                    "three_phase": "Serviço de rede 120/208V (Apartamento/Condomínio)",
                     "allow_breaker_control": "Permitir controlo de disjuntores",
-                    "gap_handling": "Gestão de Interrupções (firmware antigo)",
-                    "gap_threshold": "Limiar de Interrupção (mins)",
+                    "gap_handling": "Gestão de interrupções (firmware antigo apenas)",
+                    "gap_threshold": "Limiar de interrupção (mins)",
                     "ha_inform_rate": "Taxa de informação HA (segundos)",
                     "log_warnings": "Registar erros gerais de integração",
-                    "log_data_warnings": "Registar avisos de dados (Picos/Reposições)",
-                    "log_all_raw": "Registar String WebSocket Bruta",
-                    "log_parsed_data": "Registar Todos os Dados Analisados",
-                    "enable_specific_logging": "Ativar o registo de campos específicos",
+                    "log_data_warnings": "Registar avisos de valores de dados (picos/reposições)",
+                    "log_all_raw": "Registar string WebSocket bruta",
+                    "log_parsed_data": "Registar todos os dados analisados",
+                    "enable_specific_logging": "Ativar registo de campos específicos",
                     "log_fields": "Campos a registar"
                 },
                 "data_description": {
-                    "ha_inform_rate": "Com que frequência atualizar os sensores no Home Assistant (2-600 segundos).",
-                    "three_phase": "Ative esta opção APENAS se viver num apartamento ou edifício com uma instalação de rede 120/208V. Isto calcula corretamente as tensões dos disjuntores bipolares utilizando a matemática de 208V em vez de 240V. Não ative esta opção para uma casa residencial padrão.",
-                    "allow_breaker_control": "Quando ativado, o HA criará interruptores para acionar/repor disjuntores.",
-                    "gap_handling": "Reserva para firmware antigo sem contadores. Ignorar: mais seguro. Extrapolar: última potência. Média: compromisso. Firmware 2.0+ usa contadores de hardware e ignora isto.",
-                    "gap_threshold": "Tempo sem dados antes da ativação (1-30 minutos). Apenas modo de reserva.",
+                    "ha_inform_rate": "Com que frequência atualizar os sensores no Home Assistant (2-600 segundos). Valores mais baixos = mais responsivo mas maior carga do sistema e escritas na BD.",
+                    "three_phase": "Ativar apenas se o seu serviço for trifásico 120/208V (comum em apartamentos e condomínios com transformadores de serviço partilhados). Neste modo, as tensões dos disjuntores bipolares são multiplicadas por √3/2 (~0,866) para reportar a tensão correta de 208V linha a linha em vez dos incorretos 240V. NÃO ativar para serviço residencial monofásico padrão 120/240V.",
+                    "allow_breaker_control": "Quando ativado, o HA criará entidades de interruptor permitindo acionar/repor disjuntores. Quando desativado, os disjuntores são tratados apenas como sensores.",
+                    "gap_handling": "Reserva para firmware antigo sem contadores de energia de hardware. Como os sensores de energia diária dos disjuntores gerem lacunas quando não são recebidos dados. Ignorar: mais seguro. Extrapolar: assumir última potência conhecida. Média: compromisso. Painéis com firmware 2.0+ usam contadores de hardware e ignoram esta definição.",
+                    "gap_threshold": "Tempo sem dados antes da ativação da gestão de interrupções (1-30 minutos). Aplica-se apenas à reserva de potência×tempo em firmware antigo.",
                     "log_warnings": "Registar falhas da integração ou erros web.",
-                    "log_data_warnings": "Registar dados em falta ou inconsistentes.",
-                    "log_all_raw": "Registar a string JSON exata e não analisada recebida diretamente do WebSocket Leviton (AVISO: Contém tokens/IDs não ocultados).",
-                    "log_parsed_data": "Registar o dicionário completo de dados analisados (após ocultação) que a integração retém da API/WebSocket.",
-                    "enable_specific_logging": "Registar qualquer campo especificado. Os nomes dos campos podem ser encontrados ativando brevemente 'Registar Todos os Dados Analisados'.",
-                    "log_fields": "Para encontrar os nomes dos campos, ative 'Registar Todos os Dados Analisados' e verifique os registos do Home Assistant. Introduza acima separados por vírgulas."
+                    "log_data_warnings": "Registar avisos de inconsistências de dados da Leviton (picos/reposições).",
+                    "log_all_raw": "Registar a string WebSocket bruta tal como recebida da Leviton. Aviso: a saída não é expurgada e conterá tokens de autenticação e IDs de dispositivos. Desativar quando não estiver a depurar ativamente.",
+                    "log_parsed_data": "Registar todos os campos de disjuntores e painéis após analisar cada atualização WebSocket ou REST. Útil para verificar valores sem ativar o registo WebSocket bruto.",
+                    "enable_specific_logging": "Registar qualquer campo especificado. Os nomes dos campos podem ser encontrados ativando brevemente 'Registar todos os dados analisados'.",
+                    "log_fields": "Para encontrar nomes de campos, ative 'Registar todos os dados analisados' e consulte os registos do Home Assistant. Introduzir acima separados por vírgulas."
                 }
             }
         }

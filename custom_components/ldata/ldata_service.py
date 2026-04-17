@@ -15,7 +15,10 @@ import requests
 import asyncio
 import aiohttp
 
-from .const import _LEG1_POSITIONS, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT
+from .const import (
+    _LEG1_POSITIONS, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
+    CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
+)
 
 try:
     # Read manifest.json dynamically to get the version
@@ -94,9 +97,14 @@ class LDATAService:
         
         # Per-panel CT polling flag.
         # CT energy counters require bandwidth toggle + REST poll to update.
-        # Breaker data (power, energyConsumption) arrives via WebSocket — no REST needed.
         # Key: panel_id, Value: True if panel has CTs requiring polling
         self._panel_needs_rest_poll: dict[str, bool] = {}
+        # Per-panel breaker energy polling flag.
+        # energyConsumption/energyImport fields NEVER appear in WebSocket traffic
+        # (confirmed by HAR analysis) — they only arrive via REST GET /residentialBreakers.
+        # All panels with real breakers need periodic bandwidth toggle + breaker REST fetch.
+        # This is INDEPENDENT of CT polling (_panel_needs_rest_poll).
+        self._panel_needs_breaker_poll: dict[str, bool] = {}
         # Track whether panels have hardware energy counters (energyConsumption).
         # Set True when we see non-None consumption data from a breaker.
         # When False, breaker daily sensors fall back to power×time integration.
@@ -128,9 +136,6 @@ class LDATAService:
         self._breaker_zero_count: dict[str, int] = {}
         _ZERO_CONFIRM_THRESHOLD = 3
         self._ZERO_CONFIRM_THRESHOLD = _ZERO_CONFIRM_THRESHOLD
-        # Stash the last-known-good values so we can hold them during
-        # the zero-confirmation window.  Keyed by breaker_id.
-        self._breaker_last_good: dict[str, dict] = {}
         # Track the timestamp of the last zero-counter increment per breaker.
         # If too much wall-clock time passes between increments (e.g. because
         # a non-zero reading arrived in between), the counter resets.
@@ -143,6 +148,10 @@ class LDATAService:
         # in this set, zero-counter increments for its breakers are suppressed
         # so that the transient zeros caused by bandwidth:0 don't accumulate.
         self._panels_in_bandwidth_toggle: set[str] = set()
+        # Last observed Leviton cloud API version string (e.g. "1.57.1").
+        # Populated on the first apiversion heartbeat; a WARNING is logged
+        # whenever the value changes so cloud updates are visible in HA logs.
+        self._leviton_api_version: str | None = None
 
     def _check_rate_limit(self) -> None:
         """Enforces a 10-second wait between login attempts."""
@@ -159,13 +168,18 @@ class LDATAService:
         LDATAService._last_login_attempt_time = time.time()
 
     def _test_internet_connectivity(self) -> str:
-        """Helper to check if google.com is resolvable."""
+        """Return 'ACTIVE' if google.com is resolvable, 'DOWN' otherwise.
+
+        Blocking DNS lookup — must be run via run_in_executor from async contexts.
+        Used to distinguish 'no internet' from 'Leviton cloud unreachable' in
+        the WebSocket reconnect loop.
+        """
         try:
             socket.gethostbyname("google.com")
             return "ACTIVE"
         except socket.error:
             return "DOWN"
-            
+
     def _get_clean_error_msg(self, response_text: str) -> str:
         """Helper to strip HTML and deduplicate common gateway errors."""
         # Strip HTML tags
@@ -833,6 +847,27 @@ class LDATAService:
                 )
                 return False  # REJECT — hold old values, don't count
 
+            # ── WebSocket source: accept immediately ──
+            # WS events are change-driven — the Leviton cloud only fires a
+            # ResidentialBreaker notification when power genuinely changes.
+            # A single zero event from WS therefore means the device is truly
+            # off; no multi-read confirmation is needed (and none is possible,
+            # since the cloud won't send another event until power changes again).
+            #
+            # The bandwidth-toggle guard above already handles the only known
+            # source of spurious WS zeros, so anything reaching here is real.
+            #
+            # REST polling still uses the multi-count path below because a
+            # single REST read can catch a transient (e.g., a firmware glitch
+            # mid-cycle), so confirmation there remains appropriate.
+            if source in ("WS", "WS-bulk"):
+                _LOGGER.debug(
+                    f"[v{self.version}] {source}: Accepting zero for breaker "
+                    f"{breaker_id} (WS is event-driven — single zero is sufficient)"
+                )
+                self._breaker_zero_count[breaker_id] = 0
+                return True  # ACCEPT — device genuinely off
+
             # ── Time-based decay ──
             # If the last zero was too long ago, reset the counter.
             # This prevents slow accumulation across unrelated events.
@@ -1043,7 +1078,15 @@ class LDATAService:
             if "energyConsumption2" in raw:
                 existing["consumption2"] = float(raw["energyConsumption2"]) if raw["energyConsumption2"] is not None else cached_ec2
             existing["consumption"] = existing["consumption1"] + existing["consumption2"]
-        
+
+            # NOTE: Do NOT use energyConsumption > 0 to promote a panel to
+            # hw-counter mode.  In firmware 2.1.0, energyConsumption is a
+            # PERIOD counter that resets with every bandwidth toggle (1→0→1).
+            # Non-zero values are expected every poll cycle and do not indicate
+            # that a lifetime hardware counter is available.
+            # _panel_has_hw_counters is set once at startup in parse_panels()
+            # based on the firmware version; it must not be changed dynamically.
+
         if "energyImport" in raw or "energyImport2" in raw:
             cached_ei1 = existing.get("import1", 0)
             cached_ei2 = existing.get("import2", 0)
@@ -1238,17 +1281,19 @@ class LDATAService:
             except (ValueError, IndexError):
                 fw_major = 0
             
-            # WS-first strategy: ALL panels start assuming WebSocket delivers
-            # breaker/CT data. REST polling is only enabled after auto-detection
-            # CT polling: only enabled when CTs are discovered for this panel.
-            # Breakers no longer need REST polling — WS delivers energyConsumption.
+            # _panel_needs_rest_poll tracks CT panels only.
+            # CT energy counters need a bandwidth toggle to refresh (hardware requirement).
+            # Breaker energy (energyConsumption/energyImport) is tracked separately via
+            # _panel_needs_breaker_poll and is always REST-polled — WebSocket does not
+            # deliver these fields (confirmed by HAR traffic analysis).
             if panel["id"] not in self._panel_needs_rest_poll:
                 self._panel_needs_rest_poll[panel["id"]] = False
                 self._ws_iotwhem_count[panel["id"]] = 0
             _LOGGER.info(
                 f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' "
                 f"({panel_data['panel_type']}) firmware {fw_str} "
-                f"— WebSocket for breaker data, CT polling enabled if CTs present"
+                f"— WebSocket for breaker data"
+                + (", CT REST polling disabled (v2: energy counters unused, power via WS)" if fw_major >= 2 else ", CT REST polling enabled if CTs present")
             )
             if three_phase is False:
                 panel_data["voltage"] = (
@@ -1296,8 +1341,14 @@ class LDATAService:
             # Setup the CT list.
             if "CTs" in panel and panel["CTs"]: # Add check if CTs exist and is not None
                 _LOGGER.debug(f"[v{self.version}] Panel {panel.get('name', panel['id'])}: Found {len(panel['CTs'])} CTs in API response")
-                # Enable CT REST polling for this panel — CTs need bandwidth toggle
-                self._panel_needs_rest_poll[panel["id"]] = True
+                # CT REST polling (bandwidth toggle + GET /iotCts) is only needed on
+                # v1 firmware where energyConsumption/energyImport are working lifetime
+                # counters that require the toggle to refresh.
+                # On v2+ firmware the energy counters are broken period counters, CT daily
+                # sensors use power×time from WS instead, and the bandwidth toggle causes
+                # a 10-20s cloud disconnect — so REST polling is disabled entirely for v2.
+                if fw_major < 2:
+                    self._panel_needs_rest_poll[panel["id"]] = True
                 for ct in panel["CTs"]:
                     if ct["usageType"] != "NOT_USED":
                         # Create the CT data
@@ -1476,7 +1527,14 @@ class LDATAService:
                         breaker_data["import1"] = self.none_to_zero(breaker, "energyImport")
                         breaker_data["import2"] = self.none_to_zero(breaker, "energyImport2")
                         breaker_data["import"] = breaker_data["import1"] + breaker_data["import2"]
-                        
+                        # Circuit classification set by the user in the Leviton app.
+                        # Known values include: 'Solar', 'Oven', 'Dryer', 'Microwave',
+                        # 'Air Conditioner', 'Heating', 'Refrigerator', 'Dishwasher',
+                        # 'Washing Machine', 'Lights', 'Outlets', 'Mixed Use', 'None'.
+                        # 'Solar' is the authoritative indicator that this breaker is a
+                        # generation source — used in sensor.py to gate import entities.
+                        breaker_data["branch_type"] = breaker.get("branchType") or ""
+
                         # Add the breaker to the list.
                         breakers[breaker["id"]] = breaker_data
                         try:
@@ -1488,27 +1546,52 @@ class LDATAService:
             status_data[panel["id"] + "totalPower"] = totalPower
             
             # Detect hardware energy counters for this panel.
-            # If any breaker has a non-zero energyConsumption, the panel supports
-            # hardware counters and we can use them for daily energy tracking.
-            # If not, fall back to power×time integration.
-            has_hw = False
-            for b_id, b_data in breakers.items():
-                if b_data.get("panel_id") == panel["id"]:
-                    # Check our parsed data — consumption > 0 means counters exist
-                    if b_data.get("consumption", 0) > 0 or b_data.get("consumption1", 0) > 0:
-                        has_hw = True
-                        break
-            self._panel_has_hw_counters[panel["id"]] = has_hw
-            if has_hw:
+            #
+            # Firmware 2.x changed energyConsumption from a lifetime counter to a
+            # PERIOD counter that resets with every bandwidth toggle (1→0→1).
+            # energyImport is similarly unreliable as a daily tracking source on v2
+            # (short period readings, not lifetime totals for load breakers).
+            #
+            # For v2+ panels we always use power×time integration for daily energy.
+            # For v1 panels we check whether any breaker already has a non-zero
+            # energyConsumption at startup (pre-toggle null → 0 means no counters).
+            if fw_major >= 2:
+                has_hw = False
                 _LOGGER.info(
-                    f"[v{self.version}] Panel '{panel.get('name', panel['id'])}': "
-                    f"hardware energy counters detected — using for daily energy"
+                    f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' "
+                    f"firmware {fw_str}: v2+ panel — energyConsumption is a period "
+                    f"counter, using power×time integration for all daily energy sensors"
                 )
             else:
-                _LOGGER.info(
-                    f"[v{self.version}] Panel '{panel.get('name', panel['id'])}': "
-                    f"no hardware energy counters — using power×time fallback for daily energy"
+                has_hw = False
+                for b_id, b_data in breakers.items():
+                    if b_data.get("panel_id") == panel["id"]:
+                        if b_data.get("consumption", 0) > 0 or b_data.get("consumption1", 0) > 0:
+                            has_hw = True
+                            break
+                if has_hw:
+                    _LOGGER.info(
+                        f"[v{self.version}] Panel '{panel.get('name', panel['id'])}': "
+                        f"hardware energy counters detected — using for daily energy"
+                    )
+                else:
+                    _LOGGER.info(
+                        f"[v{self.version}] Panel '{panel.get('name', panel['id'])}': "
+                        f"no hardware energy counters — using power×time fallback for daily energy"
+                    )
+            self._panel_has_hw_counters[panel["id"]] = has_hw
+
+            # Breaker REST polling (energyConsumption/energyImport via GET /residentialBreakers).
+            # On v2+ panels these counters are not used for daily energy (period counters),
+            # so skip the REST poll entirely — saves bandwidth-toggle disruptions.
+            # On v1 panels, WebSocket does not deliver energyConsumption, so REST poll is needed.
+            if fw_major >= 2:
+                self._panel_needs_breaker_poll[panel["id"]] = False
+            else:
+                panel_breaker_count = sum(
+                    1 for b in breakers.values() if b.get("panel_id") == panel["id"]
                 )
+                self._panel_needs_breaker_poll[panel["id"]] = panel_breaker_count > 0
         
         # Save cache for WS
         self.status_data = status_data
@@ -1590,21 +1673,22 @@ class LDATAService:
 
     def refresh_breaker_data(self) -> bool:
         """Re-fetch breaker data from the REST API and merge into status_data.
-        
-        FALLBACK mechanism for panels without hardware energy counters.
-        Only activates for panels where _panel_needs_rest_poll is True
-        (older firmware, or WS not delivering breaker data).
-        
+
+        Runs for ALL panels that have real breakers — energyConsumption/energyImport
+        only arrive via GET /residentialBreakers (after a bandwidth toggle) and are
+        never delivered by WebSocket.  CT data is also refreshed here for panels that
+        have CTs (_panel_needs_rest_poll), since the bandwidth toggle is already done.
+
         Returns True if data was successfully refreshed.
         """
         if not self.status_data or not self.status_data.get("panels"):
             return False
-        
+
         if not self.auth_token:
             return False
-        
-        # Check if any panel needs REST polling
-        if not any(self._panel_needs_rest_poll.values()):
+
+        # Check if any panel has real breakers that need polling
+        if not any(self._panel_needs_breaker_poll.values()):
             return False
         
         # Serialize with CT poll to prevent bandwidth:0 toggle from corrupting
@@ -1620,36 +1704,35 @@ class LDATAService:
 
     def _refresh_breaker_data_locked(self) -> bool:
         """Inner implementation of refresh_breaker_data, called under _rest_poll_lock.
-        
-        On panels with hardware energy counters, skips the breaker REST fetch
-        (those get data via WS) but still does the bandwidth toggle and CT fetch
-        since CTs always need the toggle to refresh their energy counters.
+
+        Runs a bandwidth toggle + breaker REST fetch for every panel that has real
+        breakers (_panel_needs_breaker_poll).  energyConsumption/energyImport are
+        never delivered by WebSocket — REST is the only source.
+
+        For panels that also have CTs (_panel_needs_rest_poll), CT data is fetched
+        in the same cycle (the bandwidth toggle is already done, so no extra cost).
+        The dedicated _ct_poll_loop runs more frequently for CT-only refreshes.
         """
-        
+
         new_status_data = self.status_data.copy()
         breakers = new_status_data.get("breakers", {}).copy()
         cts = new_status_data.get("cts", {}).copy()
         updated = False
         panels_with_power_change = set()
-        
+
         for panel_data in new_status_data.get("panels", []):
             panel_id = panel_data.get("id")
             panel_type = panel_data.get("panel_type", "WHEMS")
-            
-            if not panel_id or not self._panel_needs_rest_poll.get(panel_id, False):
+
+            # Skip panels with no real breakers
+            if not panel_id or not self._panel_needs_breaker_poll.get(panel_id, False):
                 continue
-            
-            has_hw = self._panel_has_hw_counters.get(panel_id, False)
-            
+
             try:
                 self._bandwidth_toggle(panel_id, panel_type)
-                
-                # Fetch fresh breaker data for ALL panels.
-                # Power/current from REST keeps watts/amps sensors alive
-                # even when the IotWhem WS doesn't deliver per-breaker
-                # power data.  The zero-transition guard in the sensor
-                # layer handles any transient zeros from the bandwidth
-                # toggle — no need to filter at the data layer.
+
+                # Fetch fresh breaker data — energyConsumption/energyImport only
+                # arrive here; WebSocket never carries these fields.
                 raw_breakers = self.get_Whems_breakers(panel_id)
                 if raw_breakers:
                     for breaker in raw_breakers:
@@ -1668,18 +1751,33 @@ class LDATAService:
                                     panels_with_power_change.add(existing.get("panel_id"))
                                 breakers[b_id] = existing
                                 updated = True
-                
-                # Fetch fresh CT data
-                raw_cts = self.get_Whems_CT(panel_id)
-                if raw_cts:
-                    for ct in raw_cts:
-                        if ct.get("usageType") != "NOT_USED":
-                            ct_id = str(ct["id"])
-                            if ct_id in cts:
-                                existing_ct = cts[ct_id].copy()
-                                self._apply_ct_update(existing_ct, ct)
-                                cts[ct_id] = existing_ct
-                                updated = True
+
+                # Fetch CT data only for panels that have CTs.
+                # The bandwidth toggle is already done above; apply the same
+                # settle delay and retry logic used in the dedicated CT poll
+                # so that firmware v2.1.0 reconnection time is absorbed here too.
+                if self._panel_needs_rest_poll.get(panel_id, False):
+                    time.sleep(CT_BANDWIDTH_SETTLE_SECS)
+                    raw_cts = self.get_Whems_CT(panel_id)
+                    for attempt, delay in enumerate(CT_FETCH_RETRY_DELAYS, start=1):
+                        if raw_cts is not None:
+                            break
+                        _LOGGER.debug(
+                            f"[v{self.version}] CT fetch (breaker poll) returned None for panel {panel_id} "
+                            f"(attempt {attempt}/{len(CT_FETCH_RETRY_DELAYS)}) "
+                            f"— waiting {delay}s before retry"
+                        )
+                        time.sleep(delay)
+                        raw_cts = self.get_Whems_CT(panel_id)
+                    if raw_cts:
+                        for ct in raw_cts:
+                            if ct.get("usageType") != "NOT_USED":
+                                ct_id = str(ct["id"])
+                                if ct_id in cts:
+                                    existing_ct = cts[ct_id].copy()
+                                    self._apply_ct_update(existing_ct, ct)
+                                    cts[ct_id] = existing_ct
+                                    updated = True
                 
             except LDATAAuthError:
                 raise
@@ -1698,8 +1796,18 @@ class LDATAService:
 
     @property
     def needs_rest_poll(self) -> bool:
-        """Return True if any panel requires REST polling for breaker/CT data."""
+        """Return True if any panel requires REST polling for CT data."""
         return any(self._panel_needs_rest_poll.values())
+
+    @property
+    def needs_breaker_poll(self) -> bool:
+        """Return True if any panel requires REST polling for breaker energy data.
+
+        energyConsumption/energyImport only arrive via GET /residentialBreakers —
+        they are never delivered by WebSocket.  Any panel with real breakers needs
+        this poll, regardless of whether it also has CTs.
+        """
+        return any(self._panel_needs_breaker_poll.values())
 
     def panel_has_hw_counters(self, panel_id: str) -> bool:
         """Return True if the given panel has hardware energy counters."""
@@ -1750,8 +1858,25 @@ class LDATAService:
             try:
                 panel_type = panel_data.get("panel_type", "WHEMS")
                 self._bandwidth_toggle(panel_id, panel_type)
-                
+
+                # Firmware v2.1.0: bandwidth:0 causes the panel to disconnect
+                # from the cloud.  Reconnection after bandwidth:1 takes 10-20s
+                # in v2.1.0 (vs. near-instant in earlier firmware).  Waiting
+                # CT_BANDWIDTH_SETTLE_SECS before the first fetch avoids most
+                # 502 errors without needing to burn a retry.
+                time.sleep(CT_BANDWIDTH_SETTLE_SECS)
+
                 raw_cts = self.get_Whems_CT(panel_id)
+                for attempt, delay in enumerate(CT_FETCH_RETRY_DELAYS, start=1):
+                    if raw_cts is not None:
+                        break
+                    _LOGGER.debug(
+                        f"[v{self.version}] CT fetch returned None for panel {panel_id} "
+                        f"(attempt {attempt}/{len(CT_FETCH_RETRY_DELAYS)}) "
+                        f"— waiting {delay}s before retry"
+                    )
+                    time.sleep(delay)
+                    raw_cts = self.get_Whems_CT(panel_id)
                 if raw_cts:
                     for ct in raw_cts:
                         if ct.get("usageType") != "NOT_USED":
@@ -2088,7 +2213,25 @@ class LDATAService:
                                 },
                                 timeout=aiohttp.ClientTimeout(total=10)
                             ) as resp:
-                                _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
+                                api_ver = (await resp.text()).strip()
+                                if not api_ver:
+                                    _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status} (empty body)")
+                                elif self._leviton_api_version is None:
+                                    # First observation — store quietly at debug level.
+                                    self._leviton_api_version = api_ver
+                                    _LOGGER.debug(f"[v{self.version}] Leviton API version: {api_ver}")
+                                elif api_ver != self._leviton_api_version:
+                                    # Version changed — surface at WARNING so it's
+                                    # visible without enabling debug logging.
+                                    _LOGGER.warning(
+                                        f"[v{self.version}] Leviton API version changed: "
+                                        f"{self._leviton_api_version} → {api_ver}. "
+                                        f"New fields or endpoints may be available — "
+                                        f"consider capturing a HAR and checking for integration updates."
+                                    )
+                                    self._leviton_api_version = api_ver
+                                else:
+                                    _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
                         except asyncio.CancelledError:
                             raise
                         except Exception as e:
@@ -2117,7 +2260,20 @@ class LDATAService:
                             compress=15,
                         )
                     except Exception as e:
-                        _LOGGER.warning(f"[v{self.version}] WS connect failed: {e}")
+                        loop = asyncio.get_running_loop()
+                        connectivity = await loop.run_in_executor(
+                            None, self._test_internet_connectivity
+                        )
+                        if connectivity == "DOWN":
+                            _LOGGER.warning(
+                                f"[v{self.version}] WS connect failed — "
+                                f"no internet connectivity: {e}"
+                            )
+                        else:
+                            _LOGGER.warning(
+                                f"[v{self.version}] WS connect failed — "
+                                f"internet up but Leviton cloud unreachable: {e}"
+                            )
                         notify_connection(False)
                         await asyncio.sleep(reconnect_delay)
                         reconnect_delay = min(reconnect_delay * 2, max_delay)
@@ -2323,11 +2479,16 @@ class LDATAService:
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 message_count += 1
                                 last_data_time = current_time
-                                
+
                                 if message_count % 100 == 0:
                                     elapsed = current_time - start_time
                                     _LOGGER.debug(f"[v{self.version}] WS: {message_count} msgs, {elapsed:.0f}s, {bandwidth_put_count} PUTs, {heartbeat_count} heartbeats")
-                                
+
+                                # Log raw unredacted WS string if enabled.
+                                # Warning: contains auth tokens and device IDs.
+                                if self.entry and self.entry.options.get("log_all_raw", False):
+                                    _LOGGER.warning(f"[v{self.version}] WS raw: {msg.data}")
+
                                 try:
                                     payload = json.loads(msg.data)
                                     if payload.get("type") == "notification":

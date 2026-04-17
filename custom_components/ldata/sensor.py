@@ -107,6 +107,58 @@ def _log_warnings_enabled(coordinator) -> bool:
     return coordinator.config_entry.options.get("log_warnings", True)
 
 
+# ── Spike-detection thresholds ────────────────────────────────────────────────
+# Used by LDATACTOutputSensor to filter transient hardware glitches.
+_CT_SPIKE_ABSOLUTE_W   = 3000   # CT reading above this on first update is suspicious
+_SPIKE_RATIO_THRESHOLD = 10     # new_value > old_value × this  → spike candidate
+_SPIKE_MIN_DELTA_W     = 2000   # minimum absolute Watt delta to trigger ratio check
+
+
+def _calc_pxt_energy(
+    time_span: float,
+    last_power: float | None,
+    current_power: float,
+    current_state: float,
+    options: dict,
+    entity_id: str,
+    log_enabled: bool,
+) -> float:
+    """Apply gap-handling policy and return new cumulative energy (kWh).
+
+    Args:
+        time_span:     Seconds since last update.
+        last_power:    Last recorded power reading in Watts (None = unknown).
+        current_power: Current power reading in Watts.
+        current_state: Current accumulated energy in kWh.
+        options:       Config-entry options dict (for gap threshold/mode).
+        entity_id:     Entity ID string (for log messages).
+        log_enabled:   Whether data-warning debug logs are enabled.
+    """
+    gap_threshold_secs = options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT) * 60
+    gap_mode = options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT)
+
+    if time_span > gap_threshold_secs:
+        if gap_mode == GAP_HANDLING_SKIP:
+            if log_enabled:
+                _LOGGER.debug(
+                    "Gap detected for %s: %.1fs (threshold %.1fs) — skipping",
+                    entity_id, time_span, gap_threshold_secs,
+                )
+            return current_state  # no change
+        elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
+            energy_kwh = ((last_power or 0) * time_span) / 3_600_000.0
+        elif gap_mode == GAP_HANDLING_AVERAGE:
+            avg_power = ((last_power or 0) + current_power) / 2.0
+            energy_kwh = (avg_power * time_span) / 3_600_000.0
+        else:
+            energy_kwh = 0.0
+    else:
+        avg_power = ((last_power or 0) + current_power) / 2.0
+        energy_kwh = (avg_power * time_span) / 3_600_000.0
+
+    return current_state + energy_kwh
+
+
 @dataclass(frozen=True, kw_only=True)
 class SensorDescription(SensorEntityDescription):
     """SensorEntityDescription for LDATA entities."""
@@ -211,21 +263,190 @@ async def async_setup_entry(
 
     ent_reg = er.async_get(hass)
 
+    def _breaker_has_hw_counters(b_data) -> bool:
+        """Return True if the breaker's panel uses hw energy counters (v1 firmware).
+
+        On v2+ firmware, energyImport is a PERIOD counter that is non-zero for
+        every breaker — including pure loads.  The _imp > 0 gate is only
+        meaningful on v1 panels where energyImport is a monotonic lifetime
+        counter that proves the breaker has exported energy to the grid.
+        """
+        panel_id = b_data.get("panel_id")
+        if panel_id and hasattr(coordinator, '_service') and coordinator._service:
+            return coordinator._service.panel_has_hw_counters(panel_id)
+        return True  # unknown firmware — assume v1 to be conservative
+
+    def _remove_registry_entry(uid: str) -> None:
+        """Remove an entity from the registry by unique_id if it exists."""
+        eid = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
+        if eid:
+            ent_reg.async_remove(eid)
+            _LOGGER.info("Removed spurious import sensor from registry: %s", eid)
+
     for breaker_id, breaker_data in coordinator.data.get("breakers", {}).items():
         entities_to_add.append(LDATADailyUsageSensor(coordinator, breaker_data, False, ""))
-        # Breaker Daily Import: only for solar-capable breakers.
-        # Primary gate: import > 0 — positive lifetime counter confirms this
-        # breaker has seen grid-export (solar/generator).
-        # Fallback gate: entity already exists in the registry — the counter
-        # was non-zero on a previous run but came back null/0 on this startup
-        # (none_to_zero artefact, or panel briefly offline during first fetch).
-        # Without the fallback, a previously-created import sensor disappears
-        # permanently after any HA restart where the initial REST fetch returns
-        # null for energyImport.
-        _imp = float(breaker_data.get("import", 0) or 0)
-        _daily_import_uid = f"{coordinator.user}-ldata_{breaker_id}_todaymw_import"
-        _has_daily_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _daily_import_uid) is not None
-        if _imp > 0 or _has_daily_import:
+
+        # Cache once — called in 3 places below (v1/v2 firmware detection).
+        _has_hw_counters = _breaker_has_hw_counters(breaker_data)
+
+        _imp  = float(breaker_data.get("import", 0) or 0)
+        _cons = float(breaker_data.get("consumption", 0) or 0)
+        _daily_import_uid    = f"{coordinator.user}-ldata_{breaker_id}_todaymw_import"
+        _lifetime_import_uid = f"{coordinator.user}-ldata_{breaker_id}__Import_kWh"
+        _has_daily_import    = ent_reg.async_get_entity_id("sensor", DOMAIN, _daily_import_uid)    is not None
+        _has_lifetime_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _lifetime_import_uid) is not None
+
+        # ── Import-sensor creation gates ──────────────────────────────────────
+        #
+        # v1 panels: energyImport is a monotonic lifetime counter.
+        #   Non-zero at startup proves this breaker has exported energy (solar/
+        #   generator).  Use it as the primary creation gate.
+        #
+        # v2 panels: energyImport is a PERIOD counter.
+        #   It resets every bandwidth toggle (~5 min) and is non-zero for ANY
+        #   breaker — including pure loads like an oven.  The _imp > 0 check is
+        #   meaningless here; instead use the ratio of import to consumption:
+        #
+        #     • Solar breaker  → period import >> period consumption
+        #       (the breaker exports; its consumption ≈ 0 or very small)
+        #     • Load breaker   → period import ≈ period consumption
+        #       (the firmware mirrors consumption into import as an artifact)
+        #
+        # Registry fallback (both v1 and v2): if a sensor already exists in
+        #   the entity registry from a prior legitimate run, keep recreating it
+        #   even when the current period counter returns null or 0.
+        #
+        # Spurious v2 registry cleanup: when import ≈ consumption AND both are
+        #   non-trivially non-zero, the registry entry is a load-breaker
+        #   artifact.  Actively remove it so HA orphans the entity and the user
+        #   can delete it — or it simply disappears on the next restart.
+        # ─────────────────────────────────────────────────────────────────────
+
+        # v1: non-zero lifetime counter = confirmed solar/generator
+        _imp_valid = _imp > 0 and _has_hw_counters
+
+        # v2: detect solar/generator breakers.
+        #
+        # PRIMARY — branchType field (API 1.57.1+):
+        #   Set by the user in the Leviton app; 'Solar' is authoritative.
+        #   Works at any time of day regardless of current period-counter values.
+        _branch_type = breaker_data.get("branch_type", "")
+        _branch_is_solar = _branch_type == "Solar"
+        #
+        # FALLBACK — period-counter ratio heuristic (older firmware / missing field):
+        #   Solar:  energyImport >> energyConsumption (exporting to bus).
+        #   Load:   energyImport ≈ energyConsumption (firmware mirrors cons→imp).
+        #   Require _imp > 0.05 to filter noise when the device is off (_cons = 0
+        #   makes the ratio check trivially True for any tiny artifact value).
+        _v2_ratio_signal = (
+            not _has_hw_counters
+            and not _branch_type           # only use when branchType is absent
+            and _imp > 0.05               # non-trivial export (not just noise)
+            and _imp > _cons * 3          # import far exceeds consumption
+        )
+        _v2_solar_signal = _branch_is_solar or _v2_ratio_signal
+
+        # ── Persisted load suppression ─────────────────────────────────────────
+        # suppressed_import_uids: breakers confirmed as load artifacts.
+        # Suppression is permanent — survives restarts even when appliance is off
+        # (and thus _cons ≈ 0, making runtime ratio detection unreliable).
+        _suppressed_uids: set = set(
+            config_entry.options.get("suppressed_import_uids", [])
+        )
+        _already_suppressed = (
+            _daily_import_uid in _suppressed_uids
+            or _lifetime_import_uid in _suppressed_uids
+        )
+
+        # ── Persisted solar confirmation ───────────────────────────────────────
+        # confirmed_solar_import_uids: breakers positively identified as solar/
+        # generator exporters.  On v2 panels this replaces the raw registry
+        # fallback (_has_daily_import / _has_lifetime_import) so that a
+        # historical registry entry for a load breaker (oven, dryer, …) does
+        # NOT cause its import entity to be recreated.
+        _confirmed_solar_uids: set = set(
+            config_entry.options.get("confirmed_solar_import_uids", [])
+        )
+        _is_confirmed_solar = (
+            _daily_import_uid in _confirmed_solar_uids
+            or _lifetime_import_uid in _confirmed_solar_uids
+        )
+
+        # Persist solar classification the first time we detect it.
+        if _v2_solar_signal and not _is_confirmed_solar:
+            _confirmed_solar_uids.add(_daily_import_uid)
+            _confirmed_solar_uids.add(_lifetime_import_uid)
+            hass.config_entries.async_update_entry(
+                config_entry,
+                options={**config_entry.options,
+                         "confirmed_solar_import_uids": list(_confirmed_solar_uids)},
+            )
+            _is_confirmed_solar = True
+            _LOGGER.info(
+                "Breaker '%s': confirmed solar/generator exporter — "
+                "import sensors will persist across restarts",
+                breaker_data.get("name", breaker_id),
+            )
+
+        # v2: import ≈ consumption = load-breaker firmware artifact.
+        # Never fires for breakers explicitly classified as solar by branchType —
+        # a solar breaker with small counter values (e.g. early morning) must not
+        # be misidentified as a load and have its import entities suppressed.
+        _v2_load_artifact = (not _branch_is_solar) and (
+            _already_suppressed or (
+                not _has_hw_counters
+                and _imp > 0
+                and _cons > 0.01          # both counters are non-trivially non-zero
+                and _imp <= _cons * 3     # import is not significantly above consumption
+            )
+        )
+
+        if _v2_load_artifact:
+            # Remove any spurious registry entries so these entities become
+            # orphaned (enabling deletion) and are not recreated.
+            _remove_registry_entry(_daily_import_uid)
+            _remove_registry_entry(_lifetime_import_uid)
+            _has_daily_import    = False
+            _has_lifetime_import = False
+            _is_confirmed_solar  = False
+            # Persist the suppression so it survives restarts even when the
+            # appliance is off (and thus _cons ≈ 0 next time).
+            options_patch: dict = {}
+            if not _already_suppressed:
+                _suppressed_uids.add(_daily_import_uid)
+                _suppressed_uids.add(_lifetime_import_uid)
+                options_patch["suppressed_import_uids"] = list(_suppressed_uids)
+            # Also evict from confirmed_solar if somehow present (defensive).
+            if _daily_import_uid in _confirmed_solar_uids or _lifetime_import_uid in _confirmed_solar_uids:
+                _confirmed_solar_uids.discard(_daily_import_uid)
+                _confirmed_solar_uids.discard(_lifetime_import_uid)
+                options_patch["confirmed_solar_import_uids"] = list(_confirmed_solar_uids)
+            if options_patch:
+                hass.config_entries.async_update_entry(
+                    config_entry,
+                    options={**config_entry.options, **options_patch},
+                )
+            _LOGGER.info(
+                "Breaker '%s': v2 load artifact detected "
+                "(import=%.3f kWh ≈ consumption=%.3f kWh) — "
+                "suppressing import sensors permanently",
+                breaker_data.get("name", breaker_id), _imp, _cons,
+            )
+
+        # For v2 panels, the registry fallback is replaced by the explicit
+        # confirmed-solar list.  A historical registry entry alone (from a
+        # load breaker that was spuriously created in a prior run) is no
+        # longer sufficient to recreate import entities.
+        # For v1 panels, the registry fallback is kept as-is (safe, since
+        # v1 only created import entities for genuine exporters).
+        _import_fallback = (
+            (_has_daily_import or _has_lifetime_import)
+            if _has_hw_counters
+            else _is_confirmed_solar
+        )
+
+        # Breaker Daily Import sensor
+        if _imp_valid or _v2_solar_signal or _import_fallback:
             entities_to_add.append(
                 LDATADailyUsageSensor(coordinator, breaker_data, False, "",
                                       breaker_energy_key="import")
@@ -236,12 +457,8 @@ async def async_setup_entry(
         entities_to_add.append(
             LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[2])
         )
-        # Add lifetime energy sensors. Consumption is created for all breakers.
-        # Import (solar production) uses the same gate as Daily Import above,
-        # plus its own registry check.
-        _lifetime_import_uid = f"{coordinator.user}-ldata_{breaker_id}__Import_kWh"
-        _has_lifetime_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _lifetime_import_uid) is not None
-        if _imp > 0 or _has_daily_import or _has_lifetime_import:
+        # Breaker Lifetime Import sensor
+        if _imp_valid or _v2_solar_signal or _import_fallback:
             entities_to_add.append(
                 LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[4])
             )
@@ -431,8 +648,10 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 self._last_update_time = float(attrs["last_update_time"])
             except (KeyError, ValueError, TypeError):
                 self._last_update_time = None
-            if "use_hw_counters" in attrs:
-                self._use_hw_counters = attrs["use_hw_counters"]
+            # NOTE: _use_hw_counters is intentionally NOT restored.
+            # Mode is re-detected on first update so that firmware changes
+            # (e.g. v1 → v2) and code fixes take effect immediately after
+            # an HA restart without stale cached mode overriding the detection.
             if "energy_key" in attrs:
                 self._energy_key = attrs["energy_key"]
 
@@ -524,11 +743,13 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 if val is not None:
                     try:
                         fval = float(val)
-                        # Reject 0.0 if we have a non-zero baseline — this is
-                        # almost certainly a stale/missing value from parse_panels
-                        # where none_to_zero converted None → 0.0, not a real
-                        # counter that happens to be exactly zero.
-                        if fval == 0.0 and self._midnight_baseline and self._midnight_baseline > 1.0:
+                        # Reject near-zero values when baseline is well above zero.
+                        # The bandwidth toggle (1→0→1) causes transient null/near-zero
+                        # readings for both energyConsumption and energyImport — this
+                        # guard covers both keys since _energy_key selects which field
+                        # is read.  A genuine counter can't drop from >1 kWh to <1 kWh
+                        # between poll cycles.
+                        if fval < 1.0 and self._midnight_baseline and self._midnight_baseline > 1.0:
                             return None
                         return fval
                     except (ValueError, TypeError):
@@ -537,16 +758,23 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
 
     def _detect_mode(self) -> bool:
         """Detect whether to use hardware counters or power×time fallback.
-        
+
         Returns True for hardware counters, False for power×time.
+
+        On firmware 2.x panels _panel_has_hw_counters is always False because
+        energyConsumption changed to a period counter (resets with bandwidth
+        toggle) and energyImport cannot reliably represent daily load-breaker
+        consumption.  All daily energy sensors on v2+ panels therefore use
+        power×time integration regardless of the energy key.
         """
-        # Check if ldata_service detected hw counters for this panel
+        # Defer to the service's per-panel hw-counter flag.
+        # parse_panels() sets this False for all v2+ panels.
         if hasattr(self.coordinator, '_service') and self.coordinator._service:
             return self.coordinator._service.panel_has_hw_counters(self.panel_id)
-        # Fallback: check if consumption data exists on this breaker
-        if not self.panel_total:
-            consumption = self._get_breaker_consumption(self.breaker_data["id"])
-            return consumption is not None and consumption > 0
+        # Service unavailable — default to power×time (safe fallback).
+        # The old fallback of consumption > 0 is removed: in v2 firmware
+        # energyConsumption is a period counter that is non-zero between polls,
+        # which would incorrectly trigger hw-counter mode.
         return False
 
     @callback
@@ -618,13 +846,12 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self._consecutive_none = 0
 
         if is_new_day:
-            if self._midnight_baseline is not None and self._midnight_baseline > 10.0 and consumption < 1.0:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.warning(
-                        "New-day reset for %s: consumption=%.3f is suspiciously low "
-                        "(previous baseline=%.3f) — carrying forward old baseline",
-                        self.entity_id, consumption, self._midnight_baseline
-                    )
+            if consumption < 1.0:
+                # energyConsumption is null/0 at midnight — bandwidth toggle hasn't
+                # run yet.  Defer baseline to the first real REST poll value so we
+                # don't set baseline=0 and lose the morning's energy to a
+                # MAX_DAILY_ENERGY_KWH re-baseline when the real value arrives.
+                self._midnight_baseline = None
                 self._state = 0.0
                 return
 
@@ -633,6 +860,8 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             return
 
         if self._midnight_baseline is None:
+            # Deferred from midnight (null CT values) or lost on restart.
+            # First real poll value becomes the baseline.
             self._midnight_baseline = consumption
             self._state = 0.0
             return
@@ -643,7 +872,7 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 _LOGGER.debug(
                     "Skipping negative daily for %s: consumption=%.3f "
                     "< baseline=%.3f — waiting for correction",
-                    consumption, self.entity_id, self._midnight_baseline
+                    self.entity_id, consumption, self._midnight_baseline
                 )
             return
 
@@ -730,14 +959,22 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
 
         # ─── Standard Single-Baseline Logic ───
         if is_new_day:
-            if self._midnight_baseline is not None and self._midnight_baseline > 10.0 and current_lifetime_sum < 1.0:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.warning(
-                        "Panel total new-day reset for %s: sum=%.3f is suspiciously low "
-                        "(previous baseline=%.3f) — carrying forward old baseline",
-                        self.entity_id, current_lifetime_sum, self._midnight_baseline
-                    )
+            if current_lifetime_sum < 1.0:
+                # CT/breaker energy counters return 0 at midnight — the bandwidth
+                # toggle hasn't run yet so energyConsumption is still null/0.
+                # Setting baseline=0 here would cause a massive spike (e.g. 14000+
+                # kWh) when the first real CT poll arrives, tripping the
+                # MAX_DAILY_ENERGY_KWH re-baseline and losing the entire morning.
+                # Defer: leave baseline=None so it is set by the first real poll
+                # value after midnight.  We lose at most one CT poll interval
+                # (~5 min) of morning data, which is acceptable.
+                self._midnight_baseline = None
                 self._state = 0.0
+                _LOGGER.debug(
+                    "New-day baseline deferred for %s — CT/breaker sum is %.3f "
+                    "(pre-toggle null). Baseline will be set on first real poll.",
+                    self.entity_id, current_lifetime_sum,
+                )
                 return
 
             self._midnight_baseline = current_lifetime_sum
@@ -745,25 +982,15 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             return
 
         if self._midnight_baseline is None:
-            # Fallback: attempt to grab the baseline from the external grid sensor
-            grid_sensor = self.hass.states.get("sensor.grid_power_total_daily_energy")
-            if grid_sensor and "midnight_baseline" in grid_sensor.attributes:
-                try:
-                    external_baseline = float(grid_sensor.attributes["midnight_baseline"])
-                    self._midnight_baseline = external_baseline
-                    if _log_data_warnings_enabled(self.coordinator):
-                        _LOGGER.info(
-                            "Recovered missing midnight_baseline (%.3f) for %s from sensor.grid_power_total_daily_energy",
-                            external_baseline, self.entity_id
-                        )
-                except (ValueError, TypeError):
-                    pass
-
-            # If still None, establish it now
-            if self._midnight_baseline is None:
-                self._midnight_baseline = current_lifetime_sum
-                self._state = 0.0
-                return
+            # Baseline was deferred (CT null at midnight) or lost on restart.
+            # Set it now from the first real poll value we receive.
+            self._midnight_baseline = current_lifetime_sum
+            self._state = 0.0
+            _LOGGER.debug(
+                "Deferred midnight baseline set for %s at %.3f",
+                self.entity_id, current_lifetime_sum,
+            )
+            return
 
         daily = current_lifetime_sum - self._midnight_baseline
         
@@ -777,12 +1004,16 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             return
 
         if daily > MAX_DAILY_ENERGY_KWH:
-            if _log_data_warnings_enabled(self.coordinator):
-                _LOGGER.warning(
-                    "Panel total daily %.1f kWh for %s exceeds sanity cap (%.0f kWh) "
-                    "— re-baselining (baseline=%.3f, sum=%.3f)",
-                    daily, self.entity_id, MAX_DAILY_ENERGY_KWH, self._midnight_baseline, current_lifetime_sum
-                )
+            # Most likely cause: midnight baseline was 0 (CT null before first
+            # bandwidth toggle) and the deferred-baseline path above wasn't reached
+            # yet.  Re-baseline to current so accumulation starts from now.
+            _LOGGER.warning(
+                "Panel total daily %.1f kWh for %s exceeds sanity cap (%.0f kWh) "
+                "— midnight baseline (%.3f) was likely set before CT values were "
+                "available. Re-baselining to %.3f; today's data starts from now.",
+                daily, self.entity_id, MAX_DAILY_ENERGY_KWH,
+                self._midnight_baseline, current_lifetime_sum,
+            )
             self._midnight_baseline = current_lifetime_sum
             daily = 0.0
 
@@ -819,13 +1050,43 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self._state = daily
 
     def _update_single_breaker_pxt(self, today: datetime.date, is_new_day: bool):
-        """Update daily energy for a single breaker using power×time integration."""
+        """Update daily energy for a single breaker using power×time integration.
+
+        Power direction handling for bidirectional (solar/import) breakers:
+          • _is_forced_import = True  → Daily Import sensor.
+            The LDATA panel reports positive watts when the breaker feeds power
+            INTO the panel bus (solar generation).  Clamp to max(power, 0) so
+            that inverter standby draw (negative watts) does not corrupt the
+            daily solar total.
+
+          • _is_forced_import = False, _energy_key == "import" (auto-detected solar)
+            → Daily Consumption sensor on a solar breaker.
+            Tracks the opposite direction: power drawn FROM the panel bus through
+            the breaker (inverter standby, typically near 0 W during the day).
+            Clamp to max(-power, 0) so generation does not corrupt the total.
+
+          • _energy_key == "consumption" (regular load breaker)
+            → always consumes from the panel (positive watts).
+            abs() handles the rare firmware transient that briefly sends a negative
+            value for a load breaker.
+        """
         new_data = self.coordinator.data.get("breakers", {}).get(self.breaker_data["id"])
         if not new_data:
             return
-        
+
         try:
-            current_power = abs(float(new_data.get("power", 0)))
+            raw_power = float(new_data.get("power", 0))
+            if self._is_forced_import:
+                # Daily Import sensor: solar generation flows into the panel bus
+                # as positive watts.  Ignore the negative (consumption) direction.
+                current_power = max(raw_power, 0.0)
+            elif self._energy_key == "import":
+                # Daily Consumption sensor on an auto-detected solar breaker.
+                # Track power drawn FROM the panel (negative direction) only.
+                current_power = max(-raw_power, 0.0)
+            else:
+                # Regular load breaker — always positive; abs() covers transients.
+                current_power = abs(raw_power)
         except (ValueError, TypeError):
             return
 
@@ -839,46 +1100,26 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             return
 
         if self._last_update_time is None or self._state is None:
-            # First run — establish baseline
-            self._last_update_time = now
-            self._last_power = current_power
+            # First pxt run after startup or a hw→pxt mode switch.
+            # Preserve any restored _state (hw-counter or prior pxt session) —
+            # both represent today's accumulated energy and should NOT be wiped.
+            # Only initialise to 0 if there is genuinely no prior state at all.
             if self._state is None:
                 self._state = 0.0
+            self._last_update_time = now
+            self._last_power = current_power
             return
 
         time_span = now - self._last_update_time
         if time_span <= 0:
             return
 
-        gap_threshold_secs = options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT) * 60
-        gap_mode = options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT)
-
-        if time_span > gap_threshold_secs:
-            # Gap detected
-            if gap_mode == GAP_HANDLING_SKIP:
-                # Don't accumulate energy during the gap
-                if options.get("log_data_warnings", True):
-                    _LOGGER.debug(
-                        "Gap detected for %s: %.1fs (threshold %.1fs) — skipping",
-                        self.entity_id, time_span, gap_threshold_secs
-                    )
-            elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
-                # Assume last known power continued through the gap
-                last_p = self._last_power or 0
-                energy_kwh = (last_p * time_span) / 3_600_000
-                self._state += energy_kwh
-            elif gap_mode == GAP_HANDLING_AVERAGE:
-                # Average of last known and recovery power
-                last_p = self._last_power or 0
-                avg_power = (last_p + current_power) / 2
-                energy_kwh = (avg_power * time_span) / 3_600_000
-                self._state += energy_kwh
-        else:
-            # Normal integration: power × time
-            avg_power = ((self._last_power or 0) + current_power) / 2
-            energy_kwh = (avg_power * time_span) / 3_600_000
-            self._state += energy_kwh
-
+        self._state = _calc_pxt_energy(
+            time_span, self._last_power, current_power,
+            self._state or 0.0,
+            options, self.entity_id,
+            _log_data_warnings_enabled(self.coordinator),
+        )
         self._last_update_time = now
         self._last_power = current_power
 
@@ -911,26 +1152,12 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if time_span <= 0:
             return
 
-        gap_threshold_secs = options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT) * 60
-        gap_mode = options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT)
-
-        if time_span > gap_threshold_secs:
-            if gap_mode == GAP_HANDLING_SKIP:
-                pass  # Don't accumulate
-            elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
-                last_p = self._last_power or 0
-                energy_kwh = (last_p * time_span) / 3_600_000
-                self._state += energy_kwh
-            elif gap_mode == GAP_HANDLING_AVERAGE:
-                last_p = self._last_power or 0
-                avg_power = (last_p + current_power) / 2
-                energy_kwh = (avg_power * time_span) / 3_600_000
-                self._state += energy_kwh
-        else:
-            avg_power = ((self._last_power or 0) + current_power) / 2
-            energy_kwh = (avg_power * time_span) / 3_600_000
-            self._state += energy_kwh
-
+        self._state = _calc_pxt_energy(
+            time_span, self._last_power, current_power,
+            self._state or 0.0,
+            options, self.entity_id,
+            _log_data_warnings_enabled(self.coordinator),
+        )
         self._last_update_time = now
         self._last_power = current_power
 
@@ -987,8 +1214,10 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                     self._last_date = datetime.date.fromisoformat(date_str)
                 except (ValueError, TypeError):
                     self._last_date = None
-            if "use_hw_counters" in attrs:
-                self._use_hw_counters = attrs["use_hw_counters"]
+            # NOTE: _use_hw_counters is intentionally NOT restored.
+            # Mode is re-detected on first update so that firmware changes
+            # (e.g. v1 → v2) and code fixes take effect immediately after
+            # an HA restart without stale cached mode overriding the detection.
             if "energy_key" in attrs and attrs["energy_key"]:
                 self._energy_key = attrs["energy_key"]
 
@@ -1063,17 +1292,21 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         """Detect whether to use hardware counters or power×time fallback.
 
         Returns True for hardware counters, False for power×time.
-        Checks whether the panel's ldata_service flagged hw counters.
-        Falls back to checking if a non-zero energy counter exists on this CT.
+
+        The authoritative source is the service's _panel_has_hw_counters flag,
+        which parse_panels() sets False for all v2+ panels.
+
+        The old fallback of checking consumption > 0 is intentionally removed:
+        in v2 firmware energyConsumption is a period counter that resets with
+        every bandwidth toggle — it is non-zero between polls even though no
+        lifetime hw counters are available, so the check gives a false True.
         """
         if hasattr(self.coordinator, '_service') and self.coordinator._service:
-            ct_id = self.breaker_data.get("id")
             panel_id = self.breaker_data.get("panel_id")
             if panel_id:
                 return self.coordinator._service.panel_has_hw_counters(panel_id)
-        # Fallback: check if any energy counter is non-zero
-        consumption = self._get_ct_consumption()
-        return consumption is not None and consumption > 0
+        # Service unavailable — default to power×time (safe fallback).
+        return False
 
     @callback
     def _state_update(self):
@@ -1131,13 +1364,10 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
         # --- Midnight reset ---
         if is_new_day:
-            if self._midnight_baseline is not None and self._midnight_baseline > 10.0 and consumption < 1.0:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.warning(
-                        "New-day reset for %s: consumption=%.3f is suspiciously low "
-                        "(previous baseline=%.3f) -- carrying forward old baseline",
-                        self.entity_id, consumption, self._midnight_baseline
-                    )
+            if consumption < 1.0:
+                # CT energyConsumption is null/0 at midnight — bandwidth toggle
+                # hasn't run yet.  Defer baseline to the first real poll value.
+                self._midnight_baseline = None
                 self._state = 0.0
                 self._last_date = today
                 return
@@ -1147,7 +1377,7 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             self._last_date = today
             return
 
-        # --- First reading ever (no baseline yet) ---
+        # --- First reading or deferred baseline ---
         if self._midnight_baseline is None:
             
             # Auto-detect energy key if set to "consumption" but import
@@ -1242,9 +1472,27 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         self._last_date = today
 
     def _update_ct_pxt(self, today: datetime.date, is_new_day: bool):
-        """Update daily energy using power×time integration (older firmware fallback).
+        """Update daily energy using power×time integration (v2+ firmware path).
 
         Uses the CT's combined power (power1 + power2) integrated over time.
+
+        Power direction handling for the GRID CT:
+
+          The CT sits on the main supply lines between the utility meter and
+          the panel bus.  The sign convention is:
+            positive watts → grid feeding the house (normal consumption)
+            negative watts → solar generation exceeds house load; excess
+                             flows back through the CT to the grid ("import"
+                             from the grid's perspective / solar export)
+
+          • _energy_key == "consumption"  → Daily Consumption sensor.
+            Tracks energy drawn FROM the grid: max(power, 0).
+            Accumulates whenever the house is buying from the utility.
+
+          • _energy_key == "import"  → Daily Import sensor.
+            Tracks solar energy pushed back INTO the grid: max(-power, 0).
+            Only accumulates when watts go negative (solar > house load).
+            Will be 0 on days without surplus solar.
         """
         if not self.coordinator.data or "cts" not in self.coordinator.data:
             return
@@ -1253,7 +1501,13 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             return
 
         try:
-            current_power = abs(float(ct_data.get("power", 0)))
+            raw_power = float(ct_data.get("power", 0))
+            if self._energy_key == "import":
+                # Solar export: only when CT watts are negative
+                current_power = max(-raw_power, 0.0)
+            else:
+                # Grid consumption: only when CT watts are positive
+                current_power = max(raw_power, 0.0)
         except (ValueError, TypeError):
             return
 
@@ -1268,41 +1522,27 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             return
 
         if self._last_update_time is None or self._state is None:
+            # First pxt run after startup or mode switch.  Any _state value
+            # restored from a previous hw-counter session is meaningless in
+            # pxt mode (hw mode reads a period counter; pxt integrates from 0).
+            # Reset to 0 so the sensor accumulates cleanly from this point.
+            self._state = 0.0
+            self._last_reported = None  # clear native_value monotonic clamp too
             self._last_update_time = now
             self._last_power = current_power
             self._last_date = today
-            if self._state is None:
-                self._state = 0.0
             return
 
         time_span = now - self._last_update_time
         if time_span <= 0:
             return
 
-        gap_threshold_secs = options.get(GAP_THRESHOLD, GAP_THRESHOLD_DEFAULT) * 60
-        gap_mode = options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT)
-
-        if time_span > gap_threshold_secs:
-            if gap_mode == GAP_HANDLING_SKIP:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.debug(
-                        "Gap detected for %s: %.1fs (threshold %.1fs) — skipping",
-                        self.entity_id, time_span, gap_threshold_secs
-                    )
-            elif gap_mode == GAP_HANDLING_EXTRAPOLATE:
-                last_p = self._last_power or 0
-                energy_kwh = (last_p * time_span) / 3_600_000
-                self._state += energy_kwh
-            elif gap_mode == GAP_HANDLING_AVERAGE:
-                last_p = self._last_power or 0
-                avg_power = (last_p + current_power) / 2
-                energy_kwh = (avg_power * time_span) / 3_600_000
-                self._state += energy_kwh
-        else:
-            avg_power = ((self._last_power or 0) + current_power) / 2
-            energy_kwh = (avg_power * time_span) / 3_600_000
-            self._state += energy_kwh
-
+        self._state = _calc_pxt_energy(
+            time_span, self._last_power, current_power,
+            self._state or 0.0,
+            options, self.entity_id,
+            _log_data_warnings_enabled(self.coordinator),
+        )
         self._last_update_time = now
         self._last_power = current_power
         self._last_date = today
@@ -1495,6 +1735,9 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         # Manual override: set via ldata.reset_energy_baseline service
         self._accept_next_value: bool = False
         self._consecutive_decrease: int = 0
+        # Power×time tracking for v2 panels (hw counters unavailable)
+        self._last_power: float | None = None
+        self._last_update_time: float | None = None  # time.time() epoch seconds
 
     @property
     def available(self) -> bool:
@@ -1510,6 +1753,67 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             except (ValueError, TypeError):
                 pass
 
+    def _use_pxt_mode(self) -> bool:
+        """Return True if this panel has no hw counters and we should integrate power×time."""
+        if hasattr(self.coordinator, '_service') and self.coordinator._service:
+            panel_id = self.breaker_data.get("panel_id")
+            if panel_id:
+                return not self.coordinator._service.panel_has_hw_counters(panel_id)
+        return False  # default: hw counter path (safe for v1)
+
+    def _update_pxt(self, new_data) -> None:
+        """Accumulate lifetime energy from instantaneous power (used on v2 panels).
+
+        Called instead of the hardware-counter path when the panel firmware
+        reports period counters instead of monotonically-increasing lifetime
+        counters (firmware ≥ 2.x).
+
+        Direction conventions
+        ─────────────────────
+        Import sensor  (key="import"):
+            Solar breaker — positive watts = solar generation flowing INTO the
+            panel bus.  Clamp to max(power, 0) to ignore inverter standby draw.
+
+        Consumption sensor  (key="consumption"):
+            Load breaker  — power is virtually always positive (consuming from
+            the panel bus).  abs() absorbs rare firmware transients.
+        """
+        try:
+            raw_power = float(new_data.get("power", 0) or 0)
+        except (ValueError, TypeError):
+            return
+
+        if self.entity_description.key == "import":
+            current_power = max(raw_power, 0.0)
+        else:
+            current_power = abs(raw_power)
+
+        now = time.time()
+        options = self.coordinator.config_entry.options
+
+        if self._last_update_time is None:
+            # First update after startup — establish baseline, no delta yet.
+            self._last_update_time = now
+            self._last_power = current_power
+            if self._state is None:
+                self._state = 0.0
+                self.async_write_ha_state()
+            return
+
+        time_span = now - self._last_update_time
+        if time_span <= 0:
+            return
+
+        self._state = _calc_pxt_energy(
+            time_span, self._last_power, current_power,
+            self._state or 0.0,
+            options, self.entity_id,
+            _log_data_warnings_enabled(self.coordinator),
+        )
+        self._last_update_time = now
+        self._last_power = current_power
+        self.async_write_ha_state()
+
     @callback
     def _handle_coordinator_update(self) -> None:
         """Route coordinator updates through our custom state-update logic."""
@@ -1521,16 +1825,25 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         try:
             if breakers := self.coordinator.data.get("breakers"):
                 if new_data := breakers.get(self.breaker_data["id"]):
+                    # On v2 panels the hw counters are period counters — integrate
+                    # power×time to build a monotonically-increasing lifetime total.
+                    if self._use_pxt_mode():
+                        self._update_pxt(new_data)
+                        return
+
+                    # ── v1 hardware counter path ──────────────────────────────
                     raw = new_data.get(self.entity_description.key)
                     if raw is None:
                         return  # Field missing — keep last state
                     new_value = float(raw)
                     ROUNDING_TOLERANCE = 0.05
 
-                    # Reject zero values when state is well above zero —
-                    # bandwidth toggle returns energyConsumption=0 for
-                    # breakers that haven't responded yet.
-                    if new_value == 0.0 and self._state is not None and self._state > 1.0:
+                    # Reject near-zero values when state is well above zero —
+                    # bandwidth toggle / reconnect bursts return energyConsumption=0
+                    # (or a transient near-zero like 0.04) for breakers that
+                    # haven't responded yet.  A genuine counter can't drop from
+                    # >1 kWh to <1 kWh in a single poll cycle.
+                    if new_value < 1.0 and self._state is not None and self._state > 1.0:
                         return
 
                     # First update — accept unconditionally
@@ -1702,15 +2015,15 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
                     # (power values can swing widely, so ratio-based is less useful)
                     is_potential_spike = False
                     if self._state is None:
-                        if abs(new_value) > 3000:
+                        if abs(new_value) > _CT_SPIKE_ABSOLUTE_W:
                             if log_enabled:
                                 _LOGGER.warning("Potential spike on first update for %s: %s", self.entity_id, new_value)
                             is_potential_spike = True
                     else:
                         previous_state = float(self._state)
-                        if previous_state == 0 and abs(new_value) > 3000:
+                        if previous_state == 0 and abs(new_value) > _CT_SPIKE_ABSOLUTE_W:
                             is_potential_spike = True
-                        elif previous_state != 0 and abs(new_value) > (abs(previous_state) * 10) and abs(new_value - previous_state) > 2000:
+                        elif previous_state != 0 and abs(new_value) > (abs(previous_state) * _SPIKE_RATIO_THRESHOLD) and abs(new_value - previous_state) > _SPIKE_MIN_DELTA_W:
                             is_potential_spike = True
 
                     if is_potential_spike:
@@ -1784,7 +2097,10 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         self._consecutive_decrease: int = 0
         # Manual override: set via ldata.reset_energy_baseline service
         self._accept_next_value: bool = False
-    
+        # Power×time tracking for v2 panels (hw counters unavailable)
+        self._last_power: float | None = None
+        self._last_update_time: float | None = None  # time.time() epoch seconds
+
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
@@ -1802,6 +2118,69 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
 
+    def _use_pxt_mode(self) -> bool:
+        """Return True if this CT's panel has no hw counters — use power×time integration."""
+        if hasattr(self.coordinator, '_service') and self.coordinator._service:
+            panel_id = self.ct_data.get("panel_id")
+            if panel_id:
+                return not self.coordinator._service.panel_has_hw_counters(panel_id)
+        return False  # default: hw counter path (safe for v1)
+
+    def _update_pxt(self, new_data) -> None:
+        """Accumulate lifetime energy from instantaneous CT power (used on v2 panels).
+
+        Called instead of the hardware-counter path when the panel firmware
+        reports period counters instead of monotonically-increasing lifetime
+        counters (firmware ≥ 2.x).
+
+        Direction conventions (Grid CT sign convention)
+        ────────────────────────────────────────────────
+        Consumption sensor  (key="consumption"):
+            Positive CT watts = power flowing grid → house.
+            Clamp to max(power, 0) — ignore negative (solar return) direction.
+
+        Import / return sensor  (key="import"):
+            Negative CT watts = solar excess flowing house → grid.
+            Clamp to max(-power, 0) — only accumulate when CT is negative.
+        """
+        try:
+            raw_power = float(new_data.get("power", 0) or 0)
+        except (ValueError, TypeError):
+            return
+
+        if self.entity_description.key == "import":
+            # Solar return: CT negative = house → grid
+            current_power = max(-raw_power, 0.0)
+        else:
+            # Grid consumption: CT positive = grid → house
+            current_power = max(raw_power, 0.0)
+
+        now = time.time()
+        options = self.coordinator.config_entry.options
+
+        if self._last_update_time is None:
+            # First update after startup — establish baseline, no delta yet.
+            self._last_update_time = now
+            self._last_power = current_power
+            if self._state is None:
+                self._state = 0.0
+                self.async_write_ha_state()
+            return
+
+        time_span = now - self._last_update_time
+        if time_span <= 0:
+            return
+
+        self._state = _calc_pxt_energy(
+            time_span, self._last_power, current_power,
+            self._state or 0.0,
+            options, self.entity_id,
+            _log_data_warnings_enabled(self.coordinator),
+        )
+        self._last_update_time = now
+        self._last_power = current_power
+        self.async_write_ha_state()
+
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
@@ -1809,13 +2188,22 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             # Add safety check for coordinator.data
             if cts := self.coordinator.data.get("cts"):
                 if new_data := cts.get(self.ct_data["id"]):
+                    # On v2 panels the hw counters are period counters — integrate
+                    # power×time to build a monotonically-increasing lifetime total.
+                    if self._use_pxt_mode():
+                        self._update_pxt(new_data)
+                        return
+
+                    # ── v1 hardware counter path ──────────────────────────────
                     new_value = float(new_data[self.entity_description.key])
                     ROUNDING_TOLERANCE = 0.05
 
-                    # Reject zero values when state is well above zero —
-                    # bandwidth toggle / reconnect bursts return 0 for
-                    # CTs that haven't responded yet.
-                    if new_value == 0.0 and self._state is not None and self._state > 1.0:
+                    # Reject near-zero values when state is well above zero —
+                    # bandwidth toggle / reconnect bursts return 0 (or a
+                    # transient near-zero) for CTs that haven't responded yet.
+                    # A genuine counter can't drop from >1 kWh to <1 kWh in
+                    # a single poll cycle.
+                    if new_value < 1.0 and self._state is not None and self._state > 1.0:
                         return
 
                     # Initialize state on the very first update if not already set by restore.
@@ -1861,9 +2249,9 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                                 self.entity_id, new_value, self._state
                             )
                         return # Exit without updating.
-                    
+
                     self._consecutive_decrease = 0
-                    
+
                     # For minor decreases within tolerance, hold the previous value
                     # to maintain TOTAL_INCREASING contract with HA.
                     if new_value < float(self._state):

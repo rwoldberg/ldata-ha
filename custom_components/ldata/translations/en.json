@@ -48,14 +48,14 @@
                 },
                 "data_description": {
                     "ha_inform_rate": "How often to update sensors in Home Assistant (2-600 seconds). Lower values = more responsive but higher system load and DB writes.",
-                    "three_phase": "Enable this ONLY if you live in an apartment or building with a 120/208V Network setup. This correctly calculates 2-pole breaker voltages using 208V math instead of 240V. Do not enable this for a standard residential house.",
+                    "three_phase": "Enable only if your service is 120/208V three-phase (common in apartments and condos with shared utility transformers). In this mode, two-pole breaker voltages are multiplied by \u221a3/2 (~0.866) to report the correct 208V line-to-line voltage instead of the incorrect 240V. Do NOT enable for standard 120/240V single-phase residential service.",
                     "allow_breaker_control": "When enabled, HA will create switch entities allowing you to trip/reset breakers. When disabled, breakers are only treated as sensors.",
-                    "gap_handling": "Fallback for older firmware without hardware energy counters. Skip: safest. Extrapolate: assume last known power. Average: compromise. Panels with firmware 2.0+ use hardware counters and ignore this.",
-                    "gap_threshold": "Time without data before gap handling activates (1-30 minutes). Only for power×time fallback.",
+                    "gap_handling": "Fallback for older firmware without hardware energy counters. How breaker daily energy sensors handle gaps when no data is received. Skip: safest. Extrapolate: assume last known power. Average: compromise. Panels with firmware 2.0+ use hardware counters and ignore this setting.",
+                    "gap_threshold": "Time without data before gap handling activates (1-30 minutes). Only applies to power\u00d7time fallback on older firmware.",
                     "log_warnings": "Log integration crashes or web errors.",
                     "log_data_warnings": "Log warnings of data inconsistencies from Leviton (spikes/resets).",
-                    "log_all_raw": "Log the exact, unparsed JSON string received directly from the Leviton WebSocket (WARNING: Contains unredacted tokens/IDs).",
-                    "log_parsed_data": "Log the complete parsed data dictionary (after redaction) that the integration retains from the API/WebSocket.",
+                    "log_all_raw": "Log the raw WebSocket string as received from Leviton. Warning: output is unredacted and will contain auth tokens and device IDs. Disable when not actively debugging.",
+                    "log_parsed_data": "Log all breaker and panel fields after parsing each WebSocket or REST update. Useful for verifying values without enabling raw WebSocket logging.",
                     "enable_specific_logging": "Log any specified field. Field names can be found by briefly enabling 'Log All Parsed Data'.",
                     "log_fields": "To find field names, enable 'Log All Parsed Data' and check Home Assistant logs. Enter above as comma separated."
                 }
