@@ -1535,6 +1535,23 @@ class LDATAService:
                         # generation source — used in sensor.py to gate import entities.
                         breaker_data["branch_type"] = breaker.get("branchType") or ""
 
+                        # Warn when a v2+ breaker has electrical activity but no
+                        # Circuit Type assigned in the Leviton app.  On v2+ firmware
+                        # branchType is the authoritative source for solar detection;
+                        # an unset type means solar breakers won't be classified
+                        # correctly and energy direction will be wrong.
+                        if fw_major >= 2 and not breaker_data["branch_type"]:
+                            _b_pwr = abs(breaker_data.get("power") or 0)
+                            if _b_pwr > 1.0:
+                                _LOGGER.warning(
+                                    f"[v{self.version}] Breaker '{breaker_data['name']}' on panel "
+                                    f"'{panel.get('name', panel['id'])}' has no Circuit Type set "
+                                    f"(currently drawing {round(_b_pwr, 1)}W). Solar detection "
+                                    f"relies on 'Circuit Type' being configured in the Leviton app "
+                                    f"— open the app, select this breaker, and assign its type "
+                                    f"(e.g. 'Solar', 'Oven', 'Lights')."
+                                )
+
                         # Add the breaker to the list.
                         breakers[breaker["id"]] = breaker_data
                         try:
@@ -2213,25 +2230,39 @@ class LDATAService:
                                 },
                                 timeout=aiohttp.ClientTimeout(total=10)
                             ) as resp:
-                                api_ver = (await resp.text()).strip()
-                                if not api_ver:
-                                    _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status} (empty body)")
-                                elif self._leviton_api_version is None:
-                                    # First observation — store quietly at debug level.
-                                    self._leviton_api_version = api_ver
-                                    _LOGGER.debug(f"[v{self.version}] Leviton API version: {api_ver}")
-                                elif api_ver != self._leviton_api_version:
-                                    # Version changed — surface at WARNING so it's
-                                    # visible without enabling debug logging.
-                                    _LOGGER.warning(
-                                        f"[v{self.version}] Leviton API version changed: "
-                                        f"{self._leviton_api_version} → {api_ver}. "
-                                        f"New fields or endpoints may be available — "
-                                        f"consider capturing a HAR and checking for integration updates."
+                                if resp.status != 200:
+                                    _LOGGER.debug(
+                                        f"[v{self.version}] API version heartbeat: "
+                                        f"non-200 response ({resp.status}) — skipping"
                                     )
-                                    self._leviton_api_version = api_ver
                                 else:
-                                    _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
+                                    api_ver = (await resp.text()).strip()
+                                    # Guard against HTML error pages (502 etc.) that
+                                    # slip through with a 200-ish proxy status, or any
+                                    # other non-version body.  A valid Leviton version
+                                    # string is digits-and-dots only (e.g. "1.57.1").
+                                    _ver_valid = bool(api_ver and api_ver.replace(".", "").isdigit())
+                                    if not _ver_valid:
+                                        _LOGGER.debug(
+                                            f"[v{self.version}] API version heartbeat: "
+                                            f"unexpected body ignored ({repr(api_ver[:40])})"
+                                        )
+                                    elif self._leviton_api_version is None:
+                                        # First observation — store quietly at debug level.
+                                        self._leviton_api_version = api_ver
+                                        _LOGGER.debug(f"[v{self.version}] Leviton API version: {api_ver}")
+                                    elif api_ver != self._leviton_api_version:
+                                        # Version changed — surface at WARNING so it's
+                                        # visible without enabling debug logging.
+                                        _LOGGER.warning(
+                                            f"[v{self.version}] Leviton API version changed: "
+                                            f"{self._leviton_api_version} → {api_ver}. "
+                                            f"New fields or endpoints may be available — "
+                                            f"consider capturing a HAR and checking for integration updates."
+                                        )
+                                        self._leviton_api_version = api_ver
+                                    else:
+                                        _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
                         except asyncio.CancelledError:
                             raise
                         except Exception as e:
