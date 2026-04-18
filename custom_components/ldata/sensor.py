@@ -107,11 +107,16 @@ def _log_warnings_enabled(coordinator) -> bool:
     return coordinator.config_entry.options.get("log_warnings", True)
 
 
-# ── Spike-detection thresholds ────────────────────────────────────────────────
-# Used by LDATACTOutputSensor to filter transient hardware glitches.
-_CT_SPIKE_ABSOLUTE_W   = 3000   # CT reading above this on first update is suspicious
-_SPIKE_RATIO_THRESHOLD = 10     # new_value > old_value × this  → spike candidate
-_SPIKE_MIN_DELTA_W     = 2000   # minimum absolute Watt delta to trigger ratio check
+# ── Spike-detection threshold ─────────────────────────────────────────────────
+# Used by LDATACTOutputSensor to catch genuine firmware glitches.
+# Any reading above this is implausible on a residential service:
+# 200 A × 240 V = 48 kW theoretical maximum; 25 kW leaves ample headroom
+# for simultaneous EV charging, HVAC, and cooking while still flagging
+# absurd values.  The previous zero-to-high (> 3 kW) and ratio-based (10×)
+# checks produced false positives on the grid CT, which legitimately swings
+# from near-zero (solar covering load) to 6+ kW the moment a large appliance
+# starts — instantaneous power can jump by any amount in one tick.
+_CT_POWER_MAX_W = 25_000
 
 
 def _calc_pxt_energy(
@@ -2032,20 +2037,12 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
                     new_value = float(new_data[self.entity_description.key])
                     log_enabled = _log_data_warnings_enabled(self.coordinator)
 
-                    # CT output uses absolute thresholds for spike detection
-                    # (power values can swing widely, so ratio-based is less useful)
-                    is_potential_spike = False
-                    if self._state is None:
-                        if abs(new_value) > _CT_SPIKE_ABSOLUTE_W:
-                            if log_enabled:
-                                _LOGGER.warning("Potential spike on first update for %s: %s", self.entity_id, new_value)
-                            is_potential_spike = True
-                    else:
-                        previous_state = float(self._state)
-                        if previous_state == 0 and abs(new_value) > _CT_SPIKE_ABSOLUTE_W:
-                            is_potential_spike = True
-                        elif previous_state != 0 and abs(new_value) > (abs(previous_state) * _SPIKE_RATIO_THRESHOLD) and abs(new_value - previous_state) > _SPIKE_MIN_DELTA_W:
-                            is_potential_spike = True
+                    # Spike detection: only flag readings that exceed the residential
+                    # service ceiling (_CT_POWER_MAX_W).  The previous zero-to-high
+                    # and ratio-based checks caused false positives on the grid CT,
+                    # which legitimately swings from near-zero (solar covering load)
+                    # to 5–8 kW when a large appliance starts.
+                    is_potential_spike = abs(new_value) > _CT_POWER_MAX_W
 
                     if is_potential_spike:
                         if self._pending_state is not None:
