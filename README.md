@@ -91,7 +91,7 @@ Addon is auto reloading on submit.
 
 # Known Issues (Leviton Lacking support)
 
-- CT clamp and Breaker lifetime values are only available via triggering a Poll request then WS gets a update
+- CT clamp and Breaker lifetime values are only available via triggering a Poll request then WS gets a update **(NOTE as of WHEM firmware v2.1.0 these lifetime values no longer function)**
 - BLErssi on 2-pole breakers always 0 due to not reporting from Leviton
 
 <br>
