@@ -150,8 +150,12 @@ class LDATAService:
         self._panels_in_bandwidth_toggle: set[str] = set()
         # Last observed Leviton cloud API version string (e.g. "1.57.1").
         # Populated on the first apiversion heartbeat; a WARNING is logged
-        # whenever the value changes so cloud updates are visible in HA logs.
+        # the first time a genuinely new version string is observed.
+        # _seen_api_versions accumulates every distinct string ever returned
+        # so that load-balancer traffic splits (e.g. 1.57.1 ↔ 1.58.0 during
+        # a rolling deployment) do not produce repeated spurious warnings.
         self._leviton_api_version: str | None = None
+        self._seen_api_versions: set[str] = set()
 
     def _check_rate_limit(self) -> None:
         """Enforces a 10-second wait between login attempts."""
@@ -2247,22 +2251,33 @@ class LDATAService:
                                             f"[v{self.version}] API version heartbeat: "
                                             f"unexpected body ignored ({repr(api_ver[:40])})"
                                         )
-                                    elif self._leviton_api_version is None:
-                                        # First observation — store quietly at debug level.
-                                        self._leviton_api_version = api_ver
-                                        _LOGGER.debug(f"[v{self.version}] Leviton API version: {api_ver}")
-                                    elif api_ver != self._leviton_api_version:
-                                        # Version changed — surface at WARNING so it's
-                                        # visible without enabling debug logging.
-                                        _LOGGER.warning(
-                                            f"[v{self.version}] Leviton API version changed: "
-                                            f"{self._leviton_api_version} → {api_ver}. "
-                                            f"New fields or endpoints may be available — "
-                                            f"consider capturing a HAR and checking for integration updates."
-                                        )
+                                    elif api_ver not in self._seen_api_versions:
+                                        # Genuinely new version string never seen before.
+                                        # First-ever observation is debug only; subsequent
+                                        # new versions (real upgrades) warrant a WARNING.
+                                        self._seen_api_versions.add(api_ver)
+                                        if self._leviton_api_version is None:
+                                            _LOGGER.debug(f"[v{self.version}] Leviton API version: {api_ver}")
+                                        else:
+                                            _LOGGER.warning(
+                                                f"[v{self.version}] Leviton API version changed: "
+                                                f"{self._leviton_api_version} → {api_ver}. "
+                                                f"New fields or endpoints may be available — "
+                                                f"consider capturing a HAR and checking for integration updates."
+                                            )
                                         self._leviton_api_version = api_ver
                                     else:
-                                        _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
+                                        # Known version — update last-seen quietly.
+                                        # This is normal during a rolling deployment where
+                                        # the load balancer alternates between two versions.
+                                        if api_ver != self._leviton_api_version:
+                                            _LOGGER.debug(
+                                                f"[v{self.version}] API version heartbeat: {api_ver} "
+                                                f"(load-balanced flip, already known)"
+                                            )
+                                        else:
+                                            _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
+                                        self._leviton_api_version = api_ver
                         except asyncio.CancelledError:
                             raise
                         except Exception as e:
@@ -2489,7 +2504,7 @@ class LDATAService:
                                         _LOGGER.debug(f"[v{self.version}] Connection reset during re-subscribe")
                                         break
                                 else:
-                                    _LOGGER.warning(f"[v{self.version}] Re-subscribe limit reached (#{resubscribe_count}), forcing reconnect")
+                                    _LOGGER.debug(f"[v{self.version}] Re-subscribe limit reached (#{resubscribe_count}), forcing reconnect")
                                     break
                             
                             # Proactive reconnect every 55 minutes (before server forces disconnect)
