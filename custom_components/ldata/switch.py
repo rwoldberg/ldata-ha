@@ -55,17 +55,16 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         self._last_known_is_on: bool = False
         self._consecutive_update_failures: int = 0
 
-        if current_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
-            if (
-                current_data["state"] == "ManualON"
-                and current_data["remoteState"] == "RemoteON"
-            ):
-                self._state = True
-            else:
-                self._state = False
-            
-            # Set the initial "last known" state
-            self._last_known_is_on = self._state
+        # `data` is the same breaker dict entry the coordinator already holds
+        # at construction time (see async_setup_entry) — use it directly
+        # instead of re-indexing coordinator.data["breakers"], which would
+        # raise KeyError if this breaker ever briefly dropped out of the
+        # coordinator's cache between setup and entity construction.
+        self._state = (
+            data.get("state") == "ManualON"
+            and data.get("remoteState") == "RemoteON"
+        )
+        self._last_known_is_on = self._state
 
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))

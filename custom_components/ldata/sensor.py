@@ -49,6 +49,14 @@ from .ldata_entity import LDATAEntity
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
+# Daily energy sensors round to 2 decimal places; a true hardware/rounding
+# jitter dip is on the order of a hundredth of a kWh (e.g. 21.31 -> 21.30).
+# Used by the TOTAL_INCREASING native_value clamp below to distinguish real
+# jitter from a legitimate drop (midnight reset OR a mid-day correction from
+# a monotonic-guard/re-baseline/spike-rejection flow) — a ratio-based check
+# can't tell those apart since corrections aren't always near-zero.
+_DAILY_JITTER_EPSILON_KWH = 0.05
+
 
 def _check_spike_and_update(
     state: float | None,
@@ -160,6 +168,14 @@ def _calc_pxt_energy(
     else:
         avg_power = ((last_power or 0) + current_power) / 2.0
         energy_kwh = (avg_power * time_span) / 3_600_000.0
+
+    # Sanity-cap a single update's energy delta. Daily sensors already clamp
+    # their cumulative total via MAX_DAILY_ENERGY_KWH downstream, but lifetime
+    # (TOTAL_INCREASING) accumulators have no other cap — an unbounded gap
+    # (e.g. from a host clock jumping forward after an NTP resync) would
+    # otherwise inject an implausible one-shot spike that permanently
+    # inflates the Energy dashboard total with no recovery path.
+    energy_kwh = max(0.0, min(energy_kwh, MAX_DAILY_ENERGY_KWH))
 
     return current_state + energy_kwh
 
@@ -652,7 +668,10 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         # value, and the daily total resets to 0.
         if last_state := await self.async_get_last_state():
             try:
-                self._state = float(last_state.state)
+                restored = float(last_state.state)
+                # Clamp implausible restored values (e.g. a corrupted recorder
+                # entry) to the same sanity range live updates are held to.
+                self._state = max(0.0, min(restored, MAX_DAILY_ENERGY_KWH))
             except (ValueError, TypeError):
                 pass
 
@@ -666,10 +685,12 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                     self._last_date = datetime.date.fromisoformat(date_str)
                 except (ValueError, TypeError):
                     self._last_date = None
-            try:
-                self._last_update_time = float(attrs["last_update_time"])
-            except (KeyError, ValueError, TypeError):
-                self._last_update_time = None
+            # _last_update_time is intentionally NOT restored across a restart
+            # (matches LDATACTDailyUsageSensor) — restoring it would expose the
+            # entire HA-downtime window to gap-handling policy on the very next
+            # update, and in EXTRAPOLATE/AVERAGE mode could inject a large
+            # one-shot energy delta for time HA was simply offline. The next
+            # pxt update instead establishes a fresh baseline with no delta.
             # NOTE: _use_hw_counters is intentionally NOT restored.
             # Mode is re-detected on first update so that firmware changes
             # (e.g. v1 → v2) and code fixes take effect immediately after
@@ -722,10 +743,11 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             # Midnight resets (val near 0 while _last_reported is high) are
             # allowed — HA handles those natively for TOTAL_INCREASING.
             if self._last_reported is not None and val < self._last_reported:
-                # A midnight reset looks like a large drop (e.g. 21.3 → 0.1).
-                # A jitter dip is a tiny drop (e.g. 0.18 → 0.17 or 21.31 → 21.30).
-                # Use ratio: if new value is less than 50% of previous, it's a reset.
-                if self._last_reported > 0 and val / self._last_reported > 0.5:
+                # Only hold back genuinely tiny dips (hardware/rounding jitter,
+                # e.g. 21.31 -> 21.30). Any larger drop is a real change —
+                # either a midnight reset or a legitimate mid-day correction —
+                # and must be reported, not frozen at a stale high value.
+                if (self._last_reported - val) <= _DAILY_JITTER_EPSILON_KWH:
                     return self._last_reported  # Jitter — hold previous value
             self._last_reported = val
             return val
@@ -1226,7 +1248,8 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         # would overwrite _midnight_baseline with the current counter value.
         if last_state := await self.async_get_last_state():
             try:
-                self._state = float(last_state.state)
+                restored = float(last_state.state)
+                self._state = max(0.0, min(restored, MAX_DAILY_ENERGY_KWH))
             except (ValueError, TypeError):
                 pass
 
@@ -1274,7 +1297,9 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         if self._state is not None:
             val = round(self._state, 2)
             if self._last_reported is not None and val < self._last_reported:
-                if self._last_reported > 0 and val / self._last_reported > 0.5:
+                # See _DAILY_JITTER_EPSILON_KWH: only hold back tiny dips, not
+                # legitimate resets or mid-day corrections of any size.
+                if (self._last_reported - val) <= _DAILY_JITTER_EPSILON_KWH:
                     return self._last_reported
             self._last_reported = val
             return val

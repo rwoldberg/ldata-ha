@@ -61,6 +61,12 @@ class LDATAAuthError(Exception):
 class LDATAService:
     """The LDATAService object."""
     _last_login_attempt_time = 0.0
+    # Guards the read-then-sleep-then-write below. _last_login_attempt_time is a
+    # class attribute shared across every LDATAService instance (one per config
+    # entry); without a lock, two overlapping login attempts (e.g. two panels
+    # reloading at once) can both read the old timestamp before either writes
+    # back, defeating the rate limit.
+    _login_rate_limit_lock = threading.Lock()
 
     def __init__(self, username, password, entry) -> None:
         """Init LDATAService."""
@@ -159,17 +165,18 @@ class LDATAService:
 
     def _check_rate_limit(self) -> None:
         """Enforces a 10-second wait between login attempts."""
-        current_time = time.time()
-        
-        time_since_last_attempt = current_time - LDATAService._last_login_attempt_time
-        
-        if time_since_last_attempt < 10.0:
-            wait_time = 10.0 - time_since_last_attempt
-            _LOGGER.warning(f"[v{self.version}] Rate limiting login. Waiting for {wait_time:.1f} seconds.")
-            # This is running in an executor job, so time.sleep is OK.
-            time.sleep(wait_time)
-        
-        LDATAService._last_login_attempt_time = time.time()
+        with LDATAService._login_rate_limit_lock:
+            current_time = time.time()
+
+            time_since_last_attempt = current_time - LDATAService._last_login_attempt_time
+
+            if time_since_last_attempt < 10.0:
+                wait_time = 10.0 - time_since_last_attempt
+                _LOGGER.warning(f"[v{self.version}] Rate limiting login. Waiting for {wait_time:.1f} seconds.")
+                # This is running in an executor job, so time.sleep is OK.
+                time.sleep(wait_time)
+
+            LDATAService._last_login_attempt_time = time.time()
 
     def _test_internet_connectivity(self) -> str:
         """Return 'ACTIVE' if google.com is resolvable, 'DOWN' otherwise.
@@ -642,6 +649,13 @@ class LDATAService:
                         
                         # Apply WHEMS specific mapping
                         if panel_type == "WHEMS":
+                            if "rmsVoltageA" not in panel or "rmsVoltageB" not in panel or "version" not in panel:
+                                _LOGGER.warning(
+                                    f"[v{self.version}] Panel '{panel.get('name', panel.get('id', '?'))}' "
+                                    f"WHEMS response is missing rmsVoltageA/rmsVoltageB/version "
+                                    f"(e.g. a disconnected panel) — skipping this panel for this poll cycle."
+                                )
+                                continue
                             panel["rmsVoltage"] = panel["rmsVoltageA"]
                             panel["rmsVoltage2"] = panel["rmsVoltageB"]
                             panel["updateVersion"] = panel["version"]
@@ -651,7 +665,7 @@ class LDATAService:
                                 time.sleep(2)
                             panel["residentialBreakers"] = self.get_Whems_breakers(panel["id"])
                             panel["CTs"] = self.get_Whems_CT(panel["id"])
-                        
+
                         if allPanels is None:
                             allPanels = []
                         allPanels.append(panel)
@@ -1141,8 +1155,17 @@ class LDATAService:
             if "rmsCurrent" in raw:
                 existing["current1"] = float(raw["rmsCurrent"]) if raw["rmsCurrent"] is not None else cached_cur1
             if "rmsCurrent2" in raw:
-                existing["current2"] = float(raw["rmsCurrent2"]) if raw["rmsCurrent2"] is not None else cached_cur2
-            existing["current"] = (existing["current1"] + existing["current2"]) / 2
+                if raw["rmsCurrent2"] is not None:
+                    existing["current2"] = float(raw["rmsCurrent2"])
+                    existing["dual_leg"] = True
+                else:
+                    existing["current2"] = cached_cur2
+            # dual_leg is established once in parse_panels from the full REST
+            # payload; only average across both legs if this CT actually has one.
+            if existing.get("dual_leg"):
+                existing["current"] = (existing["current1"] + existing["current2"]) / 2
+            else:
+                existing["current"] = existing["current1"]
 
     def _recalc_total_power(self, status_data: dict, panel_id: str) -> None:
         """Recalculate totalPower for a single panel from its breaker values."""
@@ -1299,16 +1322,22 @@ class LDATAService:
                 f"— WebSocket for breaker data"
                 + (", CT REST polling disabled (v2: energy counters unused, power via WS)" if fw_major >= 2 else ", CT REST polling enabled if CTs present")
             )
+            if "rmsVoltage" not in panel or "rmsVoltage2" not in panel:
+                _LOGGER.warning(
+                    f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' response is "
+                    f"missing rmsVoltage/rmsVoltage2 — reporting 0V for this poll cycle "
+                    f"instead of failing the whole update."
+                )
+            _panel_v1 = self.none_to_zero(panel, "rmsVoltage")
+            _panel_v2 = self.none_to_zero(panel, "rmsVoltage2")
             if three_phase is False:
-                panel_data["voltage"] = (
-                    float(panel["rmsVoltage"]) + float(panel["rmsVoltage2"])
-                ) / 2.0
+                panel_data["voltage"] = (_panel_v1 + _panel_v2) / 2.0
             else:
                 panel_data["voltage"] = (
-                    float(panel["rmsVoltage"]) * 0.866025403784439
-                ) + (float(panel["rmsVoltage2"]) * 0.866025403784439)
-            panel_data["voltage1"] = float(panel["rmsVoltage"])
-            panel_data["voltage2"] = float(panel["rmsVoltage2"])
+                    _panel_v1 * 0.866025403784439
+                ) + (_panel_v2 * 0.866025403784439)
+            panel_data["voltage1"] = _panel_v1
+            panel_data["voltage2"] = _panel_v2
             panel_data["frequency1"] = float(self.none_to_zero(panel, "frequencyA"))
             panel_data["frequency2"] = float(self.none_to_zero(panel, "frequencyB"))
             if panel_data["frequency1"] == 0:
@@ -1373,12 +1402,20 @@ class LDATAService:
                         ct_data["import1"] = self.none_to_zero(ct, "energyImport")
                         ct_data["import2"] = self.none_to_zero(ct, "energyImport2")
                         ct_data["import"] = ct_data["import1"] + ct_data["import2"]
-                        ct_data["current"] = (
-                            self.none_to_zero(ct, "rmsCurrent")
-                            + self.none_to_zero(ct, "rmsCurrent2")
-                        ) / 2
-                        ct_data["current1"] = self.none_to_zero(ct, "rmsCurrent")
-                        ct_data["current2"] = self.none_to_zero(ct, "rmsCurrent2")
+                        _cur1_raw = self._none_or_float(ct, "rmsCurrent")
+                        _cur2_raw = self._none_or_float(ct, "rmsCurrent2")
+                        # Only average across two legs if this CT genuinely reports a
+                        # second channel. A None second leg means single-leg hardware,
+                        # not "0 load" — averaging against it would silently halve the
+                        # real reading (unlike a two-pole breaker, where both legs
+                        # always carry the same physical current).
+                        ct_data["dual_leg"] = _cur2_raw is not None
+                        if ct_data["dual_leg"]:
+                            ct_data["current"] = ((_cur1_raw or 0.0) + _cur2_raw) / 2.0
+                        else:
+                            ct_data["current"] = _cur1_raw or 0.0
+                        ct_data["current1"] = _cur1_raw or 0.0
+                        ct_data["current2"] = _cur2_raw or 0.0
                         # Add the CT to the list.
                         cts[ct_data["id"]] = ct_data
                     else:
@@ -2128,6 +2165,15 @@ class LDATAService:
         uri = "wss://socket.cloud.leviton.com/"
         reconnect_delay = 10
         max_delay = 300
+
+        # Keep strong references to fire-and-forget keepalive tasks so they
+        # aren't garbage-collected mid-execution (a known asyncio.create_task
+        # footgun — nothing else holds a reference to them otherwise).
+        background_tasks: set[asyncio.Task] = set()
+
+        def _track_task(task: asyncio.Task) -> None:
+            background_tasks.add(task)
+            task.add_done_callback(background_tasks.discard)
         
         BANDWIDTH_PUT_INTERVAL = 50      # PUT bandwidth:1 every 50 seconds to keep cloud active
         # The cloud decays bandwidth:1 to :2 within ~2 seconds. The official
@@ -2290,20 +2336,27 @@ class LDATAService:
                     await apiversion_heartbeat()
                     
                     try:
+                        # Compression intentionally disabled: permessage-deflate
+                        # routes sends through aiohttp's shielded background-task
+                        # write path for larger frames, which can leak an
+                        # unhandled ClientConnectionResetError ("Cannot write to
+                        # closing transport") into HA's logs if the websocket
+                        # task is cancelled mid-send (e.g. during a reload).
+                        # Messages here (auth/subscribe JSON) are tiny, so there's
+                        # no real bandwidth cost to sending them uncompressed.
                         ws = await session.ws_connect(
-                            uri, 
+                            uri,
                             headers={
                                 "Origin": "https://myapp.leviton.com",
                                 "Cache-Control": "no-cache",
                                 "Pragma": "no-cache",
-                                "Sec-WebSocket-Extensions": "permessage-deflate",
                                 "Sec-Fetch-Dest": "empty",
                                 "Sec-Fetch-Mode": "websocket",
                                 "Sec-Fetch-Site": "cross-site",
                                 "DNT": "1",
                                 "Sec-GPC": "1",
                             },
-                            compress=15,
+                            compress=0,
                         )
                     except Exception as e:
                         loop = asyncio.get_running_loop()
@@ -2474,7 +2527,7 @@ class LDATAService:
                                         pass
                                     except Exception:
                                         pass
-                                asyncio.create_task(_safe_bandwidth_put(), name="ldata_bandwidth_put")
+                                _track_task(asyncio.create_task(_safe_bandwidth_put(), name="ldata_bandwidth_put"))
                                 _LOGGER.debug(f"[v{self.version}] Bandwidth PUT #{bandwidth_put_count} ({len(panel_info)} panels)")
                             
                             # API version heartbeat every 10 seconds (keeps server session alive for v2 firmware)
@@ -2490,7 +2543,7 @@ class LDATAService:
                                         pass
                                     except Exception:
                                         pass
-                                asyncio.create_task(_safe_heartbeat(), name="ldata_heartbeat")
+                                _track_task(asyncio.create_task(_safe_heartbeat(), name="ldata_heartbeat"))
                             
                             # Re-subscribe if no data for 60 seconds (max 5 per connection)
                             if current_time - last_data_time >= STALE_DATA_THRESHOLD:

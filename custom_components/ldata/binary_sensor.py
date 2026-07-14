@@ -53,15 +53,15 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self._attr_unique_id = f"{data['id']}_status"
         self.breaker_data = data
-        self._state = None
-        if current_data := self.coordinator.data["breakers"][self.breaker_data["id"]]:
-            if (
-                current_data["state"] == "ManualON"
-                and current_data["remoteState"] == "RemoteON"
-            ):
-                self._state = True
-            else:
-                self._state = False
+        # `data` is the same breaker dict entry the coordinator already holds
+        # at construction time (see async_setup_entry) — use it directly
+        # instead of re-indexing coordinator.data["breakers"], which would
+        # raise KeyError if this breaker ever briefly dropped out of the
+        # coordinator's cache between setup and entity construction.
+        self._state = (
+            data.get("state") == "ManualON"
+            and data.get("remoteState") == "RemoteON"
+        )
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 

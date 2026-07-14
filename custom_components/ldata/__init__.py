@@ -9,6 +9,7 @@ from homeassistant.const import Platform, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
 
 from .const import DOMAIN, LOGGER_NAME
@@ -37,6 +38,21 @@ SERVICE_RESET_PANEL_SCHEMA = vol.Schema(
         vol.Required(ATTR_DEVICE_ID): cv.string,
     }
 )
+
+
+def _get_sensor_entity(hass: HomeAssistant, entity_id: str):
+    """Look up a live LDATA sensor entity object via the entity platform registry.
+
+    Avoids reaching into the private hass.data["entity_components"] dict, which
+    is an internal HA implementation detail not guaranteed across core versions.
+    """
+    for platform in entity_platform.async_get_platforms(hass, DOMAIN):
+        if platform.domain != "sensor":
+            continue
+        entity = platform.entities.get(entity_id)
+        if entity:
+            return entity
+    return None
 
 
 def _reset_energy_entity(entity, entity_id: str) -> str:
@@ -89,7 +105,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry,
     )
 
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        # The coordinator's constructor already started websocket/REST/CT
+        # background tasks; make sure they're torn down explicitly if first
+        # refresh fails, instead of relying solely on HA's own config-entry
+        # background-task bookkeeping for a coordinator that never made it
+        # into hass.data.
+        await coordinator.async_shutdown()
+        raise
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
@@ -109,18 +134,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             # Find the entity object through the entity platform
             target_entity = None
-            comp = hass.data.get("entity_components", {}).get("sensor")
             ent_reg = er.async_get(hass)
+            owns_entity = False
             for entry_id, coord in hass.data[DOMAIN].items():
                 if not isinstance(coord, LDATAUpdateCoordinator):
                     continue
                 for ent_entry in er.async_entries_for_config_entry(ent_reg, entry_id):
                     if ent_entry.entity_id == entity_id:
-                        if comp:
-                            target_entity = comp.get_entity(entity_id)
+                        owns_entity = True
                         break
-                if target_entity:
+                if owns_entity:
                     break
+
+            if owns_entity:
+                target_entity = _get_sensor_entity(hass, entity_id)
 
             if target_entity is None:
                 _LOGGER.error(
@@ -193,7 +220,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             target_device_id = call.data[ATTR_DEVICE_ID]
             dev_reg = dr.async_get(hass)
             ent_reg = er.async_get(hass)
-            comp = hass.data.get("entity_components", {}).get("sensor")
 
             device = dev_reg.async_get(target_device_id)
             if not device:
@@ -270,9 +296,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         continue
                     if not ent_device.identifiers.intersection(panel_device_identifiers):
                         continue
-                    if comp is None:
-                        continue
-                    entity = comp.get_entity(ent_entry.entity_id)
+                    entity = _get_sensor_entity(hass, ent_entry.entity_id)
                     if entity is None or not hasattr(entity, "_accept_next_value"):
                         continue
                     reset_lines.append(_reset_energy_entity(entity, ent_entry.entity_id))
@@ -301,18 +325,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    # Gracefully shutdown WebSocket before unloading
-    coordinator = hass.data[DOMAIN].get(entry.entry_id)
-    if coordinator:
-        await coordinator.async_shutdown()
-    
-    # Use the built-in unload method
+    # Unload platforms first. Only tear down the coordinator's websocket/REST
+    # tasks (and drop it from hass.data) once we know the unload actually
+    # succeeded — if it fails, entities remain loaded and need a live
+    # coordinator to keep updating, not a shut-down one.
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
-    # Also pop the coordinator from hass.data
+
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
-        
+        coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if coordinator:
+            await coordinator.async_shutdown()
+
     return unload_ok
 
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:

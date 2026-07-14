@@ -308,8 +308,12 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             _LOGGER.error(f"[v{self._service.version}] Error in debounced update: {e}")
 
         finally:
-            # ALWAYS re-arm the timer so updates never stall
-            if self._websocket_connected:
+            # ALWAYS re-arm the timer so updates never stall, unless the
+            # coordinator is shutting down — otherwise a re-arm racing with
+            # async_shutdown() (which cancels self._debounce_timer captured
+            # before this new one is assigned) can leak a timer that fires
+            # after shutdown.
+            if self._websocket_connected and not self._service._shutdown_requested:
                 self._debounce_timer = self._hass.loop.call_later(
                     inform_rate,
                     self._apply_debounced_update
