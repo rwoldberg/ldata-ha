@@ -1642,9 +1642,23 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
                 current_value = 0.0
                 if self.leg_to_total == "both":
                     try:
-                        val = breaker_data[self.entity_description.key]
-                        if val is not None:
-                            current_value = float(val)
+                        if self.entity_description.key == "current":
+                            # breaker_data["current"] is deliberately
+                            # de-duplicated for 2-pole breakers (both legs of
+                            # a 240V circuit carry the same physical current,
+                            # so it's averaged there rather than summed) — but
+                            # current1/current2 are genuine per-leg bus
+                            # totals. Sum those here instead so the panel
+                            # total "Amps" always equals "Amps Leg 1" +
+                            # "Amps Leg 2", matching how Watts is already
+                            # additive across both legs for every breaker.
+                            c1 = breaker_data.get("current1")
+                            c2 = breaker_data.get("current2")
+                            current_value = (c1 or 0.0) + (c2 or 0.0)
+                        else:
+                            val = breaker_data[self.entity_description.key]
+                            if val is not None:
+                                current_value = float(val)
                     except (ValueError, KeyError, TypeError):
                         current_value = 0.0
                 else:
