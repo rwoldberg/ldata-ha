@@ -16,6 +16,8 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
     UnitOfElectricCurrent,
     UnitOfElectricPotential,
     UnitOfEnergy,
@@ -44,6 +46,7 @@ from .const import (
     MAX_DAILY_ENERGY_KWH,
 )
 from .coordinator import LDATAUpdateCoordinator
+from .ldata_base_entity import find_panel
 from .ldata_ct_entity import LDATACTEntity
 from .ldata_entity import LDATAEntity
 
@@ -188,8 +191,12 @@ class SensorDescription(SensorEntityDescription):
     name: str | None = None
 
 
+# Indices into SENSOR_TYPES below — named so call sites read as
+# SENSOR_TYPES[POWER] instead of an unexplained SENSOR_TYPES[POWER].
+POWER, VOLTAGE, CURRENT, FREQUENCY, IMPORT, CONSUMPTION = range(6)
+
 SENSOR_TYPES = (
-    SensorDescription(  # index=0
+    SensorDescription(  # POWER
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfPower.WATT,
@@ -197,7 +204,7 @@ SENSOR_TYPES = (
         key="power",
         unique_id_suffix="_watts",
     ),
-    SensorDescription(  # index=1
+    SensorDescription(  # VOLTAGE
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
@@ -205,7 +212,7 @@ SENSOR_TYPES = (
         key="voltage",
         unique_id_suffix="_volts",
     ),
-    SensorDescription(  # index=2
+    SensorDescription(  # CURRENT
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
@@ -213,7 +220,7 @@ SENSOR_TYPES = (
         key="current",
         unique_id_suffix="_amps",
     ),
-    SensorDescription(  # index=3
+    SensorDescription(  # FREQUENCY
         device_class=SensorDeviceClass.FREQUENCY,
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfFrequency.HERTZ,
@@ -221,7 +228,7 @@ SENSOR_TYPES = (
         key="frequency",
         unique_id_suffix="_hz",
     ),
-    SensorDescription(  # index=4
+    SensorDescription(  # IMPORT
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
@@ -229,7 +236,7 @@ SENSOR_TYPES = (
         key="import",
         unique_id_suffix="_Import_kWh",
     ),
-    SensorDescription(  # index=5
+    SensorDescription(  # CONSUMPTION
         device_class=SensorDeviceClass.ENERGY,
         state_class=SensorStateClass.TOTAL_INCREASING,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
@@ -264,16 +271,16 @@ async def async_setup_entry(
 
     for ct_id, ct_data in coordinator.data.get("cts", {}).items():
         entities_to_add.append(
-            LDATAEnergyUsageSensor(coordinator, ct_data, SENSOR_TYPES[4])
+            LDATAEnergyUsageSensor(coordinator, ct_data, SENSOR_TYPES[IMPORT])
         )
         entities_to_add.append(
-            LDATAEnergyUsageSensor(coordinator, ct_data, SENSOR_TYPES[5])
+            LDATAEnergyUsageSensor(coordinator, ct_data, SENSOR_TYPES[CONSUMPTION])
         )
         entities_to_add.append(
-            LDATACTOutputSensor(coordinator, ct_data, SENSOR_TYPES[2])
+            LDATACTOutputSensor(coordinator, ct_data, SENSOR_TYPES[CURRENT])
         )
         entities_to_add.append(
-            LDATACTOutputSensor(coordinator, ct_data, SENSOR_TYPES[0])
+            LDATACTOutputSensor(coordinator, ct_data, SENSOR_TYPES[POWER])
         )
         entities_to_add.append(
             LDATACTDailyUsageSensor(coordinator, ct_data)
@@ -485,18 +492,18 @@ async def async_setup_entry(
                                       breaker_energy_key="import")
             )
         entities_to_add.append(
-            LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[0])
+            LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[POWER])
         )
         entities_to_add.append(
-            LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[2])
+            LDATAOutputSensor(coordinator, breaker_data, SENSOR_TYPES[CURRENT])
         )
         # Breaker Lifetime Import sensor
         if _imp_valid or _v2_solar_signal or _import_fallback:
             entities_to_add.append(
-                LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[4])
+                LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[IMPORT])
             )
         entities_to_add.append(
-            LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[5])
+            LDATABreakerEnergyUsageSensor(coordinator, breaker_data, SENSOR_TYPES[CONSUMPTION])
         )
         # Diagnostic sensors
         entities_to_add.append(
@@ -536,32 +543,32 @@ async def async_setup_entry(
         )
         entities_to_add.append(
             LDATATotalUsageSensor(
-                coordinator, entity_data, SENSOR_TYPES[0], average=False, which_leg="both"
+                coordinator, entity_data, SENSOR_TYPES[POWER], which_leg="both"
             )
         )
         entities_to_add.append(
             LDATATotalUsageSensor(
-                coordinator, entity_data, SENSOR_TYPES[2], average=False, which_leg="both"
+                coordinator, entity_data, SENSOR_TYPES[CURRENT], which_leg="both"
             )
         )
         entities_to_add.append(
             LDATAPanelOutputSensor(
-                coordinator, entity_data, SENSOR_TYPES[3], which_leg="1"
+                coordinator, entity_data, SENSOR_TYPES[FREQUENCY], which_leg="1"
             )
         )
         entities_to_add.append(
             LDATAPanelOutputSensor(
-                coordinator, entity_data, SENSOR_TYPES[3], which_leg="2"
+                coordinator, entity_data, SENSOR_TYPES[FREQUENCY], which_leg="2"
             )
         )
         entities_to_add.append(
             LDATAPanelOutputSensor(
-                coordinator, entity_data, SENSOR_TYPES[1], which_leg="1"
+                coordinator, entity_data, SENSOR_TYPES[VOLTAGE], which_leg="1"
             )
         )
         entities_to_add.append(
             LDATAPanelOutputSensor(
-                coordinator, entity_data, SENSOR_TYPES[1], which_leg="2"
+                coordinator, entity_data, SENSOR_TYPES[VOLTAGE], which_leg="2"
             )
         )
         
@@ -573,24 +580,24 @@ async def async_setup_entry(
         entity_data_leg1 = {**entity_data, "poles": 1, "position": 1}
         entities_to_add.append(
             LDATATotalUsageSensor(
-                coordinator, entity_data_leg1, SENSOR_TYPES[0], average=False, which_leg="1"
+                coordinator, entity_data_leg1, SENSOR_TYPES[POWER], which_leg="1"
             )
         )
         entities_to_add.append(
             LDATATotalUsageSensor(
-                coordinator, entity_data_leg1, SENSOR_TYPES[2], average=False, which_leg="1"
+                coordinator, entity_data_leg1, SENSOR_TYPES[CURRENT], which_leg="1"
             )
         )
         
         entity_data_leg2 = {**entity_data, "poles": 1, "position": 3}
         entities_to_add.append(
             LDATATotalUsageSensor(
-                coordinator, entity_data_leg2, SENSOR_TYPES[0], average=False, which_leg="2"
+                coordinator, entity_data_leg2, SENSOR_TYPES[POWER], which_leg="2"
             )
         )
         entities_to_add.append(
             LDATATotalUsageSensor(
-                coordinator, entity_data_leg2, SENSOR_TYPES[2], average=False, which_leg="2"
+                coordinator, entity_data_leg2, SENSOR_TYPES[CURRENT], which_leg="2"
             )
         )
 
@@ -599,7 +606,83 @@ async def async_setup_entry(
         async_add_entities(entities_to_add)
 
 
-class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
+class _DailyEnergySensorMixin:
+    """Shared TOTAL_INCREASING config, jitter-clamp, and monotonic-guard logic.
+
+    Used by both LDATADailyUsageSensor (breaker/panel-total) and
+    LDATACTDailyUsageSensor (CT). Their hw-counter/power×time update state
+    machines differ enough (different data sources, different re-baseline
+    rules) that they stay separate — only the display-layer clamp and the
+    backwards-jump guard are truly identical between them.
+    """
+
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the used kilowatts of the device."""
+        if self._state is not None:
+            val = round(self._state, 2)
+            # TOTAL_INCREASING clamp: never report a decrease within a day.
+            # Hardware counter jitter (e.g. 21.31→21.30) or rounding can
+            # cause tiny dips that trigger HA recorder warnings.
+            # Midnight resets (val near 0 while _last_reported is high) are
+            # allowed — HA handles those natively for TOTAL_INCREASING.
+            if self._last_reported is not None and val < self._last_reported:
+                # Only hold back genuinely tiny dips (hardware/rounding jitter,
+                # e.g. 21.31 -> 21.30). Any larger drop is a real change —
+                # either a midnight reset or a legitimate mid-day correction —
+                # and must be reported, not frozen at a stale high value.
+                if (self._last_reported - val) <= _DAILY_JITTER_EPSILON_KWH:
+                    return self._last_reported  # Jitter — hold previous value
+            self._last_reported = val
+            return val
+        return 0.0
+
+    def _apply_monotonic_guard(
+        self, daily: float, *, label: str = "consumption", extra_log_context: str = ""
+    ) -> float | None:
+        """Reject a daily-energy update that would look like a backwards jump.
+
+        Daily energy can only increase within the same day. Returns the
+        accepted `daily` value, or None if this update should be skipped this
+        cycle (a stale/bad reading is suspected). Auto-releases after 5
+        minutes of sustained rejection, in case the drop turns out to be a
+        real correction rather than transient bad data.
+        """
+        if not (
+            self._state is not None
+            and self._state > 0.5
+            and daily < self._state - 0.05
+        ):
+            if self._monotonic_reject_since is not None:
+                self._monotonic_reject_since = None
+            return daily
+
+        now = time.time()
+        if self._monotonic_reject_since is None:
+            self._monotonic_reject_since = now
+        elapsed = now - self._monotonic_reject_since
+        if elapsed < 300:
+            if _log_data_warnings_enabled(self.coordinator):
+                _LOGGER.debug(
+                    "Rejecting stale %s for %s: daily would decrease %.2f -> %.2f%s",
+                    label, self.entity_id, self._state, daily, extra_log_context
+                )
+            return None
+
+        if _log_data_warnings_enabled(self.coordinator):
+            _LOGGER.warning(
+                "Releasing monotonic guard for %s after %.0fs: %.2f -> %.2f",
+                self.entity_id, elapsed, self._state, daily
+            )
+        self._monotonic_reject_since = None
+        return daily
+
+
+class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, RestoreEntity):
     """Sensor that tracks daily usage for an LDATA device.
     
     Dual-mode operation:
@@ -612,10 +695,6 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
     Mode is auto-detected per panel based on whether energyConsumption data
     is available.
     """
-
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
     def __init__(
         self, coordinator: LDATAUpdateCoordinator, data, panelTotal, which_panel: str,
@@ -667,13 +746,21 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         # runs with _midnight_baseline=None, overwrites it with the current counter
         # value, and the daily total resets to 0.
         if last_state := await self.async_get_last_state():
-            try:
-                restored = float(last_state.state)
-                # Clamp implausible restored values (e.g. a corrupted recorder
-                # entry) to the same sanity range live updates are held to.
-                self._state = max(0.0, min(restored, MAX_DAILY_ENERGY_KWH))
-            except (ValueError, TypeError):
-                pass
+            if last_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                _LOGGER.warning(
+                    "Restore for %s: last recorded state was '%s' — daily total "
+                    "could not be restored across this restart and will "
+                    "re-baseline from the next reading.",
+                    self.entity_id, last_state.state
+                )
+            else:
+                try:
+                    restored = float(last_state.state)
+                    # Clamp implausible restored values (e.g. a corrupted recorder
+                    # entry) to the same sanity range live updates are held to.
+                    self._state = max(0.0, min(restored, MAX_DAILY_ENERGY_KWH))
+                except (ValueError, TypeError):
+                    pass
 
             attrs = last_state.attributes or {}
             try:
@@ -731,27 +818,6 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if (self.panel_total and self._panel_energy_key == "import") or self._is_forced_import:
             return "todaymw_import"
         return "todaymw"
-
-    @property
-    def native_value(self) -> StateType:
-        """Return the used kilowatts of the device."""
-        if self._state is not None:
-            val = round(self._state, 2)
-            # TOTAL_INCREASING clamp: never report a decrease within a day.
-            # Hardware counter jitter (e.g. 21.31→21.30) or rounding can
-            # cause tiny dips that trigger HA recorder warnings.
-            # Midnight resets (val near 0 while _last_reported is high) are
-            # allowed — HA handles those natively for TOTAL_INCREASING.
-            if self._last_reported is not None and val < self._last_reported:
-                # Only hold back genuinely tiny dips (hardware/rounding jitter,
-                # e.g. 21.31 -> 21.30). Any larger drop is a real change —
-                # either a midnight reset or a legitimate mid-day correction —
-                # and must be reported, not frozen at a stale high value.
-                if (self._last_reported - val) <= _DAILY_JITTER_EPSILON_KWH:
-                    return self._last_reported  # Jitter — hold previous value
-            self._last_reported = val
-            return val
-        return 0.0
 
     def _detect_energy_key(self) -> str:
         """Detect whether this breaker is solar (uses import) or normal (uses consumption).
@@ -905,9 +971,15 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
 
         if self._midnight_baseline is None:
             # Deferred from midnight (null CT values) or lost on restart.
-            # First real poll value becomes the baseline.
-            self._midnight_baseline = consumption
-            self._state = 0.0
+            if self._state is not None:
+                # _state already reflects today's accumulated total (e.g.
+                # restored after an HA restart) — derive the baseline from
+                # it instead of wiping the daily total back to 0.
+                self._midnight_baseline = consumption - self._state
+            else:
+                # First real poll value becomes the baseline.
+                self._midnight_baseline = consumption
+                self._state = 0.0
             return
 
         daily = consumption - self._midnight_baseline
@@ -930,39 +1002,12 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             self._midnight_baseline = consumption
             daily = 0.0
 
-        # Monotonic guard: daily energy can only increase within the
-        # same day.  Reject any update where a stale consumption value
-        # would cause a significant backwards jump.
-        # Release after 5 minutes of sustained rejection (data disruption).
-        if (
-            self._state is not None
-            and self._state > 0.5
-            and daily < self._state - 0.05
-        ):
-            now = time.time()
-            if self._monotonic_reject_since is None:
-                self._monotonic_reject_since = now
-            elapsed = now - self._monotonic_reject_since
-            if elapsed < 300:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.debug(
-                        "Rejecting stale consumption for %s: daily would "
-                        "decrease %.2f -> %.2f (consumption=%.3f, "
-                        "baseline=%.3f)",
-                        self.entity_id, self._state, daily,
-                        consumption, self._midnight_baseline
-                    )
-                return
-            else:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.warning(
-                        "Releasing monotonic guard for %s after %.0fs: "
-                        "%.2f -> %.2f",
-                        self.entity_id, elapsed, self._state, daily
-                    )
-                self._monotonic_reject_since = None
-        elif self._monotonic_reject_since is not None:
-            self._monotonic_reject_since = None
+        daily = self._apply_monotonic_guard(
+            daily,
+            extra_log_context=f" (consumption={consumption:.3f}, baseline={self._midnight_baseline:.3f})"
+        )
+        if daily is None:
+            return
 
         self._state = daily
 
@@ -1027,13 +1072,23 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
 
         if self._midnight_baseline is None:
             # Baseline was deferred (CT null at midnight) or lost on restart.
-            # Set it now from the first real poll value we receive.
-            self._midnight_baseline = current_lifetime_sum
-            self._state = 0.0
-            _LOGGER.debug(
-                "Deferred midnight baseline set for %s at %.3f",
-                self.entity_id, current_lifetime_sum,
-            )
+            if self._state is not None:
+                # _state already reflects today's accumulated total (e.g.
+                # restored after an HA restart) — derive the baseline from
+                # it instead of wiping the daily total back to 0.
+                self._midnight_baseline = current_lifetime_sum - self._state
+                _LOGGER.debug(
+                    "Deferred midnight baseline set for %s at %.3f "
+                    "(preserving restored state %.3f)",
+                    self.entity_id, self._midnight_baseline, self._state,
+                )
+            else:
+                self._midnight_baseline = current_lifetime_sum
+                self._state = 0.0
+                _LOGGER.debug(
+                    "Deferred midnight baseline set for %s at %.3f",
+                    self.entity_id, current_lifetime_sum,
+                )
             return
 
         daily = current_lifetime_sum - self._midnight_baseline
@@ -1061,35 +1116,12 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             self._midnight_baseline = current_lifetime_sum
             daily = 0.0
 
-        # Monotonic guard: panel daily total can only increase within the same day.
-        # This naturally protects against partial sums if a CT/breaker temporarily drops to 0.0
-        if (
-            self._state is not None
-            and self._state > 0.5
-            and daily < self._state - 0.05
-        ):
-            now = time.time()
-            if self._monotonic_reject_since is None:
-                self._monotonic_reject_since = now
-            elapsed = now - self._monotonic_reject_since
-            if elapsed < 300:  # 5 minutes
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.debug(
-                        "Rejecting stale panel total for %s: would decrease "
-                        "%.2f -> %.2f (rejecting for %.0fs)",
-                        self.entity_id, self._state, daily, elapsed
-                    )
-                return
-            else:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.warning(
-                        "Releasing monotonic guard for %s after %.0fs: "
-                        "%.2f -> %.2f (baselines were likely reset after data disruption)",
-                        self.entity_id, elapsed, self._state, daily
-                    )
-                self._monotonic_reject_since = None
-        elif self._monotonic_reject_since is not None:
-            self._monotonic_reject_since = None
+        # Panel daily total can only increase within the same day. This also
+        # naturally protects against partial sums if a CT/breaker temporarily
+        # drops to 0.0.
+        daily = self._apply_monotonic_guard(daily, label="panel total")
+        if daily is None:
+            return
 
         self._state = daily
 
@@ -1172,13 +1204,36 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self._last_power = current_power
 
     def _update_panel_total_pxt(self, today: datetime.date, is_new_day: bool):
-        """Update daily energy for panel total using totalPower × time integration."""
-        try:
-            current_power = abs(float(
-                self.coordinator.data.get(self.panel_id + "totalPower", 0)
-            ))
-        except (ValueError, TypeError):
-            return
+        """Update daily energy for panel total using power×time integration.
+
+        Sums each breaker's power contribution in the direction matching
+        this sensor's _panel_energy_key, mirroring the per-breaker sign
+        convention in _update_single_breaker_pxt: solar breakers
+        (branch_type == "Solar") contribute positive power to Import and
+        max(-power, 0) (inverter standby draw) to Consumption; regular
+        breakers only ever contribute to Consumption. Using the panel's raw
+        totalPower here (as an earlier version did) fed the exact same
+        number into both the Import and Consumption sensors, since
+        totalPower doesn't distinguish direction.
+        """
+        breakers = self.coordinator.data.get("breakers", {})
+        is_import = self._panel_energy_key == "import"
+        current_power = 0.0
+        for b_data in breakers.values():
+            if b_data.get("panel_id") != self.panel_id:
+                continue
+            try:
+                raw_power = float(b_data.get("power") or 0.0)
+            except (ValueError, TypeError):
+                continue
+            if b_data.get("branch_type") == "Solar":
+                if is_import:
+                    current_power += max(raw_power, 0.0)
+                else:
+                    current_power += max(-raw_power, 0.0)
+            elif not is_import:
+                current_power += abs(raw_power)
+            # Regular (non-solar) breakers never contribute to Import.
 
         now = time.time()
         options = self.coordinator.config_entry.options
@@ -1210,12 +1265,8 @@ class LDATADailyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self._last_power = current_power
 
 
-class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
+class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEntity, RestoreEntity):
     """Sensor that tracks daily usage from a CT clamp's lifetime total."""
-
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
     def __init__(
         self, coordinator: LDATAUpdateCoordinator, data,
@@ -1247,11 +1298,19 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         # LDATADailyUsageSensor — the immediate coordinator listener callback
         # would overwrite _midnight_baseline with the current counter value.
         if last_state := await self.async_get_last_state():
-            try:
-                restored = float(last_state.state)
-                self._state = max(0.0, min(restored, MAX_DAILY_ENERGY_KWH))
-            except (ValueError, TypeError):
-                pass
+            if last_state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                _LOGGER.warning(
+                    "Restore for %s: last recorded state was '%s' — daily total "
+                    "could not be restored across this restart and will "
+                    "re-baseline from the next reading.",
+                    self.entity_id, last_state.state
+                )
+            else:
+                try:
+                    restored = float(last_state.state)
+                    self._state = max(0.0, min(restored, MAX_DAILY_ENERGY_KWH))
+                except (ValueError, TypeError):
+                    pass
 
             attrs = last_state.attributes or {}
             try:
@@ -1290,20 +1349,6 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         if self._energy_key == "import":
             return "daily_import"
         return "todaymw"
-
-    @property
-    def native_value(self) -> StateType:
-        """Return the used kilowatts of the device."""
-        if self._state is not None:
-            val = round(self._state, 2)
-            if self._last_reported is not None and val < self._last_reported:
-                # See _DAILY_JITTER_EPSILON_KWH: only hold back tiny dips, not
-                # legitimate resets or mid-day corrections of any size.
-                if (self._last_reported - val) <= _DAILY_JITTER_EPSILON_KWH:
-                    return self._last_reported
-            self._last_reported = val
-            return val
-        return 0.0
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1452,8 +1497,14 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                     if consumption is None:
                         return
 
-            self._midnight_baseline = consumption
-            self._state = 0.0
+            if self._state is not None:
+                # _state already reflects today's accumulated total (e.g.
+                # restored after an HA restart) — derive the baseline from
+                # it instead of wiping the daily total back to 0.
+                self._midnight_baseline = consumption - self._state
+            else:
+                self._midnight_baseline = consumption
+                self._state = 0.0
             self._last_date = today
             return
 
@@ -1485,39 +1536,12 @@ class LDATACTDailyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             self._midnight_baseline = consumption
             daily = 0.0
 
-        # Monotonic guard: daily energy can only increase within the
-        # same day.  Reject any update where a stale consumption value
-        # would cause a significant backwards jump.
-        # Release after 5 minutes of sustained rejection (data disruption).
-        if (
-            self._state is not None
-            and self._state > 0.5
-            and daily < self._state - 0.05
-        ):
-            now = time.time()
-            if self._monotonic_reject_since is None:
-                self._monotonic_reject_since = now
-            elapsed = now - self._monotonic_reject_since
-            if elapsed < 300:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.debug(
-                        "Rejecting stale consumption for %s: daily would "
-                        "decrease %.2f -> %.2f (consumption=%.3f, "
-                        "baseline=%.3f)",
-                        self.entity_id, self._state, daily,
-                        consumption, self._midnight_baseline
-                    )
-                return
-            else:
-                if _log_data_warnings_enabled(self.coordinator):
-                    _LOGGER.warning(
-                        "Releasing monotonic guard for %s after %.0fs: "
-                        "%.2f -> %.2f",
-                        self.entity_id, elapsed, self._state, daily
-                    )
-                self._monotonic_reject_since = None
-        elif self._monotonic_reject_since is not None:
-            self._monotonic_reject_since = None
+        daily = self._apply_monotonic_guard(
+            daily,
+            extra_log_context=f" (consumption={consumption:.3f}, baseline={self._midnight_baseline:.3f})"
+        )
+        if daily is None:
+            return
 
         self._state = daily
         self._last_date = today
@@ -1608,16 +1632,69 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         coordinator: LDATAUpdateCoordinator,
         data,
         description: SensorDescription,
-        average: bool,
         which_leg: str,
     ) -> None:
         """Init sensor."""
         self.entity_description = description
         self.leg_to_total = which_leg
         super().__init__(data=data, coordinator=coordinator)
-        self.is_average = average
         self._state = self.total_values()
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    def _panel_leg_totals(self) -> dict:
+        """Sum power/current across all breakers on this panel, once per coordinator update.
+
+        Shared by the up-to-5 sibling LDATATotalUsageSensor entities per
+        panel (Watts/Amps x leg1/leg2, plus the Amps "both" total) that would
+        otherwise each independently scan every breaker on every coordinator
+        update. Cached on the coordinator and invalidated whenever
+        coordinator.data is replaced with a new object — coordinator.data is
+        always swapped wholesale on update, never mutated in place.
+        """
+        data = self.coordinator.data
+        cache = getattr(self.coordinator, "_panel_leg_totals_cache", None)
+        if cache is None or cache.get("_data_id") != id(data):
+            cache = {"_data_id": id(data)}
+            self.coordinator._panel_leg_totals_cache = cache
+
+        panel_serial = self.entity_data["serialNumber"]
+        totals = cache.get(panel_serial)
+        if totals is not None:
+            return totals
+
+        totals = {
+            "power1": 0.0, "power2": 0.0,
+            "current1": 0.0, "current2": 0.0, "current_both": 0.0,
+        }
+        if data and "breakers" in data:
+            for breaker_data in data["breakers"].values():
+                if breaker_data.get("panel_id") != panel_serial:
+                    continue
+
+                def _num(key):
+                    try:
+                        val = breaker_data[key]
+                        return float(val) if val is not None else 0.0
+                    except (ValueError, KeyError, TypeError):
+                        return 0.0
+
+                p1, p2 = _num("power1"), _num("power2")
+                c1, c2 = _num("current1"), _num("current2")
+
+                totals["power1"] += max(p1, 0.0)
+                totals["power2"] += max(p2, 0.0)
+                totals["current1"] += max(c1, 0.0)
+                totals["current2"] += max(c2, 0.0)
+                # breaker_data["current"] is deliberately de-duplicated for
+                # 2-pole breakers (both legs of a 240V circuit carry the same
+                # physical current) — but current1/current2 are genuine
+                # per-leg bus totals. Sum those here instead so the panel
+                # total "Amps" always equals "Amps Leg 1" + "Amps Leg 2",
+                # matching how Watts is already additive across both legs.
+                totals["current_both"] += max(c1 + c2, 0.0)
+
+        cache[panel_serial] = totals
+        return totals
 
     def total_values(self) -> float:
         """Total value for all breakers."""
@@ -1626,58 +1703,19 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
 
         # Fast path: totalPower is pre-calculated and maintained by all update paths.
         # Use it for the common case (total power, both legs) to avoid iterating all breakers.
-        if self.entity_description.key == "power" and self.leg_to_total == "both" and not self.is_average:
+        if self.entity_description.key == "power" and self.leg_to_total == "both":
             key = self.entity_data["serialNumber"] + "totalPower"
             try:
                 return float(self.coordinator.data.get(key, 0))
             except (ValueError, TypeError):
                 return 0.0
 
-        # General path: iterate breakers for per-leg totals, current totals, averages
-        total = 0.0
-        count = 0
-        for breaker in self.coordinator.data["breakers"].items():
-            breaker_data = breaker[1]
-            if breaker_data["panel_id"] == self.entity_data["serialNumber"]:
-                current_value = 0.0
-                if self.leg_to_total == "both":
-                    try:
-                        if self.entity_description.key == "current":
-                            # breaker_data["current"] is deliberately
-                            # de-duplicated for 2-pole breakers (both legs of
-                            # a 240V circuit carry the same physical current,
-                            # so it's averaged there rather than summed) — but
-                            # current1/current2 are genuine per-leg bus
-                            # totals. Sum those here instead so the panel
-                            # total "Amps" always equals "Amps Leg 1" +
-                            # "Amps Leg 2", matching how Watts is already
-                            # additive across both legs for every breaker.
-                            c1 = breaker_data.get("current1")
-                            c2 = breaker_data.get("current2")
-                            current_value = (c1 or 0.0) + (c2 or 0.0)
-                        else:
-                            val = breaker_data[self.entity_description.key]
-                            if val is not None:
-                                current_value = float(val)
-                    except (ValueError, KeyError, TypeError):
-                        current_value = 0.0
-                else:
-                    try:
-                        val = breaker_data[
-                            self.entity_description.key + self.leg_to_total
-                        ]
-                        if val is not None:
-                            current_value = float(val)
-                    except (ValueError, KeyError, TypeError):
-                        current_value = 0.0
-                current_value = max(current_value, 0.0)
-                total += current_value
-                count += 1
-        if self.is_average is True:
-            if count > 0:
-                return total / count
-            return 0
-        return total
+        totals = self._panel_leg_totals()
+        if self.entity_description.key == "current":
+            if self.leg_to_total == "both":
+                return totals["current_both"]
+            return totals.get(f"current{self.leg_to_total}", 0.0)
+        return totals.get(f"power{self.leg_to_total}", 0.0)
 
     @callback
     def _state_update(self):
@@ -2013,16 +2051,13 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            # Add safety check for coordinator.data
-            if panels := self.coordinator.data.get("panels"):
-                for panel in panels:
-                    if panel["id"] == self.panel_data["id"]:
-                        self._state = panel[
-                            self.entity_description.key + self.leg_to_total
-                        ]
-                        break
+            if self.coordinator.data.get("panels"):
+                panel = find_panel(self.coordinator, self.panel_data["id"])
+                if panel is not None:
+                    self._state = panel[self.entity_description.key + self.leg_to_total]
+                # else: no matching panel this cycle — leave prior state as-is
             else:
-                self._state = None # No panel data in coordinator
+                self._state = None  # No panel data in coordinator
         except KeyError:
             self._state = None
         self.async_write_ha_state()
@@ -2479,13 +2514,11 @@ class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
-            if panels := self.coordinator.data.get("panels"):
-                for panel in panels:
-                    if panel["id"] == self._panel_id:
-                        val = panel.get("rssi")
-                        if val is not None:
-                            self._state = val
-                        break
+            panel = find_panel(self.coordinator, self._panel_id)
+            if panel is not None:
+                val = panel.get("rssi")
+                if val is not None:
+                    self._state = val
         except (KeyError, TypeError):
             pass
         self.async_write_ha_state()

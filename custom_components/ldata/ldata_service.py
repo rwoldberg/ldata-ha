@@ -120,8 +120,6 @@ class LDATAService:
         # Detection threshold (still used for logging, but no longer triggers breaker REST poll)
         _WS_DETECTION_THRESHOLD = 5
         self._WS_DETECTION_THRESHOLD = _WS_DETECTION_THRESHOLD
-        # Track when WS last delivered breaker data per panel (for coordinator)
-        self._ws_last_breaker_data_time: dict[str, float] = {}
 
         # ── Unified zero-transition protection ────────────────────────
         # On V2 firmware the cloud sporadically sends zero power *and/or*
@@ -306,8 +304,7 @@ class LDATAService:
         _LOGGER.debug(f"[v{self.version}] Validating stored auth token.")
         self.auth_token = self.refresh_token
         
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
+        headers = self._auth_headers()
         url = f"https://my.leviton.com/api/Person/{self.userid}/residentialPermissions"
         
         # --- RETRY LOGIC START ---
@@ -378,116 +375,110 @@ class LDATAService:
         
         return False
 
+    def _auth_headers(self, **extra) -> dict:
+        """Build request headers carrying the current auth token, plus any extras."""
+        headers = {**defaultHeaders, "authorization": self.auth_token}
+        headers.update(extra)
+        return headers
+
+    def _residence_api_get(self, url: str, context_str: str, clear_tokens_on_failure: bool = False):
+        """GET a residence/account API endpoint with the shared status/auth-error handling.
+
+        Returns the parsed JSON body on a 200 response with a non-empty
+        payload, or None on any other outcome (logged accordingly). Raises
+        LDATAAuthError on 401/403/406 so callers can trigger re-auth.
+        """
+        headers = self._auth_headers()
+        try:
+            result = self.session.get(url, headers=headers, timeout=15)
+            _LOGGER.debug(f"[v{self.version}] Get {context_str} result {result.status_code}: {result.text}")
+
+            if result.status_code in (401, 403, 406):
+                raise LDATAAuthError(
+                    f"[v{self.version}] Auth token invalid during API call get_{context_str}. "
+                    f"Status code: {result.status_code}"
+                )
+
+            result_json = result.json()
+            if result.status_code == 200 and len(result_json) > 0:
+                return result_json
+
+            _LOGGER.error(f"[v{self.version}] Unable to get {context_str}!")
+            if clear_tokens_on_failure:
+                self.clear_tokens()
+        except Exception as e:  # pylint: disable=broad-except
+            if isinstance(e, LDATAAuthError):
+                raise
+            _LOGGER.exception(f"[v{self.version}] Exception while getting {context_str}!")
+            if clear_tokens_on_failure:
+                self.clear_tokens()
+
+        return None
+
     def get_residential_account(self) -> bool:
         """Get the Residential Account for the user."""
         if self.account_id:
             _LOGGER.debug(f"[v{self.version}] Account ID already known.")
             return True
 
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
         url = f"https://my.leviton.com/api/Person/{self.userid}/residentialPermissions"
+        result_json = self._residence_api_get(url, "Residential Account", clear_tokens_on_failure=True)
+        if result_json is None:
+            return False
 
-        try:
-            result = self.session.get(
-                url,
-                headers=headers,
-                timeout=15,
-            )
-            _LOGGER.debug(
-                f"[v{self.version}] Get Residential Account result {result.status_code}: {result.text}"
-            )
-            
-            if result.status_code in (401, 403, 406):
-                raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_residence. Status code: {result.status_code}")
-
-            result_json = result.json()
-            if result.status_code == 200 and len(result_json) > 0:
-                # Search for the residential account id
-                for item in result_json:
-                    if "residentialAccountId" in item:
-                        self.account_id = item["residentialAccountId"]
-                        if self.account_id is not None:
-                            break
+        # Search for the residential account id
+        for item in result_json:
+            if "residentialAccountId" in item:
+                self.account_id = item["residentialAccountId"]
                 if self.account_id is not None:
-                    # Save the userId if we just got it
-                    if "userId" in result_json[0]:
-                        self.userid = result_json[0]["userId"]
-                    return True
-            _LOGGER.error(f"[v{self.version}] Unable to get Residential Account!")
-            self.clear_tokens()
-        except Exception as e:  # pylint: disable=broad-except
-            if isinstance(e, LDATAAuthError):
-                raise # Re-raise auth errors
-            _LOGGER.exception(f"[v{self.version}] Exception while getting Residential Account!")
-            self.clear_tokens()
+                    break
+        if self.account_id is not None:
+            # Save the userId if we just got it
+            if "userId" in result_json[0]:
+                self.userid = result_json[0]["userId"]
+            return True
 
+        _LOGGER.error(f"[v{self.version}] Unable to get Residential Account!")
+        self.clear_tokens()
         return False
 
     def get_residencePermissions(self) -> bool:
         """Get the additional residences for the user."""
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
         url = f"https://my.leviton.com/api/Person/{self.userid}/residentialPermissions"
-        try:
-            result = self.session.get(
-                url,
-                headers=headers,
-                timeout=15,
-            )
-            _LOGGER.debug(
-                f"[v{self.version}] Get Residence Permissions result {result.status_code}: {result.text}"
-            )
-            if result.status_code in (401, 403, 406):
-                raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_residencePermissions. Status code: {result.status_code}")
+        result_json = self._residence_api_get(url, "Residence Permissions")
+        if result_json is None:
+            return False
 
-            result_json = result.json()
-            if result.status_code == 200 and len(result_json) > 0:
-                for account in result_json:
-                    if account["residenceId"] is not None:
-                        if account["residenceId"] not in self.residence_id_list:
-                            self.residence_id_list.append(account["residenceId"])
-                return True
-            _LOGGER.error(f"[v{self.version}] Unable to get Residence Permissions!")
-        except Exception as e:  # pylint: disable=broad-except
-            if isinstance(e, LDATAAuthError):
-                raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting Residence Permissions!")
-        return False
+        for account in result_json:
+            if account["residenceId"] is not None:
+                if account["residenceId"] not in self.residence_id_list:
+                    self.residence_id_list.append(account["residenceId"])
+        return True
 
     def get_residences(self) -> bool:
         """Get the Residential Account for the user."""
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
         url = f"https://my.leviton.com/api/ResidentialAccounts/{self.account_id}/residences"
-        try:
-            result = self.session.get(
-                url,
-                headers=headers,
-                timeout=15,
-            )
-            _LOGGER.debug(
-                f"[v{self.version}] Get Residences Account result {result.status_code}: {result.text}"
-            )
-            if result.status_code in (401, 403, 406):
-                raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_residences. Status code: {result.status_code}")
+        result_json = self._residence_api_get(url, "Residences")
+        if result_json is None:
+            return False
 
-            result_json = result.json()
-            if result.status_code == 200 and len(result_json) > 0:
-                self.residence_id_list.append(result_json[0]["id"])
-                return True
-            _LOGGER.error(f"[v{self.version}] Unable to get Residences!")
-        except Exception as e:  # pylint: disable=broad-except
-            if isinstance(e, LDATAAuthError):
-                raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting Residences!")
-        return False
+        self.residence_id_list.append(result_json[0]["id"])
+        return True
 
     def get_residence(self) -> bool:
         """Get the Residential Account for the user."""
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
         url = f"https://my.leviton.com/api/ResidentialAccounts/{self.account_id}"
+        result_json = self._residence_api_get(url, "Residence", clear_tokens_on_failure=True)
+        if result_json is None:
+            return False
+
+        self.residence_id_list.append(result_json["primaryResidenceId"])
+        return True
+
+    def _get_whems_resource(self, panel_id: str, endpoint: str, label: str) -> list[dict] | None:
+        """GET a per-panel WHEMS sub-resource (breakers or CTs) with shared error handling."""
+        headers = self._auth_headers(filter="{}")
+        url = f"https://my.leviton.com/api/IotWhems/{panel_id}/{endpoint}"
         try:
             result = self.session.get(
                 url,
@@ -495,95 +486,39 @@ class LDATAService:
                 timeout=15,
             )
             _LOGGER.debug(
-                f"[v{self.version}] Get Residence Account result {result.status_code}: {result.text}"
+                f"[v{self.version}] Get WHEMS {label} result {result.status_code}: {result.text}"
             )
             if result.status_code in (401, 403, 406):
-                raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_residence. Status code: {result.status_code}")
+                raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_Whems_{label}. Status code: {result.status_code}")
 
-            result_json = result.json()
-            if result.status_code == 200 and len(result_json) > 0:
-                self.residence_id_list.append(result_json["primaryResidenceId"])
-                return True
-            _LOGGER.error(f"[v{self.version}] Unable to get Residence!")
-            self.clear_tokens()
+            if result.status_code == 200:
+                return result.json()
+
+            clean_msg = self._get_clean_error_msg(result.text)
+            if result.status_code >= 500:
+                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} for {label} — will retry next cycle ({clean_msg})")
+            else:
+                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS {label}! HTTP {result.status_code}: {clean_msg}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting Residence!")
-            self.clear_tokens()
-        return False
+            _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS {label}!")
+        return None
 
     def get_Whems_breakers(self, panel_id: str) -> list[dict] | None:
         """Get the whemns modules for the residence."""
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
-        headers["filter"] = "{}"
-        url = f"https://my.leviton.com/api/IotWhems/{panel_id}/residentialBreakers"
-        try:
-            result = self.session.get(
-                url,
-                headers=headers,
-                timeout=15,
-            )
-            _LOGGER.debug(
-                f"[v{self.version}] Get WHEMS breakers result {result.status_code}: {result.text}"
-            )
-            if result.status_code in (401, 403, 406):
-                raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_Whems_breakers. Status code: {result.status_code}")
-
-            if result.status_code == 200:
-                return result.json()
-            
-            clean_msg = self._get_clean_error_msg(result.text)
-            if result.status_code >= 500:
-                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} for breakers — will retry next cycle ({clean_msg})")
-            else:
-                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS breakers! HTTP {result.status_code}: {clean_msg}")
-        except Exception as e:  # pylint: disable=broad-except
-            if isinstance(e, LDATAAuthError):
-                raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS breakers!")
-        return None
+        return self._get_whems_resource(panel_id, "residentialBreakers", "breakers")
 
     def get_Whems_CT(self, panel_id: str) -> list[dict] | None:
         """Get the whemns CTs for the panel module."""
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
-        headers["filter"] = "{}"
-        url = f"https://my.leviton.com/api/IotWhems/{panel_id}/iotCts"
-        try:
-            result = self.session.get(
-                url,
-                headers=headers,
-                timeout=15,
-            )
-            _LOGGER.debug(
-                f"[v{self.version}] Get WHEMS CTs result {result.status_code}: {result.text}"
-            )
-            if result.status_code in (401, 403, 406):
-                raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_Whems_CT. Status code: {result.status_code}")
-
-            if result.status_code == 200:
-                return result.json()
-            
-            clean_msg = self._get_clean_error_msg(result.text)
-            if result.status_code >= 500:
-                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} for CTs — will retry next cycle ({clean_msg})")
-            else:
-                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS CTs! HTTP {result.status_code}: {clean_msg}")
-        except Exception as e:  # pylint: disable=broad-except
-            if isinstance(e, LDATAAuthError):
-                raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS CTs!")
-        return None
+        return self._get_whems_resource(panel_id, "iotCts", "CTs")
 
     def _fetch_panels(self, url_template: str, panel_type: str) -> object:
         """Helper to fetch panels of a specific type (LDATA or WHEMS)."""
         allPanels = None
         for residenceId in self.residence_id_list:
-            headers = {**defaultHeaders}
-            headers["authorization"] = self.auth_token
-            
+            headers = self._auth_headers()
+
             # Determine filter based on panel type
             if panel_type == "LDATA":
                 headers["filter"] = '{"include":["residentialBreakers"]}'
@@ -626,10 +561,7 @@ class LDATAService:
                         panel["ModuleType"] = panel_type
                         
                         # Determine connection status BEFORE sending commands
-                        is_connected = panel.get("connected", False)
-                        # Special handling for DAU models
-                        if panel.get("model") == "DAU" and panel.get("status") == "READY":
-                            is_connected = True
+                        is_connected = self._is_panel_connected(panel)
 
                         # Only force an update if the panel is actually online.
                         # This avoids wasting API calls on offline devices, saving cost/load.
@@ -693,11 +625,8 @@ class LDATAService:
 
     def _put_request(self, url: str, json_data: dict, context_str: str, referer: str = None) -> object:
         """Helper to handle PUT requests with standardized error handling."""
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
-        if referer:
-            headers["referer"] = referer
-        
+        headers = self._auth_headers(**({"referer": referer} if referer else {}))
+
         try:
             result = self.session.put(
                 url,
@@ -757,18 +686,35 @@ class LDATAService:
         referer = f"https://my.leviton.com/home/residential-breakers/{breaker_id}/settings"
         return self._put_request(url, {"blinkLED": enabled}, "set_blink_led", referer=referer)
 
+    def _is_panel_connected(self, panel: dict) -> bool:
+        """Return whether a panel should be treated as connected.
+
+        DAU models report status="READY" instead of connected=True.
+        """
+        if panel.get("model") == "DAU" and panel.get("status") == "READY":
+            return True
+        return bool(panel.get("connected", False))
+
+    _SQRT3_OVER_2 = 0.866025403784439
+
+    def _combine_leg_voltage(self, v1: float, v2: float, *, three_phase: bool, average: bool) -> float:
+        """Combine two leg voltage readings into one total.
+
+        three_phase=True uses the wye-phase formula ((v1+v2) * sqrt(3)/2);
+        otherwise the two legs are simply summed, then averaged if `average`
+        is set (used for whole-panel totals; per-breaker totals are not).
+        Callers resolve any pole-count-specific gating before calling this —
+        e.g. a 1-pole breaker always uses the plain-sum path regardless of
+        the three_phase setting.
+        """
+        if three_phase:
+            return (v1 + v2) * self._SQRT3_OVER_2
+        total = v1 + v2
+        return total / 2.0 if average else total
+
     def none_to_zero(self, data_dict, key) -> float:
-        """Convert a value to a float and replace None with 0.0."""
-        try:
-            value = data_dict[key]
-        except (KeyError, TypeError, AttributeError):
-            return 0.0
-        if value is None:
-            return 0.0
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return 0.0
+        """Convert a value to a float and replace None (or a missing/invalid value) with 0.0."""
+        return self._none_or_float(data_dict, key) or 0.0
 
     def _none_or_float(self, data_dict, key) -> float | None:
         """Convert a value to float, returning None if the key is missing or the value is None.
@@ -1028,10 +974,9 @@ class LDATAService:
                     v1 = _field("rmsVoltage2", cached_v1)
                 existing["voltage1"] = v1
                 existing["voltage2"] = v2
-                if (not three_phase) or (poles == 1):
-                    existing["voltage"] = v1 + v2
-                else:
-                    existing["voltage"] = (v1 * 0.866025403784439) + (v2 * 0.866025403784439)
+                existing["voltage"] = self._combine_leg_voltage(
+                    v1, v2, three_phase=three_phase and poles != 1, average=False
+                )
             
             # Frequency (same leg swap)
             if has_frequency_field:
@@ -1288,9 +1233,7 @@ class LDATAService:
                 _LOGGER.warning(f"[v{self.version}] Skipping panel with missing ID: {panel}")
                 continue
             panel_data["panel_type"] = panel.get("ModuleType", "WHEMS")
-            panel_data["connected"] = panel.get("connected", False)
-            if panel.get("model") == "DAU" and panel.get("status") == "READY":
-                panel_data["connected"] = True
+            panel_data["connected"] = self._is_panel_connected(panel)
             
             # Panel-level diagnostic/alarm fields
             panel_data["overVoltage"] = panel.get("overVoltage", False)
@@ -1330,12 +1273,9 @@ class LDATAService:
                 )
             _panel_v1 = self.none_to_zero(panel, "rmsVoltage")
             _panel_v2 = self.none_to_zero(panel, "rmsVoltage2")
-            if three_phase is False:
-                panel_data["voltage"] = (_panel_v1 + _panel_v2) / 2.0
-            else:
-                panel_data["voltage"] = (
-                    _panel_v1 * 0.866025403784439
-                ) + (_panel_v2 * 0.866025403784439)
+            panel_data["voltage"] = self._combine_leg_voltage(
+                _panel_v1, _panel_v2, three_phase=three_phase, average=True
+            )
             panel_data["voltage1"] = _panel_v1
             panel_data["voltage2"] = _panel_v2
             panel_data["frequency1"] = float(self.none_to_zero(panel, "frequencyA"))
@@ -1479,23 +1419,19 @@ class LDATAService:
                             breaker_data["power"] = None
                         else:
                             breaker_data["power"] = (_p1_raw or 0.0) + (_p2_raw or 0.0)
-                        if (three_phase is False) or (breaker["poles"] == 1):
-                            breaker_data["voltage"] = self.none_to_zero(
-                                breaker, "rmsVoltage"
-                            ) + self.none_to_zero(breaker, "rmsVoltage2")
-                        else:
-                            breaker_data["voltage"] = (
-                                self.none_to_zero(breaker, "rmsVoltage") * 0.866025403784439
-                            ) + (
-                                self.none_to_zero(breaker, "rmsVoltage2")
-                                * 0.866025403784439
-                            )
+                        # Voltage/frequency are read once here and reused below for
+                        # both the combined total and the per-leg assignment.
+                        _v1 = self.none_to_zero(breaker, "rmsVoltage")
+                        _v2 = self.none_to_zero(breaker, "rmsVoltage2")
+                        _f1 = self.none_to_zero(breaker, "lineFrequency")
+                        _f2 = self.none_to_zero(breaker, "lineFrequency2")
+
+                        breaker_data["voltage"] = self._combine_leg_voltage(
+                            _v1, _v2, three_phase=three_phase and breaker["poles"] != 1, average=False
+                        )
 
                         if breaker["poles"] == 2:
-                            breaker_data["frequency"] = (
-                                self.none_to_zero(breaker, "lineFrequency")
-                                + self.none_to_zero(breaker, "lineFrequency2")
-                            ) / 2.0
+                            breaker_data["frequency"] = (_f1 + _f2) / 2.0
                             _c1_raw = self._none_or_float(breaker, "rmsCurrent")
                             _c2_raw = self._none_or_float(breaker, "rmsCurrent2")
                             if _c1_raw is None and _c2_raw is None:
@@ -1505,9 +1441,7 @@ class LDATAService:
                                     (_c1_raw or 0.0) + (_c2_raw or 0.0)
                                 ) / 2
                         else:
-                            breaker_data["frequency"] = self.none_to_zero(
-                                breaker, "lineFrequency"
-                            )
+                            breaker_data["frequency"] = _f1
                             _c1_raw = self._none_or_float(breaker, "rmsCurrent")
                             _c2_raw = self._none_or_float(breaker, "rmsCurrent2")
                             if _c1_raw is None and _c2_raw is None:
@@ -1518,46 +1452,30 @@ class LDATAService:
                             breaker_data["leg"] = 1
                             breaker_data["power1"] = self._none_or_float(breaker, "power")
                             breaker_data["power2"] = self._none_or_float(breaker, "power2")
-                            breaker_data["voltage1"] = self.none_to_zero(
-                                breaker, "rmsVoltage"
-                            )
-                            breaker_data["voltage2"] = self.none_to_zero(
-                                breaker, "rmsVoltage2"
-                            )
+                            breaker_data["voltage1"] = _v1
+                            breaker_data["voltage2"] = _v2
                             breaker_data["current1"] = self._none_or_float(
                                 breaker, "rmsCurrent"
                             )
                             breaker_data["current2"] = self._none_or_float(
                                 breaker, "rmsCurrent2"
                             )
-                            breaker_data["frequency1"] = self.none_to_zero(
-                                breaker, "lineFrequency"
-                            )
-                            breaker_data["frequency2"] = self.none_to_zero(
-                                breaker, "lineFrequency2"
-                            )
+                            breaker_data["frequency1"] = _f1
+                            breaker_data["frequency2"] = _f2
                         else:
                             breaker_data["leg"] = 2
                             breaker_data["power1"] = self._none_or_float(breaker, "power2")
                             breaker_data["power2"] = self._none_or_float(breaker, "power")
-                            breaker_data["voltage1"] = self.none_to_zero(
-                                breaker, "rmsVoltage2"
-                            )
-                            breaker_data["voltage2"] = self.none_to_zero(
-                                breaker, "rmsVoltage"
-                            )
+                            breaker_data["voltage1"] = _v2
+                            breaker_data["voltage2"] = _v1
                             breaker_data["current1"] = self._none_or_float(
                                 breaker, "rmsCurrent2"
                             )
                             breaker_data["current2"] = self._none_or_float(
                                 breaker, "rmsCurrent"
                             )
-                            breaker_data["frequency1"] = self.none_to_zero(
-                                breaker, "lineFrequency2"
-                            )
-                            breaker_data["frequency2"] = self.none_to_zero(
-                                breaker, "lineFrequency"
-                            )
+                            breaker_data["frequency1"] = _f2
+                            breaker_data["frequency2"] = _f1
                         # Capture energy counters (if present on this breaker).
                         # These are hardware-measured cumulative values — more
                         # accurate than power×time integration. Stored for data
@@ -1703,9 +1621,8 @@ class LDATAService:
         else:
             url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
         
-        headers = {**defaultHeaders}
-        headers["authorization"] = self.auth_token
-        
+        headers = self._auth_headers()
+
         try:
             # Step 1: bandwidth:1 (wake up)
             r1 = self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
@@ -1759,6 +1676,45 @@ class LDATAService:
             return self._refresh_breaker_data_locked()
         finally:
             self._rest_poll_lock.release()
+
+    def _fetch_and_merge_cts(self, panel_id: str, cts: dict, log_ctx: str = "") -> bool:
+        """Settle-delay, fetch-with-retry, and merge fresh CT data for one panel into `cts`.
+
+        Firmware v2.1.0: bandwidth:0 causes the panel to disconnect from the
+        cloud. Reconnection after bandwidth:1 takes 10-20s in v2.1.0 (vs.
+        near-instant on earlier firmware). Waiting CT_BANDWIDTH_SETTLE_SECS
+        before the first fetch avoids most 502 errors without burning a retry.
+
+        Shared by _refresh_breaker_data_locked (which fetches CTs
+        opportunistically after a breaker poll's bandwidth toggle) and
+        _refresh_ct_data_locked (the dedicated CT-only poll). Mutates `cts`
+        in place; returns True if anything was updated.
+        """
+        time.sleep(CT_BANDWIDTH_SETTLE_SECS)
+
+        raw_cts = self.get_Whems_CT(panel_id)
+        for attempt, delay in enumerate(CT_FETCH_RETRY_DELAYS, start=1):
+            if raw_cts is not None:
+                break
+            _LOGGER.debug(
+                f"[v{self.version}] CT fetch{log_ctx} returned None for panel {panel_id} "
+                f"(attempt {attempt}/{len(CT_FETCH_RETRY_DELAYS)}) "
+                f"— waiting {delay}s before retry"
+            )
+            time.sleep(delay)
+            raw_cts = self.get_Whems_CT(panel_id)
+
+        updated = False
+        if raw_cts:
+            for ct in raw_cts:
+                if ct.get("usageType") != "NOT_USED":
+                    ct_id = str(ct["id"])
+                    if ct_id in cts:
+                        existing_ct = cts[ct_id].copy()
+                        self._apply_ct_update(existing_ct, ct)
+                        cts[ct_id] = existing_ct
+                        updated = True
+        return updated
 
     def _refresh_breaker_data_locked(self) -> bool:
         """Inner implementation of refresh_breaker_data, called under _rest_poll_lock.
@@ -1815,27 +1771,8 @@ class LDATAService:
                 # settle delay and retry logic used in the dedicated CT poll
                 # so that firmware v2.1.0 reconnection time is absorbed here too.
                 if self._panel_needs_rest_poll.get(panel_id, False):
-                    time.sleep(CT_BANDWIDTH_SETTLE_SECS)
-                    raw_cts = self.get_Whems_CT(panel_id)
-                    for attempt, delay in enumerate(CT_FETCH_RETRY_DELAYS, start=1):
-                        if raw_cts is not None:
-                            break
-                        _LOGGER.debug(
-                            f"[v{self.version}] CT fetch (breaker poll) returned None for panel {panel_id} "
-                            f"(attempt {attempt}/{len(CT_FETCH_RETRY_DELAYS)}) "
-                            f"— waiting {delay}s before retry"
-                        )
-                        time.sleep(delay)
-                        raw_cts = self.get_Whems_CT(panel_id)
-                    if raw_cts:
-                        for ct in raw_cts:
-                            if ct.get("usageType") != "NOT_USED":
-                                ct_id = str(ct["id"])
-                                if ct_id in cts:
-                                    existing_ct = cts[ct_id].copy()
-                                    self._apply_ct_update(existing_ct, ct)
-                                    cts[ct_id] = existing_ct
-                                    updated = True
+                    if self._fetch_and_merge_cts(panel_id, cts, log_ctx=" (breaker poll)"):
+                        updated = True
                 
             except LDATAAuthError:
                 raise
@@ -1917,34 +1854,9 @@ class LDATAService:
                 panel_type = panel_data.get("panel_type", "WHEMS")
                 self._bandwidth_toggle(panel_id, panel_type)
 
-                # Firmware v2.1.0: bandwidth:0 causes the panel to disconnect
-                # from the cloud.  Reconnection after bandwidth:1 takes 10-20s
-                # in v2.1.0 (vs. near-instant in earlier firmware).  Waiting
-                # CT_BANDWIDTH_SETTLE_SECS before the first fetch avoids most
-                # 502 errors without needing to burn a retry.
-                time.sleep(CT_BANDWIDTH_SETTLE_SECS)
+                if self._fetch_and_merge_cts(panel_id, cts):
+                    updated = True
 
-                raw_cts = self.get_Whems_CT(panel_id)
-                for attempt, delay in enumerate(CT_FETCH_RETRY_DELAYS, start=1):
-                    if raw_cts is not None:
-                        break
-                    _LOGGER.debug(
-                        f"[v{self.version}] CT fetch returned None for panel {panel_id} "
-                        f"(attempt {attempt}/{len(CT_FETCH_RETRY_DELAYS)}) "
-                        f"— waiting {delay}s before retry"
-                    )
-                    time.sleep(delay)
-                    raw_cts = self.get_Whems_CT(panel_id)
-                if raw_cts:
-                    for ct in raw_cts:
-                        if ct.get("usageType") != "NOT_USED":
-                            ct_id = str(ct["id"])
-                            if ct_id in cts:
-                                existing_ct = cts[ct_id].copy()
-                                self._apply_ct_update(existing_ct, ct)
-                                cts[ct_id] = existing_ct
-                                updated = True
-                
             except LDATAAuthError:
                 raise
             except Exception as e:
@@ -2036,7 +1948,6 @@ class LDATAService:
              
              if panel_id and panel_id in self._ws_iotwhem_count:
                  if has_electrical_data:
-                     self._ws_last_breaker_data_time[panel_id] = time.time()
                      self._ws_iotwhem_count[panel_id] = 0
                  else:
                      self._ws_iotwhem_count[panel_id] = self._ws_iotwhem_count.get(panel_id, 0) + 1
@@ -2105,10 +2016,10 @@ class LDATAService:
                                     panel["voltage2"] = float(v2)
                                 
                                 if panel.get("voltage1") is not None and panel.get("voltage2") is not None:
-                                    if not self._three_phase:
-                                        panel["voltage"] = (panel["voltage1"] + panel["voltage2"]) / 2.0
-                                    else:
-                                        panel["voltage"] = (panel["voltage1"] * 0.866025403784439) + (panel["voltage2"] * 0.866025403784439)
+                                    panel["voltage"] = self._combine_leg_voltage(
+                                        panel["voltage1"], panel["voltage2"],
+                                        three_phase=self._three_phase, average=True
+                                    )
                             
                             # Update frequency
                             if "frequencyA" in data or "frequencyB" in data:
@@ -2147,6 +2058,149 @@ class LDATAService:
             return True
             
         return None
+
+    async def _ws_bandwidth_put(self, session: aiohttp.ClientSession, panel_info: list) -> None:
+        """PUT bandwidth:1 to every panel — this is what keeps the WebSocket alive.
+
+        v1.54.2 HAR shows the app sends TWO bandwidth:1 PUTs back-to-back
+        every 50 seconds. Must PUT to EVERY panel using the correct endpoint.
+        """
+        if not panel_info:
+            return
+        headers = {
+            "Authorization": self.auth_token,
+            "Content-Type": "application/json",
+            "Origin": "https://myapp.leviton.com",
+            "Referer": "https://myapp.leviton.com/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "DNT": "1",
+        }
+        # Send TWO bandwidth:1 PUTs per panel (matches v1.54.2 app behavior)
+        for _round in range(2):
+            for panel_id, panel_type in panel_info:
+                try:
+                    if panel_type == "LDATA":
+                        url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
+                    else:
+                        url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
+                    async with session.put(
+                        url,
+                        headers=headers,
+                        json={"bandwidth": 1},
+                        timeout=aiohttp.ClientTimeout(total=10)
+                    ) as resp:
+                        _LOGGER.debug(f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id} (round {_round+1}): {resp.status}")
+                except aiohttp.ClientConnectionResetError:
+                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: connection reset (expected)")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id} failed: {e}")
+
+    async def _ws_apiversion_heartbeat(self, session: aiohttp.ClientSession) -> None:
+        """GET /apiversion — the Leviton web app polls this every ~10s.
+
+        Keeps the server-side session warm so the cloud continues pushing
+        data and honoring the bandwidth:1 setting for v2 firmware. Also
+        tracks the Leviton cloud API version and warns on genuine changes.
+        """
+        try:
+            async with session.get(
+                "https://my.leviton.com/apiversion",
+                headers={
+                    "Authorization": self.auth_token,
+                    "Origin": "https://myapp.leviton.com",
+                    "Referer": "https://myapp.leviton.com/",
+                    "Accept": "application/json, text/plain, */*",
+                    "Sec-Fetch-Dest": "empty",
+                    "Sec-Fetch-Mode": "cors",
+                    "Sec-Fetch-Site": "same-site",
+                },
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status != 200:
+                    _LOGGER.debug(
+                        f"[v{self.version}] API version heartbeat: "
+                        f"non-200 response ({resp.status}) — skipping"
+                    )
+                else:
+                    api_ver = (await resp.text()).strip()
+                    # Guard against HTML error pages (502 etc.) that
+                    # slip through with a 200-ish proxy status, or any
+                    # other non-version body.  A valid Leviton version
+                    # string is digits-and-dots only (e.g. "1.57.1").
+                    _ver_valid = bool(api_ver and api_ver.replace(".", "").isdigit())
+                    if not _ver_valid:
+                        _LOGGER.debug(
+                            f"[v{self.version}] API version heartbeat: "
+                            f"unexpected body ignored ({repr(api_ver[:40])})"
+                        )
+                    elif api_ver not in self._seen_api_versions:
+                        # Genuinely new version string never seen before.
+                        # First-ever observation is debug only; subsequent
+                        # new versions (real upgrades) warrant a WARNING.
+                        self._seen_api_versions.add(api_ver)
+                        if self._leviton_api_version is None:
+                            _LOGGER.debug(f"[v{self.version}] Leviton API version: {api_ver}")
+                        else:
+                            _LOGGER.warning(
+                                f"[v{self.version}] Leviton API version changed: "
+                                f"{self._leviton_api_version} → {api_ver}. "
+                                f"New fields or endpoints may be available — "
+                                f"consider capturing a HAR and checking for integration updates."
+                            )
+                        self._leviton_api_version = api_ver
+                    else:
+                        # Known version — update last-seen quietly.
+                        # This is normal during a rolling deployment where
+                        # the load balancer alternates between two versions.
+                        if api_ver != self._leviton_api_version:
+                            _LOGGER.debug(
+                                f"[v{self.version}] API version heartbeat: {api_ver} "
+                                f"(load-balanced flip, already known)"
+                            )
+                        else:
+                            _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
+                        self._leviton_api_version = api_ver
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            _LOGGER.debug(f"[v{self.version}] API version heartbeat failed: {e}")
+
+    def _ws_build_subscriptions(self) -> list:
+        """Build the subscribe-message list for the current residences/panels/breakers/CTs."""
+        subscriptions = []
+        for residence_id in self.residence_id_list:
+            try:
+                res_id = int(residence_id)
+            except (ValueError, TypeError):
+                res_id = residence_id
+            subscriptions.append({
+                "type": "subscribe",
+                "subscription": {"modelName": "Residence", "modelId": res_id}
+            })
+
+        if self.status_data:
+            for panel in self.status_data.get("panels", []):
+                subscriptions.append({
+                    "type": "subscribe",
+                    "subscription": {"modelName": "IotWhem", "modelId": panel["id"]}
+                })
+
+            for b_id in self.status_data.get("breakers", {}):
+                subscriptions.append({
+                    "type": "subscribe",
+                    "subscription": {"modelName": "ResidentialBreaker", "modelId": b_id}
+                })
+
+            for ct_id in self.status_data.get("cts", {}):
+                subscriptions.append({
+                    "type": "subscribe",
+                    "subscription": {"modelName": "IotCt", "modelId": int(ct_id)}
+                })
+        return subscriptions
 
     async def async_run_websocket(self, update_callback, connection_callback=None):
         """Run the WebSocket connection loop — PRIMARY data source.
@@ -2224,116 +2278,11 @@ class LDATAService:
                             if p.get("id")
                         ]
                     
-                    # Bandwidth PUT function - this is what keeps the WebSocket alive
-                    # v1.54.2 HAR shows the app sends TWO bandwidth:1 PUTs back-to-back
-                    # every 50 seconds. Must PUT to EVERY panel using the correct endpoint.
-                    async def bandwidth_put():
-                        if not panel_info:
-                            return
-                        headers = {
-                            "Authorization": self.auth_token,
-                            "Content-Type": "application/json",
-                            "Origin": "https://myapp.leviton.com",
-                            "Referer": "https://myapp.leviton.com/",
-                            "Sec-Fetch-Dest": "empty",
-                            "Sec-Fetch-Mode": "cors",
-                            "Sec-Fetch-Site": "same-site",
-                            "DNT": "1",
-                        }
-                        # Send TWO bandwidth:1 PUTs per panel (matches v1.54.2 app behavior)
-                        for _round in range(2):
-                            for panel_id, panel_type in panel_info:
-                                try:
-                                    if panel_type == "LDATA":
-                                        url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-                                    else:
-                                        url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-                                    async with session.put(
-                                        url,
-                                        headers=headers,
-                                        json={"bandwidth": 1},
-                                        timeout=aiohttp.ClientTimeout(total=10)
-                                    ) as resp:
-                                        _LOGGER.debug(f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id} (round {_round+1}): {resp.status}")
-                                except aiohttp.ClientConnectionResetError:
-                                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: connection reset (expected)")
-                                except asyncio.CancelledError:
-                                    raise
-                                except Exception as e:
-                                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id} failed: {e}")
-                    
-                    # API version heartbeat - the Leviton web app polls this every ~10s.
-                    # This keeps the server-side session warm so the cloud continues
-                    # pushing data and honoring the bandwidth:1 setting for v2 firmware.
-                    async def apiversion_heartbeat():
-                        try:
-                            async with session.get(
-                                "https://my.leviton.com/apiversion",
-                                headers={
-                                    "Authorization": self.auth_token,
-                                    "Origin": "https://myapp.leviton.com",
-                                    "Referer": "https://myapp.leviton.com/",
-                                    "Accept": "application/json, text/plain, */*",
-                                    "Sec-Fetch-Dest": "empty",
-                                    "Sec-Fetch-Mode": "cors",
-                                    "Sec-Fetch-Site": "same-site",
-                                },
-                                timeout=aiohttp.ClientTimeout(total=10)
-                            ) as resp:
-                                if resp.status != 200:
-                                    _LOGGER.debug(
-                                        f"[v{self.version}] API version heartbeat: "
-                                        f"non-200 response ({resp.status}) — skipping"
-                                    )
-                                else:
-                                    api_ver = (await resp.text()).strip()
-                                    # Guard against HTML error pages (502 etc.) that
-                                    # slip through with a 200-ish proxy status, or any
-                                    # other non-version body.  A valid Leviton version
-                                    # string is digits-and-dots only (e.g. "1.57.1").
-                                    _ver_valid = bool(api_ver and api_ver.replace(".", "").isdigit())
-                                    if not _ver_valid:
-                                        _LOGGER.debug(
-                                            f"[v{self.version}] API version heartbeat: "
-                                            f"unexpected body ignored ({repr(api_ver[:40])})"
-                                        )
-                                    elif api_ver not in self._seen_api_versions:
-                                        # Genuinely new version string never seen before.
-                                        # First-ever observation is debug only; subsequent
-                                        # new versions (real upgrades) warrant a WARNING.
-                                        self._seen_api_versions.add(api_ver)
-                                        if self._leviton_api_version is None:
-                                            _LOGGER.debug(f"[v{self.version}] Leviton API version: {api_ver}")
-                                        else:
-                                            _LOGGER.warning(
-                                                f"[v{self.version}] Leviton API version changed: "
-                                                f"{self._leviton_api_version} → {api_ver}. "
-                                                f"New fields or endpoints may be available — "
-                                                f"consider capturing a HAR and checking for integration updates."
-                                            )
-                                        self._leviton_api_version = api_ver
-                                    else:
-                                        # Known version — update last-seen quietly.
-                                        # This is normal during a rolling deployment where
-                                        # the load balancer alternates between two versions.
-                                        if api_ver != self._leviton_api_version:
-                                            _LOGGER.debug(
-                                                f"[v{self.version}] API version heartbeat: {api_ver} "
-                                                f"(load-balanced flip, already known)"
-                                            )
-                                        else:
-                                            _LOGGER.debug(f"[v{self.version}] API version heartbeat: {resp.status}")
-                                        self._leviton_api_version = api_ver
-                        except asyncio.CancelledError:
-                            raise
-                        except Exception as e:
-                            _LOGGER.debug(f"[v{self.version}] API version heartbeat failed: {e}")
-                    
                     # Initial bandwidth PUT
-                    await bandwidth_put()
-                    
+                    await self._ws_bandwidth_put(session, panel_info)
+
                     # Initial apiversion heartbeat
-                    await apiversion_heartbeat()
+                    await self._ws_apiversion_heartbeat(session)
                     
                     try:
                         # Compression intentionally disabled: permessage-deflate
@@ -2440,36 +2389,8 @@ class LDATAService:
                             await asyncio.sleep(2)
                             retry_count += 1
 
-                        subscriptions = []
-                        for residence_id in self.residence_id_list:
-                            try:
-                                res_id = int(residence_id)
-                            except (ValueError, TypeError):
-                                res_id = residence_id
-                            subscriptions.append({
-                                "type": "subscribe",
-                                "subscription": {"modelName": "Residence", "modelId": res_id}
-                            })
-                        
-                        if self.status_data:
-                            for panel in self.status_data.get("panels", []):
-                                subscriptions.append({
-                                    "type": "subscribe", 
-                                    "subscription": {"modelName": "IotWhem", "modelId": panel["id"]}
-                                })
-                            
-                            for b_id in self.status_data.get("breakers", {}):
-                                subscriptions.append({
-                                    "type": "subscribe",
-                                    "subscription": {"modelName": "ResidentialBreaker", "modelId": b_id}
-                                })
-                            
-                            for ct_id in self.status_data.get("cts", {}):
-                                subscriptions.append({
-                                    "type": "subscribe",
-                                    "subscription": {"modelName": "IotCt", "modelId": int(ct_id)}
-                                })
-                        
+                        subscriptions = self._ws_build_subscriptions()
+
                         async def send_subscriptions(is_initial=False):
                             try:
                                 for sub in subscriptions:
@@ -2520,7 +2441,7 @@ class LDATAService:
                                 last_bandwidth_put_time = current_time
                                 async def _safe_bandwidth_put():
                                     try:
-                                        await bandwidth_put()
+                                        await self._ws_bandwidth_put(session, panel_info)
                                     except (aiohttp.ClientConnectionResetError, ConnectionResetError):
                                         pass  # Expected during shutdown/reconnect
                                     except asyncio.CancelledError:
@@ -2536,7 +2457,7 @@ class LDATAService:
                                 last_heartbeat_time = current_time
                                 async def _safe_heartbeat():
                                     try:
-                                        await apiversion_heartbeat()
+                                        await self._ws_apiversion_heartbeat(session)
                                     except (aiohttp.ClientConnectionResetError, ConnectionResetError):
                                         pass
                                     except asyncio.CancelledError:

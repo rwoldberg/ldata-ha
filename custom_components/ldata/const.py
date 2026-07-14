@@ -41,7 +41,12 @@ GAP_HANDLING_SKIP = "skip"           # Don't accumulate energy during the gap
 GAP_HANDLING_EXTRAPOLATE = "extrapolate"  # Use last known power across the gap
 GAP_HANDLING_AVERAGE = "average"     # Average last known + recovery power across the gap
 GAP_HANDLING_DEFAULT = GAP_HANDLING_SKIP
-GAP_HANDLING_OPTIONS = [GAP_HANDLING_SKIP, GAP_HANDLING_EXTRAPOLATE, GAP_HANDLING_AVERAGE]
+GAP_HANDLING_LABELS = {
+    GAP_HANDLING_SKIP: "Skip — Don't accumulate energy during gaps",
+    GAP_HANDLING_EXTRAPOLATE: "Extrapolate — Assume last known power continued",
+    GAP_HANDLING_AVERAGE: "Average — Use mean of last and recovery power",
+}
+GAP_HANDLING_OPTIONS = list(GAP_HANDLING_LABELS)
 
 GAP_THRESHOLD = "gap_threshold"      # Gap threshold in minutes
 GAP_THRESHOLD_DEFAULT = 5.0          # 5 minutes — well above normal update intervals
@@ -59,4 +64,3 @@ HW_COUNTER_NONE_TOLERANCE = 3
 MAX_DAILY_ENERGY_KWH = 500.0
 
 _LEG1_POSITIONS = [ 1, 2, 5, 6,  9, 10, 13, 14, 17, 18, 21, 22, 25, 26, 29, 30, 33, 34, 37, 38, 41, 42, 45, 46, 49, 50, 53, 54, 57, 58, 61, 62, 65, 66 ]
-_LEG2_POSITIONS = [ 3, 4, 7, 8, 11, 12, 15, 16, 19, 20, 23, 24, 27, 28, 31, 32, 35, 36, 39, 40, 43, 44, 47, 48, 51, 52, 55, 56, 59, 60, 63, 64 ]

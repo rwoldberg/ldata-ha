@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-import time
 import requests
 
 from homeassistant.core import HomeAssistant
@@ -31,7 +30,6 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._hass = hass
         self.user = user
         self._service = LDATAService(user, password, entry)
-        self._available = True
         self.config_entry = entry
         self._websocket_task = None
         self._rest_poll_task = None
@@ -130,13 +128,53 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._debounce_timer.cancel()
             self._debounce_timer = None
 
+    def _inform_rate(self) -> float:
+        """Return the configured HA update cadence, clamped to the allowed minimum."""
+        return max(
+            HA_INFORM_RATE_MIN,
+            self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
+        )
+
+    async def _fallback_poll_loop(self, *, loop_name, get_interval, needs_poll, refresh):
+        """Shared sleep/refresh/exception scaffolding for the REST and CT fallback poll loops.
+
+        Both loops sleep for `get_interval()`, bail out on shutdown, skip the
+        cycle if `needs_poll()` is False, otherwise run `refresh` in the
+        executor and push a debounced update if it returned fresh data.
+        """
+        while not self._service._shutdown_requested:
+            try:
+                await asyncio.sleep(get_interval())
+
+                if self._service._shutdown_requested:
+                    break
+
+                if not needs_poll():
+                    continue
+
+                refreshed = await self._hass.async_add_executor_job(refresh)
+
+                if refreshed:
+                    self._handle_websocket_update()
+
+            except asyncio.CancelledError:
+                break
+            except LDATAAuthError as ex:
+                _LOGGER.warning(f"[v{self._service.version}] {loop_name} auth error: {ex}")
+                await asyncio.sleep(60)
+            except Exception as ex:
+                _LOGGER.warning(f"[v{self._service.version}] {loop_name} error: {ex}")
+                await asyncio.sleep(30)
+
+        _LOGGER.debug(f"[v{self._service.version}] {loop_name} loop stopped")
+
     async def _rest_poll_loop(self):
         """Periodically poll the REST API for fresh breaker data.
-        
+
         WS-FIRST STRATEGY: This loop is a FALLBACK. It waits for the WebSocket
-        auto-detection grace period before starting. Only panels where WS 
+        auto-detection grace period before starting. Only panels where WS
         demonstrably fails to deliver breaker data will be polled via REST.
-        
+
         On panels with hardware energy counters (firmware 2.0+), daily energy
         uses hardware counters and this poll is only needed for power/current
         freshness. On older firmware, this poll is critical for daily energy
@@ -145,14 +183,14 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         # Wait for initial data
         while not self._service.status_data and not self._service._shutdown_requested:
             await asyncio.sleep(5)
-        
+
         # Wait for WS auto-detection grace period
         _LOGGER.debug(
             f"[v{self._service.version}] REST poll loop: waiting {WS_DETECTION_GRACE_PERIOD}s "
             f"for WebSocket auto-detection before enabling fallback polling"
         )
         await asyncio.sleep(WS_DETECTION_GRACE_PERIOD)
-        
+
         if self._service.needs_breaker_poll:
             _LOGGER.info(
                 f"[v{self._service.version}] REST poll loop: enabling breaker energy polling for panels "
@@ -165,54 +203,26 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 f"REST polling not needed"
             )
 
-        while not self._service._shutdown_requested:
-            try:
-                poll_interval = max(
-                    HA_INFORM_RATE_MIN,
-                    self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
-                )
-
-                await asyncio.sleep(poll_interval)
-
-                if self._service._shutdown_requested:
-                    break
-
-                # Only poll if at least one panel has breakers with energy counters
-                if not self._service.needs_breaker_poll:
-                    continue
-                
-                # Run the blocking REST calls in executor
-                refreshed = await self._hass.async_add_executor_job(
-                    self._service.refresh_breaker_data
-                )
-                
-                if refreshed:
-                    self._handle_websocket_update()
-                    
-            except asyncio.CancelledError:
-                break
-            except LDATAAuthError as ex:
-                _LOGGER.warning(f"[v{self._service.version}] Auth error during REST poll: {ex}")
-                await asyncio.sleep(60)
-            except Exception as ex:
-                _LOGGER.warning(f"[v{self._service.version}] REST poll error: {ex}")
-                await asyncio.sleep(30)
-        
-        _LOGGER.debug(f"[v{self._service.version}] REST poll loop stopped")
+        await self._fallback_poll_loop(
+            loop_name="REST poll",
+            get_interval=self._inform_rate,
+            needs_poll=lambda: self._service.needs_breaker_poll,
+            refresh=self._service.refresh_breaker_data,
+        )
 
     async def _ct_poll_loop(self):
         """Poll loop for CT energy data.
-        
+
         CT energy counters require a bandwidth toggle (1→0→1) to refresh.
         This only runs for panels that have CTs (set during parse_panels).
         """
         # Wait for initial data to be available
         while not self._service.status_data and not self._service._shutdown_requested:
             await asyncio.sleep(5)
-        
+
         # Brief startup delay to let WS connect first
         await asyncio.sleep(10)
-        
+
         if self._service.needs_rest_poll:
             _LOGGER.info(
                 f"[v{self._service.version}] CT poll loop started "
@@ -221,37 +231,13 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             )
         else:
             _LOGGER.debug(f"[v{self._service.version}] CT poll loop: no panels have CTs, monitoring...")
-        
-        while not self._service._shutdown_requested:
-            try:
-                await asyncio.sleep(CT_POLL_INTERVAL)
-                
-                if self._service._shutdown_requested:
-                    break
-                
-                # WS-first: only run if at least one panel needs REST polling
-                if not self._service.needs_rest_poll:
-                    continue
-                
-                # Run the lightweight CT-only REST call in executor
-                refreshed = await self._hass.async_add_executor_job(
-                    self._service.refresh_ct_data
-                )
-                
-                if refreshed:
-                    # Trigger a debounced update to HA
-                    self._handle_websocket_update()
-                    
-            except asyncio.CancelledError:
-                break
-            except LDATAAuthError as ex:
-                _LOGGER.warning(f"[v{self._service.version}] Auth error during CT poll: {ex}")
-                await asyncio.sleep(60)
-            except Exception as ex:
-                _LOGGER.warning(f"[v{self._service.version}] CT poll error: {ex}")
-                await asyncio.sleep(30)
-        
-        _LOGGER.debug(f"[v{self._service.version}] CT poll loop stopped")
+
+        await self._fallback_poll_loop(
+            loop_name="CT poll",
+            get_interval=lambda: CT_POLL_INTERVAL,
+            needs_poll=lambda: self._service.needs_rest_poll,
+            refresh=self._service.refresh_ct_data,
+        )
 
     def _handle_websocket_update(self):
         """Callback for when WebSocket receives new data.
@@ -261,13 +247,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         kick-start the first cycle (or restart after a disconnect).
         """
         if self._debounce_timer is None:
-            inform_rate = max(
-                HA_INFORM_RATE_MIN,
-                self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
-            )
-            
             self._debounce_timer = self._hass.loop.call_later(
-                inform_rate, 
+                self._inform_rate(),
                 self._apply_debounced_update
             )
 
@@ -279,11 +260,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         so updates continue even if no new WS messages arrive during a cycle.
         """
         self._debounce_timer = None
-        
-        inform_rate = max(
-            HA_INFORM_RATE_MIN,
-            self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
-        )
+        inform_rate = self._inform_rate()
 
         try:
             data = self._service.status_data
@@ -413,7 +390,6 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
 
         except Exception as ex:
             # This catches all other errors (e.g., "Could not get Account ID")
-            self._available = False
             _LOGGER.warning(
                 "Unexpected error communicating with LDATA for %s: %s", self.user, ex
             )

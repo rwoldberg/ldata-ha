@@ -26,7 +26,7 @@ from .const import (
     HA_INFORM_RATE_MAX,
     GAP_HANDLING,
     GAP_HANDLING_DEFAULT,
-    GAP_HANDLING_OPTIONS,
+    GAP_HANDLING_LABELS,
     GAP_THRESHOLD,
     GAP_THRESHOLD_DEFAULT,
     GAP_THRESHOLD_MIN,
@@ -86,6 +86,34 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         
         return {"title": f"Leviton LDATA ({data[CONF_USERNAME]})"}
 
+    async def _finalize_entry(self, title: str) -> ConfigFlowResult:
+        """Persist a successful auth as either a reauth update or a new entry.
+
+        Shared by async_step_user and async_step_2fa — both reach this once
+        credentials (and 2FA, if required) have been validated.
+        """
+        if self.reauth_entry:
+            _LOGGER.debug("Re-auth successful, updating entry.")
+            new_data = self.reauth_entry.data.copy()
+            new_data[CONF_USERNAME] = self.user_data[CONF_USERNAME]
+            new_data[CONF_PASSWORD] = self.user_data[CONF_PASSWORD]
+            if self.service:
+                new_data["refresh_token"] = self.service.refresh_token
+                new_data["userid"] = self.service.userid
+
+            self.hass.config_entries.async_update_entry(self.reauth_entry, data=new_data)
+            await self.hass.config_entries.async_reload(self.reauth_entry.entry_id)
+            return self.async_abort(reason="reauth_successful")
+
+        # This is a new setup
+        if self.service:
+            self.user_data["refresh_token"] = self.service.refresh_token
+            self.user_data["userid"] = self.service.userid
+
+        await self.async_set_unique_id(self.user_data[CONF_USERNAME])
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=title, data=self.user_data)
+
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         """Handle re-authentication."""
         # Store the entry for later update
@@ -130,29 +158,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 # 2FA was not required, create or update entry
-                
-                if self.reauth_entry:
-                    _LOGGER.debug("Re-auth (no 2FA) successful, updating entry.")
-                    # Explicitly update data
-                    new_data = self.reauth_entry.data.copy()
-                    new_data[CONF_USERNAME] = self.user_data[CONF_USERNAME]
-                    new_data[CONF_PASSWORD] = self.user_data[CONF_PASSWORD]
-                    if self.service:
-                        new_data["refresh_token"] = self.service.refresh_token
-                        new_data["userid"] = self.service.userid
-                    
-                    self.hass.config_entries.async_update_entry(self.reauth_entry, data=new_data)
-                    await self.hass.config_entries.async_reload(self.reauth_entry.entry_id)
-                    return self.async_abort(reason="reauth_successful")
-                
-                # This is a new setup
-                if self.service:
-                    self.user_data["refresh_token"] = self.service.refresh_token
-                    self.user_data["userid"] = self.service.userid
-
-                await self.async_set_unique_id(self.user_data[CONF_USERNAME])
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(title=info["title"], data=self.user_data)
+                return await self._finalize_entry(info["title"])
 
         # Pre-fill the form with data if it's a re-auth
         schema = STEP_USER_DATA_SCHEMA
@@ -191,31 +197,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     errors["base"] = "invalid_2fa"
                 else:
                     # 2FA was successful, create or update entry
-                    
-                    if self.reauth_entry:
-                        _LOGGER.debug("Re-auth (with 2FA) successful, updating entry.")
-                        # Explicitly update data
-                        new_data = self.reauth_entry.data.copy()
-                        new_data[CONF_USERNAME] = self.user_data[CONF_USERNAME]
-                        new_data[CONF_PASSWORD] = self.user_data[CONF_PASSWORD]
-                        if self.service:
-                            new_data["refresh_token"] = self.service.refresh_token
-                            new_data["userid"] = self.service.userid
-                        
-                        self.hass.config_entries.async_update_entry(self.reauth_entry, data=new_data)
-                        await self.hass.config_entries.async_reload(self.reauth_entry.entry_id)
-                        return self.async_abort(reason="reauth_successful")
-
-                    # This is a new setup
                     username = self.user_data[CONF_USERNAME]
-                    self.user_data["refresh_token"] = self.service.refresh_token
-                    self.user_data["userid"] = self.service.userid
-                    
-                    await self.async_set_unique_id(username)
-                    self._abort_if_unique_id_configured()
-                    return self.async_create_entry(
-                        title=f"Leviton LDATA ({username})", data=self.user_data
-                    )
+                    return await self._finalize_entry(f"Leviton LDATA ({username})")
             
             except LDATAAuthError as ex:
                 _LOGGER.warning("2FA failed: %s", ex)
@@ -291,9 +274,8 @@ class OptionsFlow(config_entries.OptionsFlow):
             )] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=[
-                        selector.SelectOptionDict(value="skip", label="Skip — Don't accumulate energy during gaps"),
-                        selector.SelectOptionDict(value="extrapolate", label="Extrapolate — Assume last known power continued"),
-                        selector.SelectOptionDict(value="average", label="Average — Use mean of last and recovery power"),
+                        selector.SelectOptionDict(value=value, label=label)
+                        for value, label in GAP_HANDLING_LABELS.items()
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
                 )

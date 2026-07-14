@@ -12,6 +12,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, LOGGER_NAME
+from .ldata_base_entity import find_panel, is_breaker_on
 from .ldata_entity import LDATAEntity
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -58,10 +59,7 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         # instead of re-indexing coordinator.data["breakers"], which would
         # raise KeyError if this breaker ever briefly dropped out of the
         # coordinator's cache between setup and entity construction.
-        self._state = (
-            data.get("state") == "ManualON"
-            and data.get("remoteState") == "RemoteON"
-        )
+        self._state = is_breaker_on(data)
         # Subscribe to updates.
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
@@ -71,13 +69,7 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         try:
             if breakers := self.coordinator.data["breakers"]:
                 if new_data := breakers[self.breaker_data["id"]]:
-                    if (
-                        new_data["state"] == "ManualON"
-                        and new_data["remoteState"] == "RemoteON"
-                    ):
-                        self._state = True
-                    else:
-                        self._state = False
+                    self._state = is_breaker_on(new_data)
         except (KeyError, TypeError, AttributeError):
             self._state = None
         self.async_write_ha_state()
@@ -133,22 +125,18 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
     def _update_state(self):
         """Update the internal state of the sensor."""
         try:
-            # Find the specific panel's data in the latest update
-            found = False
-            for panel in self.coordinator.data["panels"]:
-                if panel["id"] == self.panel_data["id"]:
-                    self._state = panel["connected"]
-                    self._consecutive_update_failures = 0 # Reset failure count
-                    found = True
-                    return # Exit after finding the panel
-            
+            panel = find_panel(self.coordinator, self.panel_data["id"])
+            if panel is not None:
+                self._state = panel["connected"]
+                self._consecutive_update_failures = 0  # Reset failure count
+                return
+
             # Only set to None after multiple failures to prevent flickering
-            if not found:
-                self._consecutive_update_failures += 1
-                if self._consecutive_update_failures > 5:
-                    self._state = None
-                # Else: keep the last known self._state
-                
+            self._consecutive_update_failures += 1
+            if self._consecutive_update_failures > 5:
+                self._state = None
+            # Else: keep the last known self._state
+
         except (KeyError, TypeError, AttributeError):
             self._state = None
 
@@ -171,192 +159,147 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
 # ── Panel alarm sensors ──────────────────────────────────────────────
 
 
-class LDATAPanelOverVoltageSensor(LDATAEntity, BinarySensorEntity):
+class _PanelAlarmSensor(LDATAEntity, BinarySensorEntity):
+    """Base for panel-level alarm binary sensors (over/under voltage).
+
+    Subclasses set _data_key/_threshold_key/_name_suffix/_unique_id_suffix.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _data_key: str
+    _threshold_key: str
+    _name_suffix: str
+    _unique_id_suffix: str
+
+    def __init__(self, coordinator, data) -> None:
+        """Init sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.panel_data = data
+        self._state = data.get(self._data_key, False)
+        self._threshold = data.get(self._threshold_key)
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            panel = find_panel(self.coordinator, self.panel_data["id"])
+            if panel is not None:
+                self._state = panel.get(self._data_key, False)
+                self._threshold = panel.get(self._threshold_key)
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the alarm is active."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return self._name_suffix
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return self._unique_id_suffix
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        attributes = super().extra_state_attributes
+        if self._threshold is not None:
+            attributes["threshold_v"] = self._threshold
+        return attributes
+
+    @property
+    def icon(self) -> str:
+        return "mdi:flash-alert" if self.is_on else "mdi:flash-outline"
+
+
+class LDATAPanelOverVoltageSensor(_PanelAlarmSensor):
     """Panel over-voltage alarm."""
 
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator, data) -> None:
-        """Init sensor."""
-        super().__init__(data=data, coordinator=coordinator)
-        self.panel_data = data
-        self._state = data.get("overVoltage", False)
-        self._threshold = data.get("overVoltageThreshold")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-
-    @callback
-    def _state_update(self):
-        """Call when the coordinator has an update."""
-        try:
-            for panel in self.coordinator.data.get("panels", []):
-                if panel["id"] == self.panel_data["id"]:
-                    self._state = panel.get("overVoltage", False)
-                    self._threshold = panel.get("overVoltageThreshold")
-                    break
-        except (KeyError, TypeError):
-            pass
-        self.async_write_ha_state()
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return True if over-voltage alarm is active."""
-        return self._state
-
-    @property
-    def name_suffix(self) -> str | None:
-        return "Over Voltage"
-
-    @property
-    def unique_id_suffix(self) -> str | None:
-        return "over_voltage"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, str]:
-        attributes = super().extra_state_attributes
-        if self._threshold is not None:
-            attributes["threshold_v"] = self._threshold
-        return attributes
-
-    @property
-    def icon(self) -> str:
-        return "mdi:flash-alert" if self.is_on else "mdi:flash-outline"
+    _data_key = "overVoltage"
+    _threshold_key = "overVoltageThreshold"
+    _name_suffix = "Over Voltage"
+    _unique_id_suffix = "over_voltage"
 
 
-class LDATAPanelUnderVoltageSensor(LDATAEntity, BinarySensorEntity):
+class LDATAPanelUnderVoltageSensor(_PanelAlarmSensor):
     """Panel under-voltage alarm."""
 
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator, data) -> None:
-        """Init sensor."""
-        super().__init__(data=data, coordinator=coordinator)
-        self.panel_data = data
-        self._state = data.get("underVoltage", False)
-        self._threshold = data.get("underVoltageThreshold")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-
-    @callback
-    def _state_update(self):
-        """Call when the coordinator has an update."""
-        try:
-            for panel in self.coordinator.data.get("panels", []):
-                if panel["id"] == self.panel_data["id"]:
-                    self._state = panel.get("underVoltage", False)
-                    self._threshold = panel.get("underVoltageThreshold")
-                    break
-        except (KeyError, TypeError):
-            pass
-        self.async_write_ha_state()
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return True if under-voltage alarm is active."""
-        return self._state
-
-    @property
-    def name_suffix(self) -> str | None:
-        return "Under Voltage"
-
-    @property
-    def unique_id_suffix(self) -> str | None:
-        return "under_voltage"
-
-    @property
-    def extra_state_attributes(self) -> dict[str, str]:
-        attributes = super().extra_state_attributes
-        if self._threshold is not None:
-            attributes["threshold_v"] = self._threshold
-        return attributes
-
-    @property
-    def icon(self) -> str:
-        return "mdi:flash-alert" if self.is_on else "mdi:flash-outline"
+    _data_key = "underVoltage"
+    _threshold_key = "underVoltageThreshold"
+    _name_suffix = "Under Voltage"
+    _unique_id_suffix = "under_voltage"
 
 
 # ── Breaker alarm sensors ────────────────────────────────────────────
 
 
-class LDATABreakerOverCurrentSensor(LDATAEntity, BinarySensorEntity):
+class _BreakerAlarmSensor(LDATAEntity, BinarySensorEntity):
+    """Base for breaker-level alarm binary sensors (over-current, under-voltage).
+
+    Subclasses set _data_key/_name_suffix/_unique_id_suffix/_icon_off.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _data_key: str
+    _name_suffix: str
+    _unique_id_suffix: str
+    _icon_off: str = "mdi:flash-outline"
+
+    def __init__(self, coordinator, data) -> None:
+        """Init sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.breaker_data = data
+        self._state = data.get(self._data_key, False)
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            if breakers := self.coordinator.data.get("breakers"):
+                if new_data := breakers.get(self.breaker_data["id"]):
+                    self._state = new_data.get(self._data_key, False)
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Return True if the alarm is active."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return self._name_suffix
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return self._unique_id_suffix
+
+    @property
+    def icon(self) -> str:
+        return "mdi:flash-alert" if self.is_on else self._icon_off
+
+
+class LDATABreakerOverCurrentSensor(_BreakerAlarmSensor):
     """Breaker over-current alarm."""
 
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator, data) -> None:
-        """Init sensor."""
-        super().__init__(data=data, coordinator=coordinator)
-        self.breaker_data = data
-        self._state = data.get("overCurrent", False)
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-
-    @callback
-    def _state_update(self):
-        """Call when the coordinator has an update."""
-        try:
-            if breakers := self.coordinator.data.get("breakers"):
-                if new_data := breakers.get(self.breaker_data["id"]):
-                    self._state = new_data.get("overCurrent", False)
-        except (KeyError, TypeError):
-            pass
-        self.async_write_ha_state()
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return True if over-current alarm is active."""
-        return self._state
-
-    @property
-    def name_suffix(self) -> str | None:
-        return "Over Current"
-
-    @property
-    def unique_id_suffix(self) -> str | None:
-        return "over_current"
-
-    @property
-    def icon(self) -> str:
-        return "mdi:flash-alert" if self.is_on else "mdi:current-ac"
+    _data_key = "overCurrent"
+    _name_suffix = "Over Current"
+    _unique_id_suffix = "over_current"
+    _icon_off = "mdi:current-ac"
 
 
-class LDATABreakerUnderVoltageSensor(LDATAEntity, BinarySensorEntity):
+class LDATABreakerUnderVoltageSensor(_BreakerAlarmSensor):
     """Breaker under-voltage alarm."""
 
-    _attr_device_class = BinarySensorDeviceClass.PROBLEM
-    _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, coordinator, data) -> None:
-        """Init sensor."""
-        super().__init__(data=data, coordinator=coordinator)
-        self.breaker_data = data
-        self._state = data.get("underVoltage", False)
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-
-    @callback
-    def _state_update(self):
-        """Call when the coordinator has an update."""
-        try:
-            if breakers := self.coordinator.data.get("breakers"):
-                if new_data := breakers.get(self.breaker_data["id"]):
-                    self._state = new_data.get("underVoltage", False)
-        except (KeyError, TypeError):
-            pass
-        self.async_write_ha_state()
-
-    @property
-    def is_on(self) -> bool | None:
-        """Return True if under-voltage alarm is active."""
-        return self._state
-
-    @property
-    def name_suffix(self) -> str | None:
-        return "Under Voltage"
-
-    @property
-    def unique_id_suffix(self) -> str | None:
-        return "under_voltage"
-
-    @property
-    def icon(self) -> str:
-        return "mdi:flash-alert" if self.is_on else "mdi:flash-outline"
+    _data_key = "underVoltage"
+    _name_suffix = "Under Voltage"
+    _unique_id_suffix = "under_voltage"
+    _icon_off = "mdi:flash-outline"

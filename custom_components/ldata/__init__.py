@@ -5,8 +5,8 @@ import logging
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.const import ATTR_ENTITY_ID, Platform, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
@@ -20,7 +20,6 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 
 SERVICE_RESET_ENERGY = "reset_energy_baseline"
 SERVICE_RESET_PANEL = "reset_panel_energy"
-ATTR_ENTITY_ID = "entity_id"
 ATTR_DEVICE_ID = "device_id"
 ATTR_VALUE = "value"
 ATTR_BASELINE = "baseline"
@@ -132,21 +131,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_value = call.data.get(ATTR_VALUE)
             new_baseline = call.data.get(ATTR_BASELINE)
 
-            # Find the entity object through the entity platform
+            # Find the entity object through the entity platform, but only if
+            # it belongs to one of our config entries.
             target_entity = None
             ent_reg = er.async_get(hass)
-            owns_entity = False
-            for entry_id, coord in hass.data[DOMAIN].items():
-                if not isinstance(coord, LDATAUpdateCoordinator):
-                    continue
-                for ent_entry in er.async_entries_for_config_entry(ent_reg, entry_id):
-                    if ent_entry.entity_id == entity_id:
-                        owns_entity = True
-                        break
-                if owns_entity:
-                    break
-
-            if owns_entity:
+            ent_entry = ent_reg.async_get(entity_id)
+            if ent_entry is not None and ent_entry.config_entry_id in hass.data[DOMAIN]:
                 target_entity = _get_sensor_entity(hass, entity_id)
 
             if target_entity is None:

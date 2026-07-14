@@ -10,6 +10,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, LOGGER_NAME, ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT
+from .ldata_base_entity import is_breaker_on
 from .ldata_entity import LDATAEntity
 from .ldata_service import LDATAAuthError
 
@@ -60,10 +61,7 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         # instead of re-indexing coordinator.data["breakers"], which would
         # raise KeyError if this breaker ever briefly dropped out of the
         # coordinator's cache between setup and entity construction.
-        self._state = (
-            data.get("state") == "ManualON"
-            and data.get("remoteState") == "RemoteON"
-        )
+        self._state = is_breaker_on(data)
         self._last_known_is_on = self._state
 
         # Subscribe to updates.
@@ -74,14 +72,7 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         """Call when the coordinator has an update."""
         try:
             new_data = self.coordinator.data["breakers"][self.breaker_data["id"]]
-            if (
-                new_data["state"] == "ManualON"
-                and new_data["remoteState"] == "RemoteON"
-            ):
-                self._state = True
-            else:
-                self._state = False
-            
+            self._state = is_breaker_on(new_data)
             self._last_known_is_on = self._state
             self._consecutive_update_failures = 0
 
