@@ -129,6 +129,15 @@ def _log_warnings_enabled(coordinator) -> bool:
 # starts — instantaneous power can jump by any amount in one tick.
 _CT_POWER_MAX_W = 25_000
 
+# Hard ceiling — no residential/light-commercial CT clamp reading should ever
+# get close to this. Unlike _CT_POWER_MAX_W (which only holds a reading
+# pending until a second, similarly-sized reading "confirms" it), values past
+# this are discarded outright with no confirmation path at all. This closes
+# a real gap: if the cloud ever emits the same badly-corrupted value twice in
+# a row (observed in practice — a repeatable-looking glitch, not one-off
+# noise), the ordinary pending/confirm dance would otherwise accept it.
+_CT_POWER_HARD_MAX_W = 50_000
+
 
 def _calc_pxt_energy(
     time_span: float,
@@ -2111,31 +2120,42 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
                     new_value = float(new_data[self.entity_description.key])
                     log_enabled = _log_data_warnings_enabled(self.coordinator)
 
-                    # Spike detection: only flag readings that exceed the residential
-                    # service ceiling (_CT_POWER_MAX_W).  The previous zero-to-high
-                    # and ratio-based checks caused false positives on the grid CT,
-                    # which legitimately swings from near-zero (solar covering load)
-                    # to 5–8 kW when a large appliance starts.
-                    is_potential_spike = abs(new_value) > _CT_POWER_MAX_W
+                    # Hard reject: no confirmation path, no pending state — this is
+                    # never a real reading for a residential/light-commercial CT.
+                    if abs(new_value) > _CT_POWER_HARD_MAX_W:
+                        _LOGGER.error(
+                            "Discarding impossible value for %s: %s (exceeds hard "
+                            "ceiling of %s W) — not entering spike-confirmation, "
+                            "this is never a real CT reading",
+                            self.entity_id, new_value, _CT_POWER_HARD_MAX_W
+                        )
+                        self._pending_state = None
+                    else:
+                        # Spike detection: only flag readings that exceed the residential
+                        # service ceiling (_CT_POWER_MAX_W).  The previous zero-to-high
+                        # and ratio-based checks caused false positives on the grid CT,
+                        # which legitimately swings from near-zero (solar covering load)
+                        # to 5–8 kW when a large appliance starts.
+                        is_potential_spike = abs(new_value) > _CT_POWER_MAX_W
 
-                    if is_potential_spike:
-                        if self._pending_state is not None:
-                            if self._pending_state != 0 and abs(new_value - self._pending_state) / abs(self._pending_state) < 0.15:
-                                if log_enabled:
-                                    _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
-                                self._state = new_value
-                                self._pending_state = None
+                        if is_potential_spike:
+                            if self._pending_state is not None:
+                                if self._pending_state != 0 and abs(new_value - self._pending_state) / abs(self._pending_state) < 0.15:
+                                    if log_enabled:
+                                        _LOGGER.info("Accepting consistent high value for %s: %s", self.entity_id, new_value)
+                                    self._state = new_value
+                                    self._pending_state = None
+                                else:
+                                    if log_enabled:
+                                        _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
+                                    self._pending_state = new_value
                             else:
                                 if log_enabled:
-                                    _LOGGER.warning("Discarding inconsistent spike for %s: new=%s, pending=%s", self.entity_id, new_value, self._pending_state)
+                                    _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
                                 self._pending_state = new_value
                         else:
-                            if log_enabled:
-                                _LOGGER.warning("High value detected for %s. Pending verification: %s", self.entity_id, new_value)
-                            self._pending_state = new_value
-                    else:
-                        self._pending_state = None
-                        self._state = new_value
+                            self._pending_state = None
+                            self._state = new_value
                 else:
                     self._state = None # CT data not found
             else:

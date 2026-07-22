@@ -2091,7 +2091,17 @@ class LDATAService:
                         json={"bandwidth": 1},
                         timeout=aiohttp.ClientTimeout(total=10)
                     ) as resp:
-                        _LOGGER.debug(f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id} (round {_round+1}): {resp.status}")
+                        if resp.status in (401, 403, 406):
+                            # This keepalive PUT has no other error-surfacing path — if the
+                            # auth token has expired, silently continuing to "succeed" at
+                            # debug level would let the WebSocket look connected indefinitely
+                            # while the cloud has actually stopped honoring us.
+                            _LOGGER.warning(
+                                f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id} "
+                                f"got HTTP {resp.status} — auth token may have expired."
+                            )
+                        else:
+                            _LOGGER.debug(f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id} (round {_round+1}): {resp.status}")
                 except aiohttp.ClientConnectionResetError:
                     _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: connection reset (expected)")
                 except asyncio.CancelledError:
@@ -2120,7 +2130,12 @@ class LDATAService:
                 },
                 timeout=aiohttp.ClientTimeout(total=10)
             ) as resp:
-                if resp.status != 200:
+                if resp.status in (401, 403, 406):
+                    _LOGGER.warning(
+                        f"[v{self.version}] API version heartbeat got HTTP {resp.status} "
+                        f"— auth token may have expired."
+                    )
+                elif resp.status != 200:
                     _LOGGER.debug(
                         f"[v{self.version}] API version heartbeat: "
                         f"non-200 response ({resp.status}) — skipping"
@@ -2498,7 +2513,6 @@ class LDATAService:
                             
                             if msg.type == aiohttp.WSMsgType.TEXT:
                                 message_count += 1
-                                last_data_time = current_time
 
                                 if message_count % 100 == 0:
                                     elapsed = current_time - start_time
@@ -2512,6 +2526,14 @@ class LDATAService:
                                 try:
                                     payload = json.loads(msg.data)
                                     if payload.get("type") == "notification":
+                                        # A genuine application-data push from the cloud is
+                                        # what proves the connection is actually delivering
+                                        # data — only this resets the staleness clock.
+                                        # Resetting it on *any* TEXT frame (as before) meant a
+                                        # connection that degraded to non-notification traffic
+                                        # (acks, junk) would look "alive" forever and never
+                                        # trip the resubscribe / forced-reconnect safety net.
+                                        last_data_time = current_time
                                         notification = payload.get("notification", {})
                                         data = notification.get("data", {})
                                         model = notification.get("modelName")
