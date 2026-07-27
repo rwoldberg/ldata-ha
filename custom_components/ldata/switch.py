@@ -1,5 +1,6 @@
 """Switch support for an LDATA devices."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -9,8 +10,23 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, LOGGER_NAME, ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT
-from .ldata_base_entity import is_breaker_on
+from .const import (
+    DOMAIN,
+    LOGGER_NAME,
+    ALLOW_BREAKER_CONTROL,
+    ALLOW_BREAKER_CONTROL_DEFAULT,
+    DECORA_MODELS_FAN,
+    DECORA_MODELS_GFCI,
+    DECORA_MODELS_LIGHT,
+    DECORA_MODELS_OUTLET,
+    DECORA_MODELS_SWITCH,
+    ENABLE_DECORA,
+    ENABLE_DECORA_DEFAULT,
+    POWER_OFF,
+    POWER_ON,
+)
+from .decora_entity import DecoraEntity
+from .ldata_base_entity import add_entities_grouped_by_panel, is_breaker_on
 from .ldata_entity import LDATAEntity
 from .ldata_service import LDATAAuthError
 
@@ -31,18 +47,49 @@ async def async_setup_entry(
         config_entry.data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT),
     )
     if allow_breaker_control is True:
+        switches = []
         for breaker_id in entry.data["breakers"]:
             breaker_data = entry.data["breakers"][breaker_id]
-            switch = LDATASwitch(entry, breaker_data)
-            async_add_entities([switch])
+            switches.append(LDATASwitch(entry, breaker_data))
+        add_entities_grouped_by_panel(config_entry, async_add_entities, switches)
 
     # Blink LED switches are always created (DIAGNOSTIC, independent of breaker control)
     blink_switches = []
     for breaker_id in entry.data.get("breakers", {}):
         breaker_data = entry.data["breakers"][breaker_id]
         blink_switches.append(LDATABlinkLEDSwitch(entry, breaker_data))
-    if blink_switches:
-        async_add_entities(blink_switches)
+    add_entities_grouped_by_panel(config_entry, async_add_entities, blink_switches)
+
+    # ── Decora Smart Wi-Fi Switches & Outlets ──
+    enable_decora = config_entry.options.get(
+        ENABLE_DECORA,
+        config_entry.data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT),
+    )
+    if enable_decora:
+        decora_entities = []
+        for dev_id, dev_data in entry.data.get("decora_devices", {}).items():
+            model = dev_data.get("model")
+            name = (dev_data.get("name") or "").lower()
+
+            # Skip devices that are handled by light.py or fan.py
+            if model in DECORA_MODELS_LIGHT:
+                continue
+            if model in DECORA_MODELS_FAN:
+                continue
+            # Switch models named "fan" or "light" are handled by fan.py / light.py
+            if model in DECORA_MODELS_SWITCH and ("fan" in name or "light" in name):
+                continue
+
+            # Outlets, plain switches, GFCI outlets → switch entity
+            if model in DECORA_MODELS_OUTLET or model in DECORA_MODELS_SWITCH or model in DECORA_MODELS_GFCI:
+                decora_entities.append(DecoraSwitch(entry, dev_data))
+
+            # GFCI buzzer enable/disable config switch
+            if model in DECORA_MODELS_GFCI and dev_data.get("enableBuzzer") is not None:
+                decora_entities.append(DecoraBuzzerSwitch(entry, dev_data))
+
+        if decora_entities:
+            async_add_entities(decora_entities)
 
 
 class LDATASwitch(LDATAEntity, SwitchEntity):
@@ -226,3 +273,156 @@ class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
     def unique_id_suffix(self) -> str | None:
         """Unique ID suffix for this entity."""
         return "blink_led"
+
+
+class DecoraSwitch(DecoraEntity, SwitchEntity):
+    """Switch entity for a Leviton Decora Smart Wi-Fi outlet/switch/GFCI."""
+
+    def __init__(self, coordinator, data) -> None:
+        """Init DecoraSwitch."""
+        super().__init__(data=data, coordinator=coordinator)
+        self._state = data.get("power") == POWER_ON
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        device = self._get_device_data()
+        if device:
+            self._state = device.get("power") == POWER_ON
+        self.async_write_ha_state()
+
+    @property
+    def icon(self) -> str:
+        """Return the icon type."""
+        model = self.entity_data.get("model", "")
+        if model in DECORA_MODELS_GFCI:
+            return "mdi:power-socket-us"
+        if model in DECORA_MODELS_OUTLET:
+            return "mdi:power-socket-us"
+        if self.is_on:
+            return "mdi:toggle-switch"
+        return "mdi:toggle-switch-off"
+
+    @property
+    def is_on(self) -> bool | None:
+        """Returns true if the switch is on."""
+        return self._state
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the switch on."""
+        device = self._get_device_data()
+        if not device:
+            return
+
+        residence_id = device.get("residenceId")
+        result = await self.coordinator.hass.async_add_executor_job(
+            self.coordinator.service.set_iot_switch,
+            residence_id,
+            self._dev_id,
+            {"power": POWER_ON},
+        )
+        if result:
+            self._state = True
+            self.async_write_ha_state()
+            await asyncio.sleep(1)
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to turn on Decora switch %s", self.name)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the switch off."""
+        device = self._get_device_data()
+        if not device:
+            return
+
+        residence_id = device.get("residenceId")
+        result = await self.coordinator.hass.async_add_executor_job(
+            self.coordinator.service.set_iot_switch,
+            residence_id,
+            self._dev_id,
+            {"power": POWER_OFF},
+        )
+        if result:
+            self._state = False
+            self.async_write_ha_state()
+            await asyncio.sleep(1)
+            await self.coordinator.async_request_refresh()
+        else:
+            _LOGGER.error("Failed to turn off Decora switch %s", self.name)
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the device's name."""
+        return None
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Return the unique id suffix."""
+        return "switch"
+
+
+class DecoraBuzzerSwitch(DecoraEntity, SwitchEntity):
+    """Config switch to enable/disable GFCI audible alert buzzer."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator, data) -> None:
+        """Init DecoraBuzzerSwitch."""
+        super().__init__(data=data, coordinator=coordinator)
+        self._state = data.get("enableBuzzer", False)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        device = self._get_device_data()
+        if device:
+            self._state = device.get("enableBuzzer", False)
+        self.async_write_ha_state()
+
+    @property
+    def icon(self) -> str:
+        return "mdi:volume-high" if self.is_on else "mdi:volume-off"
+
+    @property
+    def is_on(self) -> bool | None:
+        return self._state
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable the buzzer."""
+        device = self._get_device_data()
+        if not device:
+            return
+        residence_id = device.get("residenceId")
+        result = await self.coordinator.hass.async_add_executor_job(
+            self.coordinator.service.set_iot_switch,
+            residence_id,
+            self._dev_id,
+            {"enableBuzzer": True},
+        )
+        if result:
+            self._state = True
+            self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable the buzzer."""
+        device = self._get_device_data()
+        if not device:
+            return
+        residence_id = device.get("residenceId")
+        result = await self.coordinator.hass.async_add_executor_job(
+            self.coordinator.service.set_iot_switch,
+            residence_id,
+            self._dev_id,
+            {"enableBuzzer": False},
+        )
+        if result:
+            self._state = False
+            self.async_write_ha_state()
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Audible Alert"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "buzzer"

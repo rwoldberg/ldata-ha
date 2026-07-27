@@ -3,12 +3,28 @@
 DOMAIN = "ldata"
 MANUFACTURER = "Leviton"
 
+# Config subentry type used to group each panel's devices/entities separately
+# from the rest of the account in HA's Devices & Services UI. One subentry is
+# created per discovered panel (unique_id = panel id), keyed by the panel's
+# own id/serialNumber — see __init__.py's subentry reconciliation.
+PANEL_SUBENTRY_TYPE = "panel"
+
+# Config entry data key holding the single residence this entry is scoped
+# to. Set during config flow for new setups (see config_flow.py's residence
+# picker); absent on entries created before this feature existed, in which
+# case ldata_service.py falls back to its original behavior of discovering
+# and using every residence the account has access to.
+CONF_RESIDENCE_ID = "residence_id"
+RESIDENCE_IMPORT_SOURCE = "residence_import"
+
 LOGGER_NAME = "ldata"
 
 THREE_PHASE = "three_phase"
 THREE_PHASE_DEFAULT = False
 ALLOW_BREAKER_CONTROL = "allow_breaker_control"
 ALLOW_BREAKER_CONTROL_DEFAULT = False
+ENABLE_DECORA = "enable_decora"
+ENABLE_DECORA_DEFAULT = False
 
 HA_INFORM_RATE = "ha_inform_rate"
 HA_INFORM_RATE_DEFAULT = 60.0
@@ -64,3 +80,61 @@ HW_COUNTER_NONE_TOLERANCE = 3
 MAX_DAILY_ENERGY_KWH = 500.0
 
 _LEG1_POSITIONS = [ 1, 2, 5, 6,  9, 10, 13, 14, 17, 18, 21, 22, 25, 26, 29, 30, 33, 34, 37, 38, 41, 42, 45, 46, 49, 50, 53, 54, 57, 58, 61, 62, 65, 66 ]
+
+# ── Decora Smart Wi-Fi Device Constants ──────────────────────────────────
+# A separate Leviton product line (switches/dimmers/fans/outlets/GFCIs/
+# bridges) from the LDATA/WHEM breaker panels above — different API
+# (iotSwitches/iotBridges), different device family, gated behind
+# ENABLE_DECORA since most LDATA users won't have any of these.
+
+POWER_ON = "ON"
+POWER_OFF = "OFF"
+
+# Device type classification
+DEVICE_TYPE_BRIDGE = "bridge"
+DEVICE_TYPE_CONTROLLER = "controller"
+DEVICE_TYPE_FAN = "fan"
+DEVICE_TYPE_GFCI = "gfci"
+DEVICE_TYPE_LIGHT = "light"
+DEVICE_TYPE_OUTLET = "outlet"
+DEVICE_TYPE_SWITCH = "switch"
+
+# Supported Decora Smart Wi-Fi device models
+# Each entry: (model, [device_types], generation)
+# Generation: 1 = DW (1st gen Wi-Fi), 2 = D2 (2nd gen Wi-Fi), 3 = DN/MLWSB (No-Neutral via bridge)
+SUPPORTED_DECORA_DEVICES = [
+    ("D215O", [DEVICE_TYPE_OUTLET], 2),
+    ("D215P", [DEVICE_TYPE_OUTLET], 2),
+    ("D215R", [DEVICE_TYPE_OUTLET], 2),
+    ("D215S", [DEVICE_TYPE_SWITCH], 2),
+    ("D23LP", [DEVICE_TYPE_LIGHT], 2),
+    ("D24SF", [DEVICE_TYPE_FAN], 2),
+    ("D26HD", [DEVICE_TYPE_LIGHT], 2),
+    ("D2ELV", [DEVICE_TYPE_LIGHT], 2),
+    ("D2GF1", [DEVICE_TYPE_GFCI], 2),
+    ("D2GF2", [DEVICE_TYPE_GFCI], 2),
+    ("D2MSD", [DEVICE_TYPE_LIGHT], 2),
+    ("D2SCS", [DEVICE_TYPE_CONTROLLER, DEVICE_TYPE_SWITCH], 2),
+    ("DN15S", [DEVICE_TYPE_SWITCH], 3),
+    ("DN6HD", [DEVICE_TYPE_LIGHT], 3),
+    ("DW15A", [DEVICE_TYPE_OUTLET], 1),
+    ("DW15P", [DEVICE_TYPE_OUTLET], 1),
+    ("DW15R", [DEVICE_TYPE_OUTLET], 1),
+    ("DW15S", [DEVICE_TYPE_SWITCH], 1),
+    ("DW1KD", [DEVICE_TYPE_LIGHT], 1),
+    ("DW3HL", [DEVICE_TYPE_LIGHT], 1),
+    ("DW4BC", [DEVICE_TYPE_CONTROLLER], 1),
+    ("DW4SF", [DEVICE_TYPE_FAN], 1),
+    ("DW6HD", [DEVICE_TYPE_LIGHT], 1),
+    ("DWVAA", [DEVICE_TYPE_LIGHT], 1),
+    ("MLWSB", [DEVICE_TYPE_BRIDGE], 3),
+]
+
+DECORA_MODELS_ALL = [d[0] for d in SUPPORTED_DECORA_DEVICES]
+DECORA_MODELS_LIGHT = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_LIGHT in d[1]]
+DECORA_MODELS_FAN = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_FAN in d[1]]
+DECORA_MODELS_SWITCH = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_SWITCH in d[1]]
+DECORA_MODELS_OUTLET = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_OUTLET in d[1]]
+DECORA_MODELS_GFCI = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_GFCI in d[1]]
+DECORA_MODELS_CONTROLLER = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_CONTROLLER in d[1]]
+DECORA_MODELS_BRIDGE = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_BRIDGE in d[1]]

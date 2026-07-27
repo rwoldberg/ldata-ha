@@ -2,7 +2,45 @@
 
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .const import PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
+
+
+def add_entities_grouped_by_panel(config_entry, async_add_entities, entities) -> None:
+    """Call async_add_entities once per panel, scoped to that panel's subentry.
+
+    Every LDATA entity's __init__ stores its constructor data verbatim as
+    entity_data (see LDATABaseEntity.__init__ below) — breaker/CT entities
+    carry panel_id directly there; a panel-level entity's entity_data IS the
+    panel's own dict, so its own "id" is used instead. This lets every
+    platform's async_setup_entry keep its existing accumulation logic
+    untouched and just swap the final flat async_add_entities(...) call for
+    this one.
+
+    config_subentry_id ends up None for anything that doesn't resolve to a
+    known panel subentry (older HA cores without subentry support, or a
+    panel that hasn't been reconciled into a subentry yet) — identical to
+    today's behavior, so this degrades safely rather than failing setup.
+    On an HA core old enough that async_add_entities doesn't accept the
+    config_subentry_id keyword at all, the call itself falls back to the
+    plain (pre-subentry) form rather than raising.
+    """
+    if not entities:
+        return
+    subentry_by_panel = {
+        se.unique_id: se.subentry_id
+        for se in getattr(config_entry, "subentries", {}).values()
+        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
+    }
+    groups: dict[str | None, list] = {}
+    for entity in entities:
+        panel_id = entity.entity_data.get("panel_id") or entity.entity_data.get("id")
+        groups.setdefault(panel_id, []).append(entity)
+    for panel_id, group in groups.items():
+        try:
+            async_add_entities(group, config_subentry_id=subentry_by_panel.get(panel_id))
+        except TypeError:
+            async_add_entities(group)
 
 
 def is_breaker_on(data: dict) -> bool:

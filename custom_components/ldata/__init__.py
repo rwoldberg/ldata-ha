@@ -1,21 +1,40 @@
 """The LDATA integration."""
 from __future__ import annotations
 import logging
+from pathlib import Path
 
 import voluptuous as vol
 
+from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.lovelace.const import LOVELACE_DATA, MODE_STORAGE
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID, Platform, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.const import ATTR_ENTITY_ID, EVENT_HOMEASSISTANT_STARTED, Platform, CONF_PASSWORD, CONF_USERNAME
+from homeassistant.core import CoreState, HomeAssistant, ServiceCall
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
 
-from .const import DOMAIN, LOGGER_NAME
+from .const import DOMAIN, LOGGER_NAME, PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
+from .ldata_service import VERSION
 
-PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.SENSOR, Platform.SWITCH]
+# URL path the panel card is served under — served directly from this
+# integration's own www/ folder (see _async_register_frontend below), so
+# users never need to copy the file into config/www or manually add it as
+# a Lovelace resource.
+_FRONTEND_URL_PATH = "/ldata_static"
+_PANEL_CARD_FILENAME = "ldata-panel-card.js"
+
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.FAN,
+    Platform.LIGHT,
+    Platform.SELECT,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 SERVICE_RESET_ENERGY = "reset_energy_baseline"
@@ -89,11 +108,328 @@ def _reset_energy_entity(entity, entity_id: str) -> str:
         return f"{entity_id}: lifetime guard cleared (was {current} kWh)"
 
 
+async def _async_register_frontend(hass: HomeAssistant) -> None:
+    """Serve the panel card from this integration's own www/ folder and
+    register it as a genuine Lovelace resource, so users never need to copy
+    the file into config/www or manually add it via Settings > Dashboards.
+
+    Deliberately does NOT use frontend.add_extra_js_url() — that injects a
+    raw `import()` into the index page, which races the rest of the
+    frontend bundle: if Lovelace evaluates a card's config before that
+    import resolves, it permanently marks the card as an unknown custom
+    element and never rechecks, even after the module finishes loading a
+    moment later. Registering as a proper Lovelace resource instead uses
+    the same loading path Lovelace itself waits on before resolving card
+    types, avoiding the race entirely.
+
+    Guarded to run only once regardless of how many config entries this
+    integration ends up with (e.g. one per residence) — async_setup runs
+    once per HA process, but belt-and-suspenders since this is also called
+    from the deferred STARTED-event listener.
+    """
+    if hass.data.get(DOMAIN, {}).get("_frontend_registered"):
+        return
+    hass.data.setdefault(DOMAIN, {})["_frontend_registered"] = True
+
+    www_dir = Path(__file__).parent / "www"
+    if not await hass.async_add_executor_job(www_dir.is_dir):
+        _LOGGER.warning("LDATA www directory not found at %s — panel card won't load", www_dir)
+        return
+
+    try:
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(_FRONTEND_URL_PATH, str(www_dir), True)
+        ])
+    except RuntimeError:
+        _LOGGER.debug("LDATA static path already registered at %s", _FRONTEND_URL_PATH)
+
+    lovelace = hass.data.get(LOVELACE_DATA)
+    if lovelace is None or lovelace.resource_mode != MODE_STORAGE:
+        # No Lovelace data yet, or the dashboard is in legacy YAML mode —
+        # the storage-backed resources collection used below doesn't apply
+        # either way. Falls back to needing the manual install steps.
+        _LOGGER.debug(
+            "Lovelace storage mode not available — panel card is served at "
+            "%s/%s but won't be auto-registered as a resource; add it "
+            "manually via Settings > Dashboards > Resources if needed.",
+            _FRONTEND_URL_PATH, _PANEL_CARD_FILENAME,
+        )
+        return
+
+    card_url = f"{_FRONTEND_URL_PATH}/{_PANEL_CARD_FILENAME}"
+    try:
+        already_registered = any(
+            resource["url"].split("?", 1)[0] == card_url
+            for resource in lovelace.resources.async_items()
+        )
+        if not already_registered:
+            await lovelace.resources.async_create_item({
+                "res_type": "module",
+                "url": f"{card_url}?v={VERSION}",
+            })
+            _LOGGER.info("Registered LDATA panel card as a Lovelace resource: %s", card_url)
+    except Exception:
+        _LOGGER.exception("Failed to auto-register the LDATA panel card as a Lovelace resource")
+
+
+def _resolve_panel_id_for_device(device, existing_panel_ids: set[str], dev_reg) -> str | None:
+    """Resolve which panel a device belongs to, using the device registry alone.
+
+    Doesn't touch coordinator.data at all — via_device_id and identifiers are
+    already persisted from prior runs, so this works even for a panel that's
+    currently offline or has since been removed from the account.
+    """
+    for identifier in device.identifiers:
+        if identifier[0] != DOMAIN:
+            continue
+        if len(identifier) == 3:
+            # CT device: (DOMAIN, panel_id, ct_id) — panel_id is right there.
+            return identifier[1]
+        if len(identifier) == 2 and identifier[1] in existing_panel_ids:
+            # The panel device itself — its own identifier IS the panel id.
+            return identifier[1]
+
+    if device.via_device_id:
+        # Breaker — resolve via the panel device it's linked to.
+        parent = dev_reg.async_get(device.via_device_id)
+        if parent:
+            for identifier in parent.identifiers:
+                if identifier[0] == DOMAIN and identifier[1] in existing_panel_ids:
+                    return identifier[1]
+
+    return None
+
+
+async def _async_purge_orphaned_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove this entry's devices that no longer have any entities.
+
+    A device's `identifiers` changing (e.g. breaker devices moving from
+    serialNumber-based to id-based identifiers, since Leviton's serialNumber
+    field turned out not to be reliably unique) makes HA register a brand
+    new device for the same physical hardware — every entity follows (same
+    unique_id, so same entity_id), but the old device record isn't deleted
+    automatically; it just lingers with zero entities. Run this AFTER
+    platform setup so entities have already been re-linked to their new
+    device before we decide what's actually orphaned.
+    """
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+
+    devices = list(dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id))
+    removed = 0
+    for device in devices:
+        if er.async_entries_for_device(ent_reg, device.id, include_disabled_entities=True):
+            continue
+        dev_reg.async_remove_device(device.id)
+        removed += 1
+
+    if removed:
+        _LOGGER.info(
+            "Removed %d orphaned device(s) with no remaining entities "
+            "(likely left behind by a device-identity change)",
+            removed,
+        )
+
+
+async def _async_reconcile_panel_subentries(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
+) -> None:
+    """Ensure every discovered panel has a matching config subentry, and move
+    any pre-subentry devices/entities into their panel's subentry.
+
+    Safe to call on every setup — devices/entities that already have a
+    config_subentry_id are left alone, so this converges naturally without
+    needing a separate "have I migrated" flag. No-ops entirely on an HA core
+    old enough not to support subentries at all.
+    """
+    try:
+        from homeassistant.config_entries import ConfigSubentry
+    except ImportError:
+        return  # HA core predates config subentries — nothing to do.
+
+    if not coordinator.data:
+        return
+
+    existing = {
+        se.unique_id: se.subentry_id
+        for se in entry.subentries.values()
+        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
+    }
+
+    for panel in coordinator.data.get("panels", []):
+        panel_id = panel.get("id")
+        if not panel_id or panel_id in existing:
+            continue
+        subentry = ConfigSubentry(
+            data={},
+            subentry_type=PANEL_SUBENTRY_TYPE,
+            title=panel.get("name") or panel_id,
+            unique_id=panel_id,
+        )
+        hass.config_entries.async_add_subentry(entry, subentry)
+        existing[panel_id] = subentry.subentry_id
+        _LOGGER.info(
+            "Created config subentry for panel '%s' (%s)", subentry.title, panel_id
+        )
+
+    if not existing:
+        return
+
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+    existing_panel_ids = set(existing)
+
+    # Config-entry-level subentries (ConfigSubentry, async_add_subentry — the
+    # create step above) and device/entity-registry-level subentry support
+    # (DeviceEntry.config_subentry_id, RegistryEntry.config_subentry_id)
+    # apparently didn't land in the same HA release — the subentries just
+    # created above are real either way and will scope newly-created
+    # devices/entities going forward, but backfilling pre-existing ones only
+    # works once the running core's registries actually carry the field.
+    # device_subentry ends up covering every device that resolves to a panel,
+    # not just ones actually moved in this call — a device already carrying
+    # the right config_subentry_id from a prior run still needs to be in
+    # here, so the entity loop below can catch up any of its entities that
+    # didn't get migrated alongside it (e.g. if entity-registry subentry
+    # support landed on this HA core after device-registry support did, or a
+    # previous run's entity pass was interrupted). Otherwise entity
+    # migration would only ever get one shot, on the same run its device
+    # was first moved, with no way to retry on a later load.
+    devices = dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id)
+    unresolved = 0
+    no_subentry_support = 0
+    device_subentry: dict[str, str] = {}
+    for device in devices:
+        panel_id = _resolve_panel_id_for_device(device, existing_panel_ids, dev_reg)
+        subentry_id = existing.get(panel_id) if panel_id else None
+        # Catch per-device, not around the whole loop — device_subentry_id
+        # support can be missing on some HA cores (see the warning below),
+        # and a broad try/except around the entire loop would silently stop
+        # processing every device that comes after the first failure in
+        # iteration order (and skip the entity-migration pass entirely,
+        # since that runs after this loop) instead of just skipping the
+        # one device that doesn't support it.
+        try:
+            if not subentry_id:
+                if device.config_subentry_id is None:
+                    unresolved += 1
+                    _LOGGER.warning(
+                        "Could not resolve a panel for device '%s' (%s) — leaving "
+                        "it out of any subentry. identifiers=%s via_device_id=%s",
+                        device.name, device.id, device.identifiers, device.via_device_id,
+                    )
+                continue
+            device_subentry[device.id] = subentry_id
+            if device.config_subentry_id != subentry_id:
+                dev_reg.async_update_device(device.id, new_config_subentry_id=subentry_id)
+        except AttributeError:
+            # debug, not warning — this is a known, permanent-until-HA-updates
+            # condition on some HA core versions (subentries work at the
+            # integration/creation-time level, but this core's device
+            # registry doesn't yet support updating config_subentry_id on an
+            # already-existing device). Re-attempted every setup since there's
+            # no persistent "already told you" flag, so warning-level here
+            # would repeat the same noise on every single restart forever.
+            no_subentry_support += 1
+            _LOGGER.debug(
+                "This Home Assistant core doesn't support config_subentry_id "
+                "on device '%s' (%s) yet — leaving it out of its panel's "
+                "subentry until HA is updated further.",
+                device.name, device.id,
+            )
+
+    if no_subentry_support:
+        _LOGGER.debug(
+            "%d device(s) could not be moved into their panel's subentry — "
+            "this Home Assistant core supports config subentries at the "
+            "integration level, but its device registry doesn't yet carry "
+            "config_subentry_id on individual devices. Newly-created "
+            "devices are unaffected.",
+            no_subentry_support,
+        )
+
+    if not device_subentry:
+        if not unresolved:
+            _LOGGER.debug("No devices found for this entry — nothing to reconcile.")
+        return
+
+    moved = 0
+    no_subentry_support = 0
+    for ent_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if not ent_entry.device_id:
+            continue
+        # Re-check even entities that already carry a subentry, not just
+        # unassigned ones — a breaker moved to a different panel (in the
+        # Leviton account, not in HA) gets its device re-resolved to the
+        # new panel's subentry above, but its entities would otherwise
+        # keep pointing at the panel they were first migrated to,
+        # forever, since a plain "only migrate if None" check has no way
+        # to notice the device it belongs to has since moved.
+        subentry_id = device_subentry.get(ent_entry.device_id)
+        if not subentry_id:
+            continue
+        # Caught per-entity for the same reason as the device loop above —
+        # one entity lacking config_subentry_id support shouldn't stop the
+        # rest of the batch from being migrated. Wraps the *read* of
+        # ent_entry.config_subentry_id too, not just the update call —
+        # device- and entity-registry subentry support can land on different
+        # HA releases (confirmed true for at least one real HA core: device
+        # support missing, entity support unconfirmed), so the read itself
+        # could just as easily be what's unsupported here.
+        try:
+            if ent_entry.config_subentry_id == subentry_id:
+                continue
+            ent_reg.async_update_entity(ent_entry.entity_id, config_subentry_id=subentry_id)
+            moved += 1
+        except AttributeError:
+            no_subentry_support += 1
+
+    if no_subentry_support:
+        # debug, not warning — same reasoning as the device loop above: a
+        # known, permanent-until-HA-updates condition that would otherwise
+        # repeat identical noise on every single restart forever.
+        _LOGGER.debug(
+            "%d entit(y/ies) could not be moved into their panel's subentry "
+            "— this HA core's entity registry doesn't support "
+            "config_subentry_id yet. They'll show under their device but "
+            "won't be grouped by subentry themselves until HA is updated "
+            "further.",
+            no_subentry_support,
+        )
+
+    if moved:
+        _LOGGER.info(
+            "Migrated %d device(s) / %d entities into panel subentries",
+            len(device_subentry), moved,
+        )
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the LDATA integration (runs once per HA process, independent
+    of any config entry).
+
+    Registers the panel card's frontend resources here rather than in
+    async_setup_entry — that runs once per config entry (e.g. once per
+    residence, per the residence picker), but frontend registration should
+    only ever happen once. Deferred until HA has fully started if it
+    hasn't yet, since Lovelace's storage-backed resources collection isn't
+    reliably available during early boot.
+    """
+    if hass.state == CoreState.running:
+        await _async_register_frontend(hass)
+    else:
+        async def _on_started(_event) -> None:
+            await _async_register_frontend(hass)
+
+        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _on_started)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up LDATA from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
-    
+
     # Handle backward compatibility for username/email field
     username = entry.data.get("email", entry.data.get(CONF_USERNAME))
 
@@ -117,8 +453,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # Ensure each panel has its own config subentry, and migrate any
+    # pre-subentry devices/entities into theirs, before platforms set up —
+    # so newly-discovered breakers get the right config_subentry_id from
+    # the moment they're created instead of needing a second pass.
+    await _async_reconcile_panel_subentries(hass, entry, coordinator)
+
     # This line will now only be reached if the first refresh was successful.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Platforms have now registered every current entity against its device —
+    # safe to remove any device that's left with none (see docstring).
+    await _async_purge_orphaned_devices(hass, entry)
 
     # Set up a listener for options updates
     entry.add_update_listener(options_update_listener)

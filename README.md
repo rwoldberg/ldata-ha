@@ -4,9 +4,7 @@
 # ldata-ha
 # leviton LDATA and LWHEM integration for Home Assistant (https://my.leviton.com/)
 
-# **-Starting with v2 this integration now uses Websockets!-**
-
-This is a home assistant integration for the LDATA and LWHEM hubs for levitons smart breakers.
+This is a home assistant integration for the LDATA and LWHEM hubs for levitons smart breakers. It can also optionally discover and control Decora Smart Wi-Fi devices (switches, dimmers, fans, outlets, GFCIs) on the same account — see [Decora Smart Wi-Fi Support](#decora-smart-wi-fi-support) below.
 
 <br>
 
@@ -54,6 +52,212 @@ If you do not wish to use HACS, then please download the latest version from the
 <img width="450" alt="Configure LDATA from Home Assistant" src="https://user-images.githubusercontent.com/2048887/220187938-142446b6-81f9-491f-a880-b54f5ec33591.png">
 
 
+## Panel Card (Lovelace)
+
+A custom Lovelace card that renders a visual representation of a physical panel — breakers laid out in their real slot positions, live Watts/Amps, alarm highlighting, and an on/off switch per breaker (if 'Allow Control is enabled').
+
+Features:
+- Auto-discovers breakers for a panel via Home Assistant's device registry — no manual entity list to maintain.
+- Left/right column placement and slot numbering match the physical panel (odd positions left, even positions right).
+- 2-pole (240V) breakers render as a single double-height slot spanning both of their positions (e.g. `5/7`), not squeezed into one row.
+- Panel mounting orientation (normal vs. rotated 180°) is auto-detected from Leviton's own data — no config needed unless you want to force an orientation.
+- Optional live power/current readout and over-current/under-voltage alarm highlighting per slot.
+- When breaker control is enabled, each slot shows its own on/off switch — pressing it asks for confirmation before actually toggling. Clicking anywhere else on a slot opens that breaker's device page.
+- Attempting to turn on a Gen1 breaker (hardware that can be tripped remotely but not reset remotely) shows an informational dialog instead of a confirmation — Gen1 breakers must be reset by hand at the panel.
+
+### 1. Install the card file
+
+Nothing to do here for most setups — the integration serves the card directly from its own `custom_components/ldata/www/` folder and registers it as a Lovelace resource automatically, so there's no file to copy and no manual "Add Resource" step. Just make sure the integration is installed and Home Assistant has been **restarted** (not just reloaded) since — this registration happens once at startup.
+
+If your dashboard is in legacy YAML mode (not the default UI/storage mode), auto-registration doesn't apply and you'll need to add the resource manually: URL `/ldata_static/ldata-panel-card.js`, type **JavaScript Module**.
+
+If the card isn't picking up an update after a new release, a hard browser refresh (Ctrl+Shift+R / Cmd+Shift+R) usually clears it; the underlying file is always current as soon as `custom_components/ldata` is updated and HA is restarted.
+
+### 2. Add the card to a dashboard
+
+1. Edit a dashboard, click **+ Add Card**, and choose **Manual** (or **Custom: LDATA Panel Card** if it appears in the picker).
+2. Use the YAML below, filling in `device_id` with your panel's device (find it under **Settings > Devices & Services > Devices**, click your LDATA/LWHEM panel — not a breaker — and copy the device ID from the page URL).
+
+```yaml
+type: custom:ldata-panel-card
+device_id: <panel device id>
+title: "Main Panel"        # optional, defaults to the device's name
+show_power: true           # optional, show live Watts/Amps per slot
+show_alarms: true          # optional, highlight over-current/under-voltage alarms
+toggle: true                # optional, show an on/off switch on each slot when control is enabled
+# rotate_180: true          # optional override — only set this if auto-detected orientation is wrong
+```
+
+If you have multiple panels, add one card per panel, each with its own `device_id`.
+
+### Showing live CT (Grid/Solar) Watts and Amps above the panel card
+
+The panel card itself only shows breakers — for a live whole-panel reading, add standard Home Assistant cards above it using your CT clamp's own sensors. Each CT is its own device, named after its usage type (e.g. "Grid", "Solar") — find its Watts/Amps entity IDs under **Settings > Devices & Services > Devices**, click the CT device (linked under your panel), and copy them from its Sensors tab.
+
+```yaml
+cards:
+  - type: horizontal-stack
+    cards:
+      - type: tile
+        entity: sensor.grid_watts
+        name: Grid Power
+      - type: tile
+        entity: sensor.grid_amps
+        name: Grid Current
+
+  # If your panel also has a Solar CT, add a second row the same way:
+  # - type: horizontal-stack
+  #   cards:
+  #     - type: tile
+  #       entity: sensor.solar_watts
+  #       name: Solar Power
+  #     - type: tile
+  #       entity: sensor.solar_amps
+  #       name: Solar Current
+
+  - type: custom:ldata-panel-card
+    device_id: <panel device id>
+    title: "Main Panel"
+```
+
+A `glance` card is a more compact alternative to the `tile`/`horizontal-stack` pair above:
+
+```yaml
+  - type: glance
+    title: Grid
+    entities:
+      - entity: sensor.grid_watts
+        name: Power
+      - entity: sensor.grid_amps
+        name: Current
+```
+
+Or use `sensor` cards with `graph: line` if you'd rather see a trend line under each value instead of just the live number:
+
+```yaml
+  - type: horizontal-stack
+    cards:
+      - type: sensor
+        graph: line
+        entity: sensor.grid_watts
+        name: Grid Power
+      - type: sensor
+        graph: line
+        entity: sensor.grid_amps
+        name: Grid Current
+```
+
+### Doing the same for a nested/sub-panel (e.g. a Casita panel)
+
+If you have a second physical panel (a sub-panel fed from the main one) that shows up as its own device under **Settings > Devices & Services** — separate from your main panel — the integration treats it exactly the same as the main panel: its own breakers, its own CT clamp(s) if it has any, and its own `device_id`. There's nothing "nested" about it structurally, so just repeat the exact same pattern with that panel's own `device_id` and its own CT entity IDs:
+
+```yaml
+cards:
+  # Main panel
+  - type: horizontal-stack
+    cards:
+      - type: tile
+        entity: sensor.grid_watts
+        name: Grid Power
+      - type: tile
+        entity: sensor.grid_amps
+        name: Grid Current
+  - type: custom:ldata-panel-card
+    device_id: <main panel device id>
+    title: "Main Panel"
+
+  # Casita (sub-)panel — same pattern, its own device_id and CT entities
+  - type: horizontal-stack
+    cards:
+      - type: tile
+        entity: sensor.casita_grid_watts
+        name: Casita Grid Power
+      - type: tile
+        entity: sensor.casita_grid_amps
+        name: Casita Grid Current
+  - type: custom:ldata-panel-card
+    device_id: <casita panel device id>
+    title: "Casita Panel"
+```
+
+If the sub-panel doesn't have its own CT clamp, it won't have a "Grid Power"-style entity of its own — in that case the closest equivalent is the Watts/Amps of whichever breaker on the main panel feeds power to it (every smart breaker has its own Watts/Amps sensors, same as any other breaker).
+
+## Decora Smart Wi-Fi Support
+
+Optional support for Leviton's **Decora Smart Wi-Fi** product line — a separate line of devices from the LDATA/WHEM breaker panels above (switches, dimmers, fans, outlets, GFCI outlets, and Wi-Fi bridges), fetched from the same Leviton cloud account via a different API. Off by default — most LDATA users don't have any of these, and leaving it off avoids extra API calls on every update.
+
+### Enabling it
+
+Turn on **Enable Decora Smart Wi-Fi devices** — either during initial setup, or later via **Settings > Devices & Services > Leviton LDATA > Configure**. Home Assistant will discover every supported Decora device on your account automatically; no device IDs or manual entity setup required.
+
+### What gets created
+
+Each Decora device becomes its own HA device, with entities depending on its type:
+
+- **Lights & dimmers** — a `light` entity (on/off, plus brightness if the device supports dimming).
+- **Fans** — a `fan` entity (on/off, plus speed if supported).
+- **Switches, outlets, and GFCI outlets** — a `switch` entity.
+- **GFCI outlets specifically** — an additional fault-status `binary_sensor` and `sensor` (Protected/Fault/Test), plus a buzzer enable/disable `switch` and a silence-alert `button`.
+- **Every device** — a Wi-Fi signal strength `sensor`, a connectivity `binary_sensor`, and an identify `button` (blinks the device's LED so you can find it physically).
+- **Dimmable/motion-capable devices** — config `select` entities for things like auto-shutoff time, status LED behavior, fade rate, and motion sensor timing/mode, where the device reports support for them.
+
+Devices update in real time over the same WebSocket connection used for breaker/panel data, so state changes (e.g. flipping a physical switch) reflect in HA immediately.
+
+### Supported Decora devices
+
+**Controllers**
+
+    D2SCS
+    DW4BC
+
+**Fans**
+
+    D24SF
+    DW4SF
+
+**GFCI Outlets**
+
+    D2GF1
+    D2GF2
+
+**Lights**
+
+    D23LP
+    D26HD
+    D2ELV
+    D2MSD
+    DN6HD
+    DW1KD
+    DW3HL
+    DW6HD
+    DWVAA
+
+**Motion Sensors** (capability of the light above, not a separate device)
+
+    D2MSD
+
+**Outlets**
+
+    D215O
+    D215P
+    D215R
+    DW15A
+    DW15P
+    DW15R
+
+**Switches**
+
+    D215S
+    D2SCS
+    DW15S
+    DN15S
+
+**Wi-Fi Bridge**
+
+    MLWSB
+
+If you add a new Decora device to your account, reload the integration to pick it up.
+
 ## Options
 
 Addon is auto reloading on submit.
@@ -67,6 +271,9 @@ Addon is auto reloading on submit.
 
 - Allow Breaker Control (default off)
   - HA will not create Switch entities for breaker control (Breakers are only treated as Sensors)
+
+- Enable Decora Smart Wi-Fi devices (default off)
+  - Discovers and creates entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account (a separate Leviton product line from the LDATA/WHEM breaker panels). Leave off if you don't have any — it avoids extra API calls on every update. Can be set at initial setup or toggled later here.
 
 - Log General Integration Errors
   - Integration crashes or web errors

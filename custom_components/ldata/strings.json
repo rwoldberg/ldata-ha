@@ -7,7 +7,8 @@
           "username": "[%key:common::config_flow::data::username%]",
           "password": "[%key:common::config_flow::data::password%]",
           "three_phase": "120/208V Network Service (Apartment/Condo)",
-          "allow_breaker_control": "Allow breaker control"
+          "allow_breaker_control": "Allow breaker control",
+          "enable_decora": "Enable Decora Smart Wi-Fi devices"
         }
       },
       "2fa": {
@@ -16,12 +17,20 @@
         "data": {
           "2fa_code": "Authentication Code"
         }
+      },
+      "residence": {
+        "title": "Select Residence(s)",
+        "description": "Your account has access to more than one residence. Select which one(s) to set up — each one you pick becomes its own separate LDATA integration entry, keeping their panels and breakers cleanly separated.",
+        "data": {
+          "residences": "Residences"
+        }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
       "invalid_2fa": "Invalid 2FA code, please try again",
+      "no_residence_selected": "Select at least one residence to continue",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
@@ -36,6 +45,7 @@
         "data": {
           "three_phase": "120/208V Network Service (Apartment/Condo)",
           "allow_breaker_control": "Allow Breaker Control",
+          "enable_decora": "Enable Decora Smart Wi-Fi devices",
           "gap_handling": "Gap Handling (older firmware only)",
           "gap_threshold": "Gap Threshold (mins)",
           "ha_inform_rate": "HA Inform Rate (seconds)",
@@ -50,6 +60,7 @@
           "ha_inform_rate": "How often to update sensors in Home Assistant (2-600 seconds). Lower values = more responsive but higher system load and DB writes.",
           "three_phase": "Enable only if your service is 120/208V three-phase (common in apartments and condos with shared utility transformers). In this mode, two-pole breaker voltages are multiplied by √3/2 (~0.866) to report the correct 208V line-to-line voltage instead of the incorrect 240V. Do NOT enable for standard 120/240V single-phase residential service.",
           "allow_breaker_control": "When enabled, HA will create switch entities allowing you to trip/reset breakers. When disabled, breakers are only treated as sensors.",
+          "enable_decora": "When enabled, LDATA will also discover and create entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account. Leave disabled if you don't have any — it avoids extra API calls on every update.",
           "gap_handling": "Fallback for older firmware without hardware energy counters. How breaker daily energy sensors handle gaps when no data is received. Skip: safest. Extrapolate: assume last known power. Average: compromise. Panels with firmware 2.0+ use hardware counters and ignore this setting.",
           "gap_threshold": "Time without data before gap handling activates (1-30 minutes). Only applies to power×time fallback on older firmware.",
           "log_warnings": "Log integration crashes or web errors.",

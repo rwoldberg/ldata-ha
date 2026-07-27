@@ -16,7 +16,8 @@ import asyncio
 import aiohttp
 
 from .const import (
-    _LEG1_POSITIONS, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
+    _LEG1_POSITIONS, CONF_RESIDENCE_ID, DECORA_MODELS_ALL, ENABLE_DECORA,
+    ENABLE_DECORA_DEFAULT, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
     CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
 )
 
@@ -475,6 +476,252 @@ class LDATAService:
         self.residence_id_list.append(result_json["primaryResidenceId"])
         return True
 
+    def discover_residences(self) -> list[dict[str, str]]:
+        """Discover every residence this account has access to.
+
+        Used by the config flow, after login but before committing to a
+        config entry, so the user can pick which residence(s) to set up as
+        separate entries (see const.py's CONF_RESIDENCE_ID). Doesn't mutate
+        residence_id_list — that's populated separately by status() at
+        runtime, scoped to whichever single residence the entry ended up
+        configured for.
+
+        Returns [{"id": ..., "name": ...}, ...]. The API's residence-name
+        field isn't documented/confirmed, so "name" defensively falls back
+        to the residence id itself if no label field is present — still
+        functional, just less pretty in the picker UI.
+        """
+        if not self.account_id:
+            self.get_residential_account()
+        if not self.account_id:
+            return []
+
+        residences: dict[str, str] = {}
+
+        url = f"https://my.leviton.com/api/ResidentialAccounts/{self.account_id}/residences"
+        result_json = self._residence_api_get(url, "Residences")
+        if result_json:
+            for item in result_json:
+                rid = item.get("id")
+                if rid:
+                    residences[rid] = item.get("name") or item.get("address") or rid
+
+        url = f"https://my.leviton.com/api/Person/{self.userid}/residentialPermissions"
+        result_json = self._residence_api_get(url, "Residence Permissions")
+        if result_json:
+            for account in result_json:
+                rid = account.get("residenceId")
+                if rid and rid not in residences:
+                    residences[rid] = account.get("residenceName") or account.get("name") or rid
+
+        if not residences:
+            # No multi-residence data at all — fall back to the single
+            # primary-residence lookup (matches get_residence()). No
+            # clear_tokens_on_failure here (unlike get_residence()) — this
+            # runs mid-config-flow before the entry is finalized, and a
+            # failed lookup shouldn't wipe out otherwise-valid auth tokens
+            # the flow still needs a moment later to save the entry.
+            url = f"https://my.leviton.com/api/ResidentialAccounts/{self.account_id}"
+            result_json = self._residence_api_get(url, "Residence")
+            if result_json and result_json.get("primaryResidenceId"):
+                rid = result_json["primaryResidenceId"]
+                residences[rid] = result_json.get("name") or rid
+
+        return [{"id": rid, "name": name} for rid, name in residences.items()]
+
+    # ── Decora Smart Wi-Fi Devices ──────────────────────────────────────
+    # A separate Leviton product line from the LDATA/WHEM panels above —
+    # different API (iotSwitches/iotBridges), gated behind ENABLE_DECORA.
+
+    def get_iot_switches(self) -> list | None:
+        """Get the Decora Smart Wi-Fi devices (iotSwitches) for all residences."""
+        all_switches = []
+        for residenceId in self.residence_id_list:
+            headers = self._auth_headers(filter=json.dumps({"include": ["iotButtons"]}))
+            url = f"https://my.leviton.com/api/Residences/{residenceId}/iotSwitches"
+            try:
+                result = self.session.get(url, headers=headers, timeout=15)
+
+                if result.status_code in (401, 403, 406):
+                    raise LDATAAuthError(
+                        f"[v{self.version}] Auth token invalid ({result.status_code}) during get_iot_switches."
+                    )
+
+                if result.status_code == 200:
+                    switches = result.json()
+                    for sw in switches:
+                        sw["_residenceId"] = residenceId
+                    all_switches.extend(switches)
+                else:
+                    clean_msg = self._get_clean_error_msg(result.text)
+                    _LOGGER.warning(
+                        f"[v{self.version}] Failed to get iotSwitches for residence {residenceId} "
+                        f"(HTTP {result.status_code}): {clean_msg}"
+                    )
+            except Exception as e:
+                if isinstance(e, LDATAAuthError):
+                    raise
+                _LOGGER.warning(
+                    f"[v{self.version}] Exception getting iotSwitches for residence {residenceId}: {e}"
+                )
+        return all_switches if all_switches else None
+
+    def get_iot_bridges(self) -> list:
+        """Get all iotBridges (MLWSB) for all residences."""
+        all_bridges = []
+        for residenceId in self.residence_id_list:
+            headers = self._auth_headers()
+            url = f"https://my.leviton.com/api/Residences/{residenceId}/iotBridges"
+            try:
+                result = self.session.get(url, headers=headers, timeout=15)
+                if result.status_code == 200:
+                    bridges = result.json()
+                    for b in bridges:
+                        b["_residenceId"] = residenceId
+                    all_bridges.extend(bridges)
+                elif result.status_code in (401, 403, 406):
+                    raise LDATAAuthError(
+                        f"[v{self.version}] Auth token invalid ({result.status_code}) during get_iot_bridges."
+                    )
+            except Exception as e:
+                if isinstance(e, LDATAAuthError):
+                    raise
+                _LOGGER.debug(
+                    f"[v{self.version}] Could not fetch iotBridges for residence {residenceId}: {e}"
+                )
+        return all_bridges
+
+    def get_residential_rooms(self) -> dict:
+        """Get the residential rooms for all residences, keyed by room id."""
+        rooms = {}
+        for residenceId in self.residence_id_list:
+            headers = self._auth_headers()
+            url = f"https://my.leviton.com/api/Residences/{residenceId}/residentialRooms"
+            try:
+                result = self.session.get(url, headers=headers, timeout=15)
+                if result.status_code == 200:
+                    for room in result.json():
+                        rooms[room["id"]] = room.get("name", f"Room {room['id']}")
+                elif result.status_code in (401, 403, 406):
+                    raise LDATAAuthError(
+                        f"[v{self.version}] Auth token invalid ({result.status_code}) during get_residential_rooms."
+                    )
+            except Exception as e:
+                if isinstance(e, LDATAAuthError):
+                    raise
+                _LOGGER.debug(
+                    f"[v{self.version}] Could not fetch rooms for residence {residenceId}: {e}"
+                )
+        return rooms
+
+    def set_iot_switch(self, residence_id, switch_id: int, data: dict) -> bool:
+        """Send a PUT to update a Decora Smart Wi-Fi switch."""
+        url = f"https://my.leviton.com/api/Residences/{residence_id}/iotSwitches/{switch_id}"
+        result = self._put_request(url, data, f"set_iot_switch({switch_id})")
+        return result is not None
+
+    def parse_decora_devices(self, switches_json) -> dict:
+        """Parse iotSwitches JSON into a normalized dict keyed by device id."""
+        devices = {}
+        if not switches_json:
+            return devices
+        for sw in switches_json:
+            model = sw.get("model")
+            if model not in DECORA_MODELS_ALL:
+                _LOGGER.debug(
+                    f"[v{self.version}] Skipping unsupported Decora model: {model} ({sw.get('name')})"
+                )
+                continue
+            dev_id = sw["id"]
+            devices[dev_id] = {
+                "id": dev_id,
+                "name": sw.get("name", f"Decora {dev_id}"),
+                "model": model,
+                "manufacturer": sw.get("manufacturer", "Leviton"),
+                "serial": sw.get("serial"),
+                "mac": sw.get("mac"),
+                "version": sw.get("version"),
+                "power": sw.get("power", "OFF"),
+                "brightness": sw.get("brightness", 0),
+                "connected": sw.get("connected", False),
+                "canSetLevel": sw.get("canSetLevel", False),
+                "minLevel": sw.get("minLevel", 0),
+                "maxLevel": sw.get("maxLevel", 100),
+                "rssi": sw.get("rssi"),
+                "localIP": sw.get("localIP"),
+                "residenceId": sw.get("_residenceId") or sw.get("residenceId"),
+                # Config fields for select entities
+                "autoOffTime": sw.get("autoOffTime"),
+                "statusLED": sw.get("statusLED"),
+                "loadType": sw.get("loadType"),
+                "fadeOnTime": sw.get("fadeOnTime"),
+                "fadeOffTime": sw.get("fadeOffTime"),
+                "triacOff": sw.get("triacOff"),
+                "reversePhase": sw.get("reversePhase"),
+                "dimLED": sw.get("dimLED"),
+                "presetLevel": sw.get("presetLevel"),
+                # Motion sensor fields
+                "motionMode": sw.get("motionMode"),
+                "motionNightMode": sw.get("motionNightMode"),
+                "motionDisableTime": sw.get("motionDisableTime"),
+                "motionTimeout": sw.get("motionTimeout"),
+                "motionOccupied": sw.get("motionOccupied"),
+                "motionSensitivity": sw.get("motionSensitivity"),
+                # GFCI fields
+                "fault": sw.get("fault"),
+                "enableBuzzer": sw.get("enableBuzzer"),
+                # Room assignment
+                "residentialRoomId": sw.get("residentialRoomId"),
+            }
+        return devices
+
+    def parse_bridge_devices(self, bridges_json) -> dict:
+        """Parse iotBridges JSON (MLWSB) into normalized device dicts."""
+        devices = {}
+        if not bridges_json:
+            return devices
+        for b in bridges_json:
+            dev_id = b.get("id") or b.get("serial")
+            if not dev_id:
+                continue
+            devices[f"bridge_{dev_id}"] = {
+                "id": f"bridge_{dev_id}",
+                "name": b.get("name", f"Wi-Fi Bridge {dev_id}"),
+                "model": "MLWSB",
+                "manufacturer": "Leviton",
+                "serial": b.get("serial"),
+                "mac": b.get("mac"),
+                "version": b.get("version"),
+                "power": "ON",  # Bridge is always on when connected
+                "brightness": 0,
+                "connected": b.get("connected", False),
+                "canSetLevel": False,
+                "minLevel": 0,
+                "maxLevel": 0,
+                "rssi": b.get("rssi"),
+                "localIP": b.get("localIP"),
+                "residenceId": b.get("_residenceId") or b.get("residenceId"),
+                "autoOffTime": None,
+                "statusLED": None,
+                "loadType": None,
+                "fadeOnTime": None,
+                "fadeOffTime": None,
+                "triacOff": None,
+                "reversePhase": None,
+                "dimLED": None,
+                "presetLevel": None,
+                "motionMode": None,
+                "motionNightMode": None,
+                "motionDisableTime": None,
+                "motionTimeout": None,
+                "motionOccupied": None,
+                "motionSensitivity": None,
+                "fault": None,
+                "enableBuzzer": None,
+                "residentialRoomId": None,
+            }
+        return devices
+
     def _get_whems_resource(self, panel_id: str, endpoint: str, label: str) -> list[dict] | None:
         """GET a per-panel WHEMS sub-resource (breakers or CTs) with shared error handling."""
         headers = self._auth_headers(filter="{}")
@@ -559,7 +806,27 @@ class LDATAService:
                         
                     for panel in returnPanels:
                         panel["ModuleType"] = panel_type
-                        
+
+                        if panel_type == "WHEMS" and panel["id"].startswith("LDATA-"):
+                            # This panel came back from the WHEMS listing
+                            # endpoint but is actually an old-style LDATA
+                            # panel under the hood (a Leviton backend
+                            # inconsistency) — every WHEMS-specific per-panel
+                            # call below (bandwidth toggle, breaker/CT
+                            # sub-resource fetch) 404s with MODEL_NOT_FOUND
+                            # for this id format. get_ldata_panels() already
+                            # returns this same panel correctly (breakers
+                            # included inline via the request filter), so
+                            # skip it entirely here instead of wasting calls
+                            # on it and duplicating it with broken data.
+                            _LOGGER.debug(
+                                f"[v{self.version}] Skipping WHEMS-listed panel "
+                                f"'{panel.get('name', panel['id'])}' — its id is "
+                                f"LDATA-formatted, so it's already handled via "
+                                f"get_ldata_panels()."
+                            )
+                            continue
+
                         # Determine connection status BEFORE sending commands
                         is_connected = self._is_panel_connected(panel)
 
@@ -1170,12 +1437,24 @@ class LDATAService:
         
         # Lookup the residential id from the account.
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
-            _LOGGER.debug(f"[v{self.version}] Get Residence ID!")
-            self.get_residences()
-            if self.residence_id_list is None or len(self.residence_id_list) == 0:
-                # User does not have multiple residences, lets try just the single residence
-                self.get_residence()
-            self.get_residencePermissions()
+            configured_residence_id = self.entry.data.get(CONF_RESIDENCE_ID) if self.entry else None
+            if configured_residence_id:
+                # This entry was set up via the residence picker (config
+                # flow) and is scoped to exactly one residence — skip
+                # discovering/using every residence the account can see.
+                _LOGGER.debug(f"[v{self.version}] Using configured residence_id: {configured_residence_id}")
+                self.residence_id_list = [configured_residence_id]
+            else:
+                # No residence_id configured — entry predates the residence
+                # picker (or discovery found only one residence at setup
+                # time), so fall back to the original behavior of using
+                # every residence the account has access to.
+                _LOGGER.debug(f"[v{self.version}] Get Residence ID!")
+                self.get_residences()
+                if self.residence_id_list is None or len(self.residence_id_list) == 0:
+                    # User does not have multiple residences, lets try just the single residence
+                    self.get_residence()
+                self.get_residencePermissions()
         
         if self.residence_id_list:
             self.residence_id_list = [x for x in self.residence_id_list if x is not None]
@@ -1191,15 +1470,68 @@ class LDATAService:
         if panels_json is None:
             panels_json = whems_panels_json
         elif whems_panels_json is not None:
+            # De-dup by id — belt-and-suspenders alongside the LDATA-id skip
+            # in _fetch_panels(). If some other (currently unknown) scenario
+            # ever causes the same panel id to appear in both listings, we
+            # want the LDATA-sourced entry to win rather than silently
+            # processing the same panel twice with two different data
+            # snapshots in one poll (panel-level sensors would flicker
+            # between whichever entry gets processed last).
+            existing_ids = {p["id"] for p in panels_json if p.get("id")}
             for panel in whems_panels_json:
+                if panel.get("id") in existing_ids:
+                    continue
                 panels_json.append(panel)
         
         if panels_json is None:
             _LOGGER.warning(f"[v{self.version}] No panels found or API returned no panel data.")
-            # Return empty structure
-            return self.parse_panels(panels_json)
 
-        return self.parse_panels(panels_json)
+        result = self.parse_panels(panels_json)
+
+        # Fetch Decora Smart Wi-Fi devices (iotSwitches), if enabled — most
+        # LDATA accounts have none, so this is opt-in rather than always-on.
+        enable_decora = self.entry.options.get(
+            ENABLE_DECORA, self.entry.data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT)
+        ) if self.entry else ENABLE_DECORA_DEFAULT
+
+        if enable_decora:
+            try:
+                switches_json = self.get_iot_switches()
+                result["decora_devices"] = self.parse_decora_devices(switches_json)
+
+                # Fetch Wi-Fi Bridges (MLWSB) from iotBridges
+                try:
+                    bridges_json = self.get_iot_bridges()
+                    bridge_devices = self.parse_bridge_devices(bridges_json)
+                    result["decora_devices"].update(bridge_devices)
+                except Exception as e:
+                    _LOGGER.debug(f"[v{self.version}] Could not fetch bridges: {e}")
+
+                decora_count = len(result["decora_devices"])
+                if decora_count > 0:
+                    _LOGGER.debug(f"[v{self.version}] Found {decora_count} Decora Smart Wi-Fi devices.")
+                    # Fetch rooms and attach room names to devices
+                    try:
+                        rooms = self.get_residential_rooms()
+                        result["rooms"] = rooms
+                        for dev in result["decora_devices"].values():
+                            room_id = dev.get("residentialRoomId")
+                            if room_id and room_id in rooms:
+                                dev["roomName"] = rooms[room_id]
+                    except Exception as e:
+                        _LOGGER.debug(f"[v{self.version}] Could not enrich devices with room names: {e}")
+                        result["rooms"] = {}
+            except LDATAAuthError:
+                raise
+            except Exception as e:
+                _LOGGER.warning(f"[v{self.version}] Failed to fetch Decora devices: {e}")
+                result["decora_devices"] = {}
+                result["rooms"] = {}
+        else:
+            result["decora_devices"] = {}
+            result["rooms"] = {}
+
+        return result
 
     def parse_panels(self, panels_json) -> object:
         """Parse the panel json data."""
@@ -1234,7 +1566,13 @@ class LDATAService:
                 continue
             panel_data["panel_type"] = panel.get("ModuleType", "WHEMS")
             panel_data["connected"] = self._is_panel_connected(panel)
-            
+
+            # Physical mounting orientation (0 or 180) and total breaker slot
+            # count — WHEMS panels report these directly; not present on the
+            # older LDATA (ResidentialBreakerPanels) panel type.
+            panel_data["orientation"] = panel.get("orientation", 0)
+            panel_data["panel_size"] = panel.get("panelSize")
+
             # Panel-level diagnostic/alarm fields
             panel_data["overVoltage"] = panel.get("overVoltage", False)
             panel_data["underVoltage"] = panel.get("underVoltage", False)
@@ -1376,6 +1714,7 @@ class LDATAService:
                 _LOGGER.debug(f"[v{self.version}] Panel {panel.get('name', panel['id'])} ({panel.get('ModuleType', 'unknown')}): No CTs key or empty CTs (CTs key present: {'CTs' in panel}, value: {type(panel.get('CTs')).__name__})")
             totalPower = 0.0
             if "residentialBreakers" in panel and panel["residentialBreakers"]: # Add check
+                dumb_breakers = []
                 for breaker in panel["residentialBreakers"]:
                     if (
                         breaker["model"] is not None
@@ -1519,6 +1858,21 @@ class LDATAService:
                                 totalPower += float(breaker_power)
                         except (ValueError, TypeError):
                             totalPower += 0
+                    else:
+                        # Physically present but non-smart ("dumb") breaker —
+                        # model NONE-1/NONE-2 with no monitoring/control data
+                        # at all. Not turned into an HA entity, but captured
+                        # so the panel card can render an accurate placeholder
+                        # slot instead of a false gap.
+                        dumb_breakers.append(
+                            {
+                                "id": breaker.get("id"),
+                                "name": breaker.get("name") or "Unmonitored Breaker",
+                                "position": breaker.get("position"),
+                                "poles": breaker.get("poles") or 1,
+                            }
+                        )
+                panel_data["dumb_breakers"] = dumb_breakers
             status_data[panel["id"] + "totalPower"] = totalPower
             
             # Detect hardware energy counters for this panel.
@@ -1740,6 +2094,17 @@ class LDATAService:
 
             # Skip panels with no real breakers
             if not panel_id or not self._panel_needs_breaker_poll.get(panel_id, False):
+                continue
+
+            if panel_type == "LDATA":
+                # get_Whems_breakers()/get_Whems_CT() only exist for WHEMS
+                # panels — there's no LDATA equivalent of this per-panel
+                # sub-resource, so calling them for an LDATA panel 404s with
+                # MODEL_NOT_FOUND every cycle. LDATA panels never populate
+                # CTs in the first place (see parse_panels()), and daily
+                # energy sensors already fall back to power×time integration
+                # when hardware counters aren't refreshed, so just skip
+                # rather than attempting an unsupported REST refresh.
                 continue
 
             try:
@@ -2056,8 +2421,47 @@ class LDATAService:
         if updated:
             self.status_data = new_status_data
             return True
-            
+
         return None
+
+    def _update_decora_from_websocket(self, payload):
+        """Update the Decora device cache from a WebSocket notification.
+
+        Independent of _update_from_websocket above — checked unconditionally
+        on every notification since the two only ever match mutually
+        exclusive modelNames (IotSwitch vs ResidentialBreaker/IotCt/IotWhem).
+        """
+        if not self.status_data:
+            return None
+
+        model_name = payload.get("modelName")
+        data = payload.get("data")
+
+        if not data or model_name != "IotSwitch":
+            return None
+
+        dev_id = data.get("id")
+        if not dev_id or dev_id not in self.status_data.get("decora_devices", {}):
+            return None
+
+        new_status_data = self.status_data.copy()
+        devices = new_status_data["decora_devices"].copy()
+        device = devices[dev_id].copy()
+
+        # Update fields present in the notification
+        for field in (
+            "power", "brightness", "connected", "rssi", "localIP",
+            "autoOffTime", "statusLED", "loadType", "fadeOnTime", "fadeOffTime",
+            "triacOff", "reversePhase", "dimLED", "motionMode", "motionNightMode",
+            "motionDisableTime", "motionTimeout", "motionOccupied", "fault", "enableBuzzer",
+        ):
+            if field in data:
+                device[field] = data[field]
+
+        devices[dev_id] = device
+        new_status_data["decora_devices"] = devices
+        self.status_data = new_status_data
+        return True
 
     async def _ws_bandwidth_put(self, session: aiohttp.ClientSession, panel_info: list) -> None:
         """PUT bandwidth:1 to every panel — this is what keeps the WebSocket alive.
@@ -2215,21 +2619,32 @@ class LDATAService:
                     "type": "subscribe",
                     "subscription": {"modelName": "IotCt", "modelId": int(ct_id)}
                 })
+
+            for dev_id in self.status_data.get("decora_devices", {}):
+                subscriptions.append({
+                    "type": "subscribe",
+                    "subscription": {"modelName": "IotSwitch", "modelId": int(dev_id)}
+                })
         return subscriptions
 
-    async def async_run_websocket(self, update_callback, connection_callback=None):
+    async def async_run_websocket(self, update_callback, connection_callback=None, decora_callback=None):
         """Run the WebSocket connection loop — PRIMARY data source.
-        
+
         WS-FIRST Strategy:
         - WebSocket is always the preferred data transport
         - All panels (regardless of firmware) start with WS-only
         - REST polling is ONLY enabled as a fallback after auto-detection
           confirms WS is not delivering breaker data for a specific panel
-        
+
         Keepalive (based on official Leviton app):
         - PUT bandwidth:1 every 50 seconds (keeps WS alive)
         - GET /apiversion every 10 seconds (keeps server session alive)
         - Subscribe once at start, re-subscribe if no data for 60 seconds
+
+        decora_callback: called for Decora IotSwitch WS data specifically —
+        immediate, no debounce (unlike update_callback, which the coordinator
+        debounces via HA_INFORM_RATE). Falls back to update_callback if not
+        provided, so Decora updates still surface even without it wired up.
         """
         uri = "wss://socket.cloud.leviton.com/"
         reconnect_delay = 10
@@ -2548,6 +2963,17 @@ class LDATAService:
                                                 update_callback()
                                             except Exception as e:
                                                 _LOGGER.error(f"[v{self.version}] Callback error: {e}")
+                                        # Decora is checked unconditionally alongside the LDATA
+                                        # update above — the two match mutually exclusive
+                                        # modelNames, so this is a no-op for LDATA notifications.
+                                        if self._update_decora_from_websocket(notification):
+                                            try:
+                                                if decora_callback:
+                                                    decora_callback()
+                                                else:
+                                                    update_callback()
+                                            except Exception as e:
+                                                _LOGGER.error(f"[v{self.version}] Decora callback error: {e}")
                                 except (ValueError, json.JSONDecodeError) as e:
                                     _LOGGER.warning(f"[v{self.version}] Invalid JSON: {e}")
                                     

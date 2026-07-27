@@ -27,14 +27,31 @@ class LDATAEntity(LDATABaseEntity):
         if self._device_id is None:
             return None
 
-        return {
-            "identifiers": {(DOMAIN, self.entity_data["serialNumber"])},
+        info = {
+            # Leviton's own "serialNumber" field is not reliably unique across
+            # breakers — confirmed via a real user report where two distinct
+            # breakers (different id, position, model, and even different
+            # parent panels) shared the same serialNumber, causing HA to
+            # merge them into a single device. "id" is what unique_id/the
+            # in-memory breaker cache already key off of and is far more
+            # trustworthy (MAC-address-shaped, effectively guaranteed
+            # globally unique). For panels, serialNumber is set to the same
+            # value as id anyway (see parse_panels()), so this is a no-op
+            # there — only breakers are actually affected.
+            "identifiers": {(DOMAIN, self.entity_data["id"])},
             "name": self.entity_data["name"],
             "model": self.entity_data["model"],
             "hw_version": self.entity_data.get("hardware"),
             "sw_version": self.entity_data["firmware"],
             "manufacturer": MANUFACTURER,
         }
+        # Breakers carry panel_id (panels themselves don't) — link the breaker
+        # device to its panel device in HA's device registry so frontend code
+        # (e.g. a panel-layout card) can discover "all breakers on this panel"
+        # without needing a separate data source.
+        if panel_id := self.entity_data.get("panel_id"):
+            info["via_device"] = (DOMAIN, panel_id)
+        return info
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:

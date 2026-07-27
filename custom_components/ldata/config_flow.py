@@ -18,6 +18,8 @@ from .const import (
     LOGGER_NAME,
     ALLOW_BREAKER_CONTROL,
     ALLOW_BREAKER_CONTROL_DEFAULT,
+    ENABLE_DECORA,
+    ENABLE_DECORA_DEFAULT,
     THREE_PHASE,
     THREE_PHASE_DEFAULT,
     HA_INFORM_RATE,
@@ -31,6 +33,8 @@ from .const import (
     GAP_THRESHOLD_DEFAULT,
     GAP_THRESHOLD_MIN,
     GAP_THRESHOLD_MAX,
+    CONF_RESIDENCE_ID,
+    RESIDENCE_IMPORT_SOURCE,
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 
@@ -42,6 +46,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required("password"): str,
         vol.Required("three_phase"): bool,
         vol.Required("allow_breaker_control"): bool,
+        vol.Required(ENABLE_DECORA, default=ENABLE_DECORA_DEFAULT): bool,
     }
 )
 
@@ -58,6 +63,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self.user_data: dict[str, Any] | None = None
         # Add this to store the entry being re-authenticated
         self.reauth_entry: config_entries.ConfigEntry | None = None
+        # Populated by _after_auth() once credentials are validated, for the
+        # residence-selection step on brand-new (non-reauth) setups.
+        self.discovered_residences: list[dict[str, str]] = []
+        self._pending_title: str | None = None
 
     async def _validate_input(self, hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
         """Validate the user input allows us to connect."""
@@ -90,7 +99,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Persist a successful auth as either a reauth update or a new entry.
 
         Shared by async_step_user and async_step_2fa — both reach this once
-        credentials (and 2FA, if required) have been validated.
+        credentials (and 2FA, if required) have been validated, by way of
+        _after_auth() (which handles residence selection for new setups).
         """
         if self.reauth_entry:
             _LOGGER.debug("Re-auth successful, updating entry.")
@@ -110,9 +120,114 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self.user_data["refresh_token"] = self.service.refresh_token
             self.user_data["userid"] = self.service.userid
 
-        await self.async_set_unique_id(self.user_data[CONF_USERNAME])
+        # Entries created via the residence picker carry a residence_id, so
+        # the same Leviton account can back multiple entries (one per
+        # residence) without colliding on username alone. Entries with no
+        # residence_id (discovery found nothing, or an older HA core/flow
+        # path) keep the original username-only unique_id.
+        residence_id = self.user_data.get(CONF_RESIDENCE_ID)
+        unique_id = f"{self.user_data[CONF_USERNAME]}::{residence_id}" if residence_id else self.user_data[CONF_USERNAME]
+        await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
         return self.async_create_entry(title=title, data=self.user_data)
+
+    async def _after_auth(self, title: str) -> ConfigFlowResult:
+        """Reached once credentials (and 2FA, if required) are validated.
+
+        Reauth goes straight to _finalize_entry — residence selection only
+        applies to brand-new setups, never to refreshing an existing entry's
+        credentials. For new setups, discover the account's residences and,
+        if there's more than one, ask which to set up; a single (or zero)
+        discovered residence skips the extra step entirely.
+        """
+        if self.reauth_entry:
+            return await self._finalize_entry(title)
+
+        try:
+            self.discovered_residences = await self.hass.async_add_executor_job(
+                self.service.discover_residences
+            )
+        except Exception:
+            _LOGGER.exception("Failed to discover residences; proceeding without residence filtering")
+            self.discovered_residences = []
+
+        if len(self.discovered_residences) <= 1:
+            if self.discovered_residences:
+                self.user_data[CONF_RESIDENCE_ID] = self.discovered_residences[0]["id"]
+            return await self._finalize_entry(title)
+
+        self._pending_title = title
+        return await self.async_step_residence()
+
+    def _residence_schema(self) -> vol.Schema:
+        options = [
+            selector.SelectOptionDict(value=r["id"], label=r["name"])
+            for r in self.discovered_residences
+        ]
+        return vol.Schema({
+            vol.Required(
+                "residences", default=[self.discovered_residences[0]["id"]]
+            ): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=options,
+                    multiple=True,
+                    mode=selector.SelectSelectorMode.LIST,
+                )
+            )
+        })
+
+    async def async_step_residence(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Let the user choose which residence(s) to set up as separate entries."""
+        if user_input is not None:
+            selected = user_input.get("residences") or []
+            if not selected:
+                return self.async_show_form(
+                    step_id="residence",
+                    data_schema=self._residence_schema(),
+                    errors={"base": "no_residence_selected"},
+                )
+
+            # async_create_entry can only be called once per flow, so the
+            # first selection finishes THIS flow; any additional selections
+            # are created as separate entries via the internal
+            # residence_import source, reusing the auth tokens already
+            # obtained here so the user isn't prompted to log in again.
+            first, *rest = selected
+            for residence_id in rest:
+                residence_name = next(
+                    (r["name"] for r in self.discovered_residences if r["id"] == residence_id),
+                    residence_id,
+                )
+                residence_data = {**self.user_data, CONF_RESIDENCE_ID: residence_id}
+                await self.hass.config_entries.flow.async_init(
+                    DOMAIN,
+                    context={"source": RESIDENCE_IMPORT_SOURCE},
+                    data={
+                        "title": f"Leviton LDATA ({residence_name})",
+                        "entry_data": residence_data,
+                    },
+                )
+
+            self.user_data[CONF_RESIDENCE_ID] = first
+            return await self._finalize_entry(self._pending_title)
+
+        return self.async_show_form(
+            step_id="residence",
+            data_schema=self._residence_schema(),
+        )
+
+    async def async_step_residence_import(self, import_data: dict[str, Any]) -> ConfigFlowResult:
+        """Internal-only step: create an additional entry for a residence the
+        user selected alongside their first, reusing already-obtained auth
+        tokens — never reached via any user-facing form.
+        """
+        entry_data = import_data["entry_data"]
+        residence_id = entry_data[CONF_RESIDENCE_ID]
+        await self.async_set_unique_id(f"{entry_data[CONF_USERNAME]}::{residence_id}")
+        self._abort_if_unique_id_configured()
+        return self.async_create_entry(title=import_data["title"], data=entry_data)
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> ConfigFlowResult:
         """Handle re-authentication."""
@@ -158,7 +273,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown"
             else:
                 # 2FA was not required, create or update entry
-                return await self._finalize_entry(info["title"])
+                return await self._after_auth(info["title"])
 
         # Pre-fill the form with data if it's a re-auth
         schema = STEP_USER_DATA_SCHEMA
@@ -168,6 +283,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PASSWORD): str,
                 vol.Required(THREE_PHASE, default=self.user_data.get(THREE_PHASE, THREE_PHASE_DEFAULT)): bool,
                 vol.Required(ALLOW_BREAKER_CONTROL, default=self.user_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)): bool,
+                vol.Required(ENABLE_DECORA, default=self.user_data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT)): bool,
             })
 
         return self.async_show_form(
@@ -198,7 +314,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 else:
                     # 2FA was successful, create or update entry
                     username = self.user_data[CONF_USERNAME]
-                    return await self._finalize_entry(f"Leviton LDATA ({username})")
+                    return await self._after_auth(f"Leviton LDATA ({username})")
             
             except LDATAAuthError as ex:
                 _LOGGER.warning("2FA failed: %s", ex)
@@ -263,6 +379,10 @@ class OptionsFlow(config_entries.OptionsFlow):
             vol.Optional(
                 ALLOW_BREAKER_CONTROL,
                 default=current_options.get(ALLOW_BREAKER_CONTROL, current_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)),
+            ): bool,
+            vol.Optional(
+                ENABLE_DECORA,
+                default=current_options.get(ENABLE_DECORA, current_data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT)),
             ): bool,
         }
 

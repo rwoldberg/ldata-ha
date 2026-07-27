@@ -35,6 +35,9 @@ from homeassistant.util import dt as dt_util
 from .const import (
     DOMAIN,
     LOGGER_NAME,
+    DECORA_MODELS_GFCI,
+    ENABLE_DECORA,
+    ENABLE_DECORA_DEFAULT,
     GAP_HANDLING,
     GAP_HANDLING_DEFAULT,
     GAP_HANDLING_SKIP,
@@ -46,7 +49,8 @@ from .const import (
     MAX_DAILY_ENERGY_KWH,
 )
 from .coordinator import LDATAUpdateCoordinator
-from .ldata_base_entity import find_panel
+from .decora_entity import DecoraEntity
+from .ldata_base_entity import add_entities_grouped_by_panel, find_panel
 from .ldata_ct_entity import LDATACTEntity
 from .ldata_entity import LDATAEntity
 
@@ -521,6 +525,9 @@ async def async_setup_entry(
         entities_to_add.append(
             LDATABreakerBleRSSISensor(coordinator, breaker_data)
         )
+        entities_to_add.append(
+            LDATABreakerPositionSensor(coordinator, breaker_data)
+        )
 
     for panel in coordinator.data.get("panels", []):
         entity_data = {}
@@ -610,9 +617,23 @@ async def async_setup_entry(
             )
         )
 
-    # Add all entities in one go for efficiency
-    if entities_to_add:
-        async_add_entities(entities_to_add)
+    add_entities_grouped_by_panel(config_entry, async_add_entities, entities_to_add)
+
+    # ── Decora Smart Wi-Fi device sensors ──
+    enable_decora = config_entry.options.get(
+        ENABLE_DECORA,
+        config_entry.data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT),
+    )
+    if enable_decora:
+        decora_entities = []
+        for dev_id, dev_data in coordinator.data.get("decora_devices", {}).items():
+            decora_entities.append(DecoraSignalSensor(coordinator, dev_data))
+            # GFCI fault status enum sensor
+            if dev_data.get("model") in DECORA_MODELS_GFCI:
+                decora_entities.append(DecoraGFCIStatusSensor(coordinator, dev_data))
+
+        if decora_entities:
+            async_add_entities(decora_entities)
 
 
 class _DailyEnergySensorMixin:
@@ -2507,6 +2528,49 @@ class LDATABreakerBleRSSISensor(LDATAEntity, SensorEntity):
         return "ble_rssi"
 
 
+class LDATABreakerPositionSensor(LDATAEntity, SensorEntity):
+    """Breaker panel slot position diagnostic sensor.
+
+    The Status binary sensor already carries `position` as an extra
+    attribute, but attributes aren't visible on a device's page without
+    opening that entity's own dialog — this surfaces it as its own row
+    on the breaker's device page instead.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:numeric"
+
+    def __init__(self, coordinator, data) -> None:
+        """Init sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.breaker_data = data
+        self._state = data.get("position")
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Call when the coordinator has an update."""
+        try:
+            if breakers := self.coordinator.data.get("breakers"):
+                if new_data := breakers.get(self.breaker_data["id"]):
+                    self._state = new_data.get("position")
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> StateType:
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Position"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "position"
+
+
 # ── Panel diagnostic sensors ────────────────────────────────────────
 
 
@@ -2570,4 +2634,91 @@ class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
                 return "mdi:wifi-strength-1"
             else:
                 return "mdi:wifi-strength-alert-outline"
+
+
+class DecoraSignalSensor(DecoraEntity, SensorEntity):
+    """Signal strength sensor for a Decora Smart Wi-Fi device."""
+
+    _attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "dBm"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, data) -> None:
+        """Init DecoraSignalSensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self._state = data.get("rssi")
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        device = self._get_device_data()
+        if device:
+            self._state = device.get("rssi")
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the signal strength value."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the device's name."""
+        return "Signal Strength"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Return the unique id suffix."""
+        return "rssi"
+
+    @property
+    def icon(self) -> str:
+        """Return the icon."""
+        return "mdi:wifi"
+
+
+GFCI_STATUS_MAP = {
+    "": "Protected",
+    "GFCI_FAULT": "Fault",
+    "MANUAL_TRIP": "Test",
+}
+
+GFCI_STATUS_OPTIONS = ["Fault", "Protected", "Test", "Unknown"]
+
+
+class DecoraGFCIStatusSensor(DecoraEntity, SensorEntity):
+    """GFCI fault status enum sensor for D2GF1/D2GF2."""
+
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_options = GFCI_STATUS_OPTIONS
+
+    def __init__(self, coordinator, data) -> None:
+        """Init DecoraGFCIStatusSensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        fault = data.get("fault", "")
+        self._state = GFCI_STATUS_MAP.get(fault, "Unknown") if fault is not None else "Unknown"
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        device = self._get_device_data()
+        if device:
+            fault = device.get("fault", "")
+            self._state = GFCI_STATUS_MAP.get(fault, "Unknown") if fault is not None else "Unknown"
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> str | None:
+        """Return the fault status."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Fault Status"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "fault_status"
         return "mdi:wifi-strength-off-outline"

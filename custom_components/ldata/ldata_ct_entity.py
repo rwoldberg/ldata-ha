@@ -23,6 +23,7 @@ class LDATACTEntity(LDATABaseEntity):
             },
             "name": self.entity_data["name"],
             "manufacturer": MANUFACTURER,
+            "via_device": (DOMAIN, self.entity_data["panel_id"]),
         }
 
     @property

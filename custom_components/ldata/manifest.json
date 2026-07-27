@@ -3,11 +3,11 @@
   "name": "Leviton LDATA",
   "codeowners": ["@rwoldberg", "@MrToast99"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["lovelace"],
   "documentation": "https://github.com/rwoldberg/ldata-ha",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/rwoldberg/ldata-ha/issues",
   "loggers": ["ldata"],
   "requirements": ["aiohttp"],
-  "version": "2.0.8"
+  "version": "2.0.9-rc1"
 }

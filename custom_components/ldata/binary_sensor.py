@@ -11,8 +11,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, LOGGER_NAME
-from .ldata_base_entity import find_panel, is_breaker_on
+from .const import DECORA_MODELS_GFCI, DOMAIN, ENABLE_DECORA, ENABLE_DECORA_DEFAULT, LOGGER_NAME
+from .decora_entity import DecoraEntity
+from .ldata_base_entity import add_entities_grouped_by_panel, find_panel, is_breaker_on
 from .ldata_entity import LDATAEntity
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -41,7 +42,22 @@ async def async_setup_entry(
             sensors_to_add.append(LDATAPanelOverVoltageSensor(entry, panel_data))
             sensors_to_add.append(LDATAPanelUnderVoltageSensor(entry, panel_data))
 
-    async_add_entities(sensors_to_add)
+    add_entities_grouped_by_panel(config_entry, async_add_entities, sensors_to_add)
+
+    # Decora Smart Wi-Fi device connectivity sensors
+    enable_decora = config_entry.options.get(
+        ENABLE_DECORA,
+        config_entry.data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT),
+    )
+    if enable_decora:
+        decora_entities = []
+        for dev_id, dev_data in entry.data.get("decora_devices", {}).items():
+            decora_entities.append(DecoraConnectedSensor(entry, dev_data))
+            if dev_data.get("model") in DECORA_MODELS_GFCI:
+                decora_entities.append(DecoraGFCIFaultSensor(entry, dev_data))
+
+        if decora_entities:
+            async_add_entities(decora_entities)
 
 
 class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
@@ -87,6 +103,10 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         attributes["hardware"] = self.breaker_data["hardware"]
         attributes["firmware"] = self.breaker_data["firmware"]
         attributes["panel_id"] = self.breaker_data["panel_id"]
+        # Gen2 breakers can be reset remotely; Gen1 breakers report False and
+        # must be reset by hand at the panel (frontend code uses this to warn
+        # before a remote "on" that won't actually do anything on Gen1).
+        attributes["canRemoteOn"] = self.breaker_data.get("canRemoteOn", False)
 
         return attributes
 
@@ -154,6 +174,20 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
     def icon(self) -> str:
         """Return the icon to use in the frontend."""
         return "mdi:cloud-check" if self.is_on else "mdi:cloud-off-outline"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        """Returns the panel's physical mounting orientation and slot count.
+
+        These don't change at runtime, so they're read once from the panel
+        data captured at entity construction rather than re-looked-up on
+        every coordinator update.
+        """
+        attributes = super().extra_state_attributes
+        attributes["orientation"] = self.panel_data.get("orientation", 0)
+        attributes["panel_size"] = self.panel_data.get("panel_size")
+        attributes["dumb_breakers"] = self.panel_data.get("dumb_breakers", [])
+        return attributes
 
 
 # ── Panel alarm sensors ──────────────────────────────────────────────
@@ -303,3 +337,85 @@ class LDATABreakerUnderVoltageSensor(_BreakerAlarmSensor):
     _name_suffix = "Under Voltage"
     _unique_id_suffix = "under_voltage"
     _icon_off = "mdi:flash-outline"
+
+
+# ── Decora Smart Wi-Fi device sensors ──────────────────────────────────
+
+
+class DecoraConnectedSensor(DecoraEntity, BinarySensorEntity):
+    """Connectivity binary sensor for a Decora Smart Wi-Fi device."""
+
+    def __init__(self, coordinator, data) -> None:
+        """Init DecoraConnectedSensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self._state = data.get("connected", False)
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        device = self._get_device_data()
+        if device:
+            self._state = device.get("connected", False)
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Returns true if the device is connected."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Suffix to append to the device's name."""
+        return "Connected"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Return the unique id suffix."""
+        return "connected"
+
+    @property
+    def icon(self) -> str:
+        """Return the icon to use in the frontend."""
+        return "mdi:wifi" if self.is_on else "mdi:wifi-off"
+
+    @property
+    def available(self) -> bool:
+        """Always available since this sensor reports connectivity itself."""
+        return self.coordinator.last_update_success
+
+
+GFCI_STATUS_PROTECTED = ""
+
+
+class DecoraGFCIFaultSensor(DecoraEntity, BinarySensorEntity):
+    """GFCI fault detection binary sensor for D2GF1/D2GF2."""
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self, coordinator, data) -> None:
+        """Init DecoraGFCIFaultSensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        fault = data.get("fault", "")
+        self._state = fault is not None and fault != GFCI_STATUS_PROTECTED
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        device = self._get_device_data()
+        if device:
+            fault = device.get("fault", "")
+            self._state = fault is not None and fault != GFCI_STATUS_PROTECTED
+        self.async_write_ha_state()
+
+    @property
+    def is_on(self) -> bool | None:
+        """Returns true if a GFCI fault is detected."""
+        return self._state
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Fault Detected"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "fault"

@@ -49,10 +49,11 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         # Start the WebSocket Listener — this is the PRIMARY data source
         self._websocket_task = self.config_entry.async_create_background_task(
-            self._hass, 
+            self._hass,
             self._service.async_run_websocket(
                 self._handle_websocket_update,
-                self._handle_connection_change
+                self._handle_connection_change,
+                self._handle_decora_websocket_update,
             ),
             "ldata_websocket"
         )
@@ -295,6 +296,24 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                     inform_rate,
                     self._apply_debounced_update
                 )
+
+    def _handle_decora_websocket_update(self):
+        """Callback for Decora IotSwitch WebSocket data — immediate push, no debounce.
+
+        Unlike breaker/CT updates (which go through the debounce timer above
+        to respect HA_INFORM_RATE), Decora state changes push immediately —
+        these are typically direct user actions (flipping a switch), where a
+        responsive UI matters more than reducing DB writes.
+        """
+        data = self._service.status_data
+        if not data:
+            return
+
+        decora_count = len(data.get("decora_devices", {}))
+        _LOGGER.debug(
+            f"[v{self._service.version}] Pushing realtime Decora update to HA: {decora_count} devices"
+        )
+        self.async_set_updated_data(data)
 
     def _log_data_if_enabled(self, data, source: str = ""):
         """Log data based on user options."""
