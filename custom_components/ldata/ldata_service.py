@@ -735,6 +735,49 @@ class LDATAService:
         except (ValueError, TypeError):
             return None
 
+    def _combine_breaker_power(
+        self,
+        power1: float | None,
+        power2: float | None,
+        poles: int,
+        *,
+        breaker_id: str | None = None,
+        source: str = "REST",
+    ) -> float | None:
+        """Return the total real power represented by a breaker payload.
+
+        A two-pole breaker reports one power value per hot leg.  The legs of a
+        normal 240 V load must contribute in the same direction.  Some panel
+        firmware instead reports one leg with an inverted polarity; directly
+        adding the two readings then cancels a real load to 0 W and prevents
+        the energy sensors from accumulating.  Treat opposite-sign leg values
+        as a polarity mismatch and combine their magnitudes, retaining the
+        direction of the larger leg for bidirectional circuits.
+
+        Missing readings remain distinct from an actual 0 W reading so the
+        caller can avoid initialising a breaker with fabricated power.
+        """
+        if power1 is None and power2 is None:
+            return None
+
+        p1 = power1 or 0.0
+        p2 = power2 or 0.0
+        if poles != 2 or p1 == 0.0 or p2 == 0.0 or p1 * p2 > 0:
+            return p1 + p2
+
+        # A 2-pole circuit with opposite signs is a reversed-leg telemetry
+        # report, not zero load.  Select a stable direction for solar/generator
+        # circuits while preserving the combined load magnitude.
+        direction = p1 if abs(p1) >= abs(p2) else p2
+        total = abs(p1) + abs(p2)
+        normalized = total if direction >= 0 else -total
+        _LOGGER.debug(
+            "[v%s] %s: normalized opposing two-pole power readings for breaker %s: "
+            "power=%s, power2=%s -> %s W",
+            self.version, source, breaker_id or "?", p1, p2, normalized,
+        )
+        return normalized
+
     def _check_zero_transition(
         self,
         breaker_id: str,
@@ -933,8 +976,14 @@ class LDATAService:
         has_any_electrical = has_power_field or has_current_field
         
         # --- Candidate values ---
-        cand_power = (p1 + p2) if has_power_field else (existing.get("power") or 0)
         poles = existing.get("poles", 1)
+        cand_power = (
+            self._combine_breaker_power(
+                p1, p2, poles, breaker_id=breaker_id, source=source,
+            )
+            if has_power_field
+            else (existing.get("power") or 0)
+        )
         cand_current = ((c1 + c2) / 2 if poles == 2 else c1 + c2) if has_current_field else (existing.get("current") or 0)
         
         # --- Unified zero-transition protection ---
@@ -1415,10 +1464,13 @@ class LDATAService:
                         breaker_data["blinkLED"] = breaker.get("blinkLED", False)
                         _p1_raw = self._none_or_float(breaker, "power")
                         _p2_raw = self._none_or_float(breaker, "power2")
-                        if _p1_raw is None and _p2_raw is None:
-                            breaker_data["power"] = None
-                        else:
-                            breaker_data["power"] = (_p1_raw or 0.0) + (_p2_raw or 0.0)
+                        breaker_data["power"] = self._combine_breaker_power(
+                            _p1_raw,
+                            _p2_raw,
+                            breaker["poles"],
+                            breaker_id=breaker["id"],
+                            source="REST initial parse",
+                        )
                         # Voltage/frequency are read once here and reused below for
                         # both the combined total and the per-leg assignment.
                         _v1 = self.none_to_zero(breaker, "rmsVoltage")
