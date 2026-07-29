@@ -240,16 +240,23 @@ class LDATAService:
         # Treat both 401 and 406 as potential auth failures
         if result.status_code == 401 or result.status_code == 406:
             clean_msg = self._get_clean_error_msg(result.text)
-            _LOGGER.warning(
-                f"[v{self.version}] Authentication failed (HTTP {result.status_code}). Check this log for the 2FA string. "
-                f"Response text: {clean_msg}"
-            )
-            
+
             if "InsufficientData:Personusestwofactorauthentication.Requirescode." in result.text:
-                _LOGGER.debug(f"[v{self.version}] Found 2FA string, raising TwoFactorRequired.")
+                # NOT a failure — this is Leviton's normal signal that the
+                # account has 2FA enabled and a code is needed next, on the
+                # way to a routine, expected 2FA prompt. Previously this
+                # logged as a WARNING under the same "Authentication
+                # failed" wording as a genuine bad-password case, which
+                # made a completely normal 2FA login look like something
+                # had gone wrong.
+                _LOGGER.debug(
+                    f"[v{self.version}] Account requires 2FA — prompting for code."
+                )
                 raise TwoFactorRequired
             else:
-                _LOGGER.warning(f"[v{self.version}] 2FA string not found, assuming invalid credentials.")
+                _LOGGER.warning(
+                    f"[v{self.version}] Authentication failed (HTTP {result.status_code}): {clean_msg}"
+                )
                 raise LDATAAuthError(f"[v{self.version}] Invalid username or password")
 
         # Handle other non-200, non-401/406 errors
@@ -505,7 +512,7 @@ class LDATAService:
                 rid = item.get("id")
                 if rid:
                     # Leviton's API returns this as a JSON number for some
-                    # accounts, not a string, since the config
+                    # accounts, not a string — coerce it, since the config
                     # flow's residence picker (SelectOptionDict) requires a
                     # str value and every other id in this integration
                     # (panel_id, breaker id, etc.) is a string too.
@@ -520,7 +527,29 @@ class LDATAService:
                 if rid:
                     rid = str(rid)
                     if rid not in residences:
-                        residences[rid] = account.get("residenceName") or account.get("name") or rid
+                        name = account.get("residenceName") or account.get("name")
+                        if not name:
+                            # Invited (non-owned) residences don't carry a
+                            # usable name in the permissions list itself —
+                            # confirmed via HAR: Leviton's own app makes a
+                            # follow-up call per permission, keyed by the
+                            # permission's own id (not the residence id), to
+                            # resolve the actual residence name.
+                            permission_id = account.get("id")
+                            if permission_id:
+                                residence_url = (
+                                    f"https://my.leviton.com/api/ResidentialPermissions/"
+                                    f"{permission_id}/residence"
+                                )
+                                residence_json = self._residence_api_get(
+                                    residence_url, "Residence (via permission)"
+                                )
+                                if residence_json:
+                                    name = residence_json.get("name")
+                        # Observed with trailing whitespace in the wild
+                        # ("TimBer landing ") — trim before it ends up as
+                        # the picker's display label.
+                        residences[rid] = (name or "").strip() or rid
 
         if not residences:
             # No multi-residence data at all — fall back to the single
@@ -1446,6 +1475,12 @@ class LDATAService:
         # Lookup the residential id from the account.
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
             configured_residence_id = self.entry.data.get(CONF_RESIDENCE_ID) if self.entry else None
+            # INFO, not debug — a user reported getting panels from every
+            # residence on the account instead of just the one their entry
+            # is scoped to, and this is the single most important line for
+            # diagnosing whether that's because configured_residence_id
+            # isn't resolving (falls through to the "every residence"
+            # fallback below) as opposed to a bug further downstream.
             _LOGGER.info(
                 f"[v{self.version}] Residence scope resolution: entry_present="
                 f"{self.entry is not None}, configured_residence_id="

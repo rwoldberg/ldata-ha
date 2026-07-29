@@ -211,6 +211,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
             self.user_data[CONF_RESIDENCE_ID] = first
+            # Give the first entry a residence-named title too, matching the
+            # "rest" entries above — without this, the first selected
+            # residence's entry keeps the generic username-only title set
+            # back in _after_auth(), making it indistinguishable in the UI
+            # from any other entry that also happens to use just the
+            # username (including another "first" pick from a separate
+            # multi-residence setup run).
             first_residence_name = next(
                 (r["name"] for r in self.discovered_residences if r["id"] == first),
                 first,
