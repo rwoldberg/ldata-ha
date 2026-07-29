@@ -373,7 +373,11 @@ class LdataPanelCard extends HTMLElement {
     const watts = showPower ? this._fmt(hass, breaker.wattsEntityId, 0) : null;
     const amps = showPower ? this._fmt(hass, breaker.ampsEntityId, 1) : null;
 
-    const stateClass = !breaker.available
+    // "Dumb" breakers get their own fill (distinct from both a normal
+    // unavailable/off breaker and a truly empty spacer slot)
+    const stateClass = breaker.isPlaceholder
+      ? "ldata-slot--dumb"
+      : !breaker.available
       ? "ldata-slot--unavailable"
       : breaker.isOn
       ? "ldata-slot--on"
@@ -762,6 +766,14 @@ class LdataPanelCard extends HTMLElement {
       }
       .ldata-slot--unavailable {
         opacity: 0.4;
+      }
+      .ldata-slot--dumb {
+        /* Distinct light-grey fill for physically-installed non-smart
+           breakers — visible (unlike a true empty spacer's transparent
+           dashed outline) but clearly not the green "on" fill of a
+           monitored breaker, since there's no state to report either way. */
+        background: color-mix(in srgb, var(--disabled-text-color, #9e9e9e) 20%, var(--card-background-color));
+        opacity: 0.85;
       }
       .ldata-slot--alarm {
         border-color: var(--error-color, #db4437);
