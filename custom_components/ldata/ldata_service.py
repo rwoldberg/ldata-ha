@@ -504,6 +504,12 @@ class LDATAService:
             for item in result_json:
                 rid = item.get("id")
                 if rid:
+                    # Leviton's API returns this as a JSON number for some
+                    # accounts, not a string, since the config
+                    # flow's residence picker (SelectOptionDict) requires a
+                    # str value and every other id in this integration
+                    # (panel_id, breaker id, etc.) is a string too.
+                    rid = str(rid)
                     residences[rid] = item.get("name") or item.get("address") or rid
 
         url = f"https://my.leviton.com/api/Person/{self.userid}/residentialPermissions"
@@ -511,8 +517,10 @@ class LDATAService:
         if result_json:
             for account in result_json:
                 rid = account.get("residenceId")
-                if rid and rid not in residences:
-                    residences[rid] = account.get("residenceName") or account.get("name") or rid
+                if rid:
+                    rid = str(rid)
+                    if rid not in residences:
+                        residences[rid] = account.get("residenceName") or account.get("name") or rid
 
         if not residences:
             # No multi-residence data at all — fall back to the single
@@ -524,7 +532,7 @@ class LDATAService:
             url = f"https://my.leviton.com/api/ResidentialAccounts/{self.account_id}"
             result_json = self._residence_api_get(url, "Residence")
             if result_json and result_json.get("primaryResidenceId"):
-                rid = result_json["primaryResidenceId"]
+                rid = str(result_json["primaryResidenceId"])
                 residences[rid] = result_json.get("name") or rid
 
         return [{"id": rid, "name": name} for rid, name in residences.items()]
@@ -1438,11 +1446,15 @@ class LDATAService:
         # Lookup the residential id from the account.
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
             configured_residence_id = self.entry.data.get(CONF_RESIDENCE_ID) if self.entry else None
+            _LOGGER.info(
+                f"[v{self.version}] Residence scope resolution: entry_present="
+                f"{self.entry is not None}, configured_residence_id="
+                f"{configured_residence_id!r}"
+            )
             if configured_residence_id:
                 # This entry was set up via the residence picker (config
                 # flow) and is scoped to exactly one residence — skip
                 # discovering/using every residence the account can see.
-                _LOGGER.debug(f"[v{self.version}] Using configured residence_id: {configured_residence_id}")
                 self.residence_id_list = [configured_residence_id]
             else:
                 # No residence_id configured — entry predates the residence
@@ -1455,7 +1467,7 @@ class LDATAService:
                     # User does not have multiple residences, lets try just the single residence
                     self.get_residence()
                 self.get_residencePermissions()
-        
+
         if self.residence_id_list:
             self.residence_id_list = [x for x in self.residence_id_list if x is not None]
             self.residence_id_list = list(set(self.residence_id_list))
@@ -1463,6 +1475,8 @@ class LDATAService:
         if self.residence_id_list is None or len(self.residence_id_list) == 0:
             _LOGGER.error(f"[v{self.version}] Could not get Residence ID.")
             raise Exception("Could not get LDATA Residence ID.")
+
+        _LOGGER.info(f"[v{self.version}] Final residence_id_list for this poll: {self.residence_id_list}")
         
         # Get the breaker panels.
         panels_json = self.get_ldata_panels()

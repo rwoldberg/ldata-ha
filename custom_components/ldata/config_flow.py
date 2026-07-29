@@ -211,7 +211,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
             self.user_data[CONF_RESIDENCE_ID] = first
-            return await self._finalize_entry(self._pending_title)
+            first_residence_name = next(
+                (r["name"] for r in self.discovered_residences if r["id"] == first),
+                first,
+            )
+            return await self._finalize_entry(f"Leviton LDATA ({first_residence_name})")
 
         return self.async_show_form(
             step_id="residence",
@@ -301,27 +305,33 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # Something went wrong, start over
                 return self.async_abort(reason="unknown")
 
+            code = user_input["2fa_code"]
             try:
-                code = user_input["2fa_code"]
                 # Call the new complete_2fa method
                 result = await self.hass.async_add_executor_job(
                     self.service.complete_2fa, code
                 )
-                
-                if not result:
-                    # This should not be reachable if complete_2fa raises LDATAAuthError
-                    errors["base"] = "invalid_2fa"
-                else:
-                    # 2FA was successful, create or update entry
-                    username = self.user_data[CONF_USERNAME]
-                    return await self._after_auth(f"Leviton LDATA ({username})")
-            
             except LDATAAuthError as ex:
                 _LOGGER.warning("2FA failed: %s", ex)
                 errors["base"] = "invalid_2fa"
             except Exception:
                 _LOGGER.exception("Unexpected error during 2FA validation")
                 errors["base"] = "unknown"
+            else:
+                if not result:
+                    # This should not be reachable if complete_2fa raises LDATAAuthError
+                    errors["base"] = "invalid_2fa"
+                else:
+                    # 2FA was successful, create or update entry — deliberately
+                    # OUTSIDE the try/except above (matches async_step_user's
+                    # pattern) so a legitimate AbortFlow raised deep inside
+                    # (_finalize_entry's "already configured" check, when
+                    # re-adding an account/residence that's already set up)
+                    # propagates to HA's flow manager instead of being caught
+                    # by the broad `except Exception` and misreported as a
+                    # generic "unknown" error.
+                    username = self.user_data[CONF_USERNAME]
+                    return await self._after_auth(f"Leviton LDATA ({username})")
         
         # Show the 2FA form
         return self.async_show_form(
