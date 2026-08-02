@@ -64,6 +64,7 @@ Features:
 - Optional live power/current readout and over-current/under-voltage alarm highlighting per slot.
 - When breaker control is enabled, each slot shows its own on/off switch — pressing it asks for confirmation before actually toggling. Clicking anywhere else on a slot opens that breaker's device page.
 - Attempting to turn on a Gen1 breaker (hardware that can be tripped remotely but not reset remotely) shows an informational dialog instead of a confirmation — Gen1 breakers must be reset by hand at the panel.
+- Optional linking of a "dumb" (non-smart) breaker to the downstream sub-panel it physically feeds — the linked slot shows that sub-panel's own live Watts/Amps and gets its own distinct color, instead of the plain grey "unmonitored" fill. Clicking it opens the sub-panel's own full breaker layout in a popup.
 
 ### 1. Install the card file
 
@@ -147,7 +148,7 @@ Or use `sensor` cards with `graph: line` if you'd rather see a trend line under 
         name: Grid Current
 ```
 
-### Doing the same for a nested/sub-panel (e.g. a Casita panel)
+### Doing the same for a nested/sub-panel (e.g. a panel 2)
 
 If you have a second physical panel (a sub-panel fed from the main one) that shows up as its own device under **Settings > Devices & Services** — separate from your main panel — the integration treats it exactly the same as the main panel: its own breakers, its own CT clamp(s) if it has any, and its own `device_id`. There's nothing "nested" about it structurally, so just repeat the exact same pattern with that panel's own `device_id` and its own CT entity IDs:
 
@@ -166,21 +167,51 @@ cards:
     device_id: <main panel device id>
     title: "Main Panel"
 
-  # Casita (sub-)panel — same pattern, its own device_id and CT entities
+  # Panel 2 (sub-)panel — same pattern, its own device_id and CT entities
   - type: horizontal-stack
     cards:
       - type: tile
-        entity: sensor.casita_grid_watts
-        name: Casita Grid Power
+        entity: sensor.Panel_2_grid_watts
+        name: Panel2 Grid Power
       - type: tile
-        entity: sensor.casita_grid_amps
-        name: Casita Grid Current
+        entity: sensor.Panel_2_grid_amps
+        name: Panel 2 Grid Current
   - type: custom:ldata-panel-card
-    device_id: <casita panel device id>
-    title: "Casita Panel"
+    device_id: <Panel 2 panel device id>
+    title: "Panel 2 Panel"
 ```
 
 If the sub-panel doesn't have its own CT clamp, it won't have a "Grid Power"-style entity of its own — in that case the closest equivalent is the Watts/Amps of whichever breaker on the main panel feeds power to it (every smart breaker has its own Watts/Amps sensors, same as any other breaker).
+
+### Linking a "dumb" breaker to the sub-panel it feeds
+
+If a sub-panel is fed by a **"dumb" (non-smart) breaker** on the main panel — no monitoring data of its own, just a physical slot — the card has no way to know that breaker feeds another panel; Leviton's API doesn't report that relationship at all. You can tell the card about it by hand in the main panel's card config, and it'll show that sub-panel's own live Watts/Amps directly on the dumb breaker's slot, with a distinct blue fill so it reads at a glance as "feeds another panel" rather than "just unmonitored":
+
+```yaml
+type: custom:ldata-panel-card
+device_id: <main panel device id>
+sub_panels:
+  - breaker_position: 9                    # the dumb breaker's slot number (the badge shown on its tile)
+    panel_device_id: <sub-panel device id>  # find under Settings > Devices & Services > Devices, same as device_id above
+    rating: 50                             # optional — see below
+```
+
+Add one entry per dumb breaker you want linked — a single card can link more than one, e.g. if a panel has two dumb breakers each feeding a different sub-panel.
+
+Leviton's API never reports a rating for a dumb breaker (it's not a smart device, so there's no data on it at all) — if you know the breaker's own max amp rating (e.g. it's a 50A double-pole feeding the sub-panel), add `rating` and it shows up the same way a smart breaker's does, right before the Watts/Amps readout.
+
+Clicking the linked slot (or its sub-panel name, which is its own clickable link) opens that sub-panel's own full breaker layout right there in a popup — a live, independent `ldata-panel-card` for the sub-panel's `device_id`, with nothing more to configure than what's already in the entry above. Close it with the ✕, Escape, or by clicking outside it.
+
+If you'd rather leave this card entirely and jump to a real dashboard view instead — say the sub-panel already has its own `ldata-panel-card` on some other dashboard — add `view_path` with the URL path to it (open that dashboard/view in your browser and copy the path after the domain, e.g. `/lovelace/DASHBOARD_NAME`) and it replaces the popup with a normal page navigation:
+
+```yaml
+sub_panels:
+  - breaker_position: 9
+    panel_device_id: <sub-panel device id>
+    view_path: /lovelace/DASHBOARD_NAME   # optional override — see above
+```
+
+There's no registry mapping a device id to "the dashboard view showing its card" — a device can appear on any number of dashboards or none — so this can't be auto-detected; the popup is the default precisely because it needs nothing beyond `panel_device_id`, and `view_path` only takes effect once you set it explicitly.
 
 ## Decora Smart Wi-Fi Support
 

@@ -17,6 +17,27 @@
  *                                  # panel's own reported mounting orientation (Leviton's
  *                                  # API exposes this) and rotates automatically; only set
  *                                  # this if you need to force a specific orientation.
+ *   sub_panels:                    # optional — link a "dumb" breaker that physically feeds
+ *                                  # a downstream sub-panel to that sub-panel's own HA device,
+ *                                  # so its slot shows the sub-panel's live Watts/Amps and a
+ *                                  # distinct color instead of the plain "dumb breaker" fill.
+ *                                  # Clicking it opens a live nested instance of THIS card for
+ *                                  # the sub-panel's own device_id in a modal — no separate
+ *                                  # dashboard needed, just the config below. There is no such
+ *                                  # link in Leviton's API — it must be configured by hand,
+ *                                  # matched by the dumb breaker's panel position (the number
+ *                                  # printed on the panel schedule).
+ *     - breaker_position: 9
+ *       panel_device_id: <sub-panel's own device id>
+ *       rating: 50                       # optional — this breaker's own max amp rating (Leviton
+ *                                         # never reports one for a dumb breaker), shown the same
+ *                                         # way as a smart breaker's, before Watts/Amps.
+ *       view_path: /lovelace-casita/0    # optional override — jump to this dashboard view
+ *                                         # instead of the nested-card modal. Only useful if
+ *                                         # you'd rather leave this card entirely; HA has no
+ *                                         # registry mapping a device id to "the view showing
+ *                                         # its card", so this can't be auto-derived — it only
+ *                                         # takes effect once you set it explicitly.
  */
 
 // Matched against entity_id (not unique_id) — some HA frontend versions omit
@@ -35,6 +56,33 @@ const LDATA_SUFFIXES = {
   cloudConnected: "_cloud_connected",
 };
 
+// One RegExp per suffix, built once and reused — _pickBySuffix runs many
+// times per breaker per hass tick, and the suffix set above is fixed, so
+// there's nothing to gain from re-compiling the same pattern every call.
+const LDATA_SUFFIX_PATTERNS = new Map();
+function suffixPattern(suffix) {
+  let pattern = LDATA_SUFFIX_PATTERNS.get(suffix);
+  if (!pattern) {
+    pattern = new RegExp(`${suffix}(_\\d+)?$`);
+    LDATA_SUFFIX_PATTERNS.set(suffix, pattern);
+  }
+  return pattern;
+}
+
+// Shared shape for a slot with no real HA device behind it (a "dumb"
+// breaker or a truly open slot) — neither ever has its own entities, so
+// these fields are always this same handful of nulls/defaults regardless
+// of which of the two categories the slot belongs to.
+const NON_SMART_BREAKER_DEFAULTS = {
+  deviceId: null,
+  canRemoteOn: false,
+  isOn: null,
+  available: false,
+  switchEntityId: null,
+  overCurrentEntityId: null,
+  underVoltageEntityId: null,
+};
+
 class LdataPanelCard extends HTMLElement {
   setConfig(config) {
     if (!config || !config.device_id) {
@@ -44,6 +92,7 @@ class LdataPanelCard extends HTMLElement {
       show_power: true,
       show_alarms: true,
       toggle: true,
+      sub_panels: [],
       // rotate_180 intentionally has no default here — leaving it unset
       // means "auto-detect from the panel's own reported orientation".
       // Set it explicitly (true/false) in YAML to override the detection.
@@ -51,6 +100,7 @@ class LdataPanelCard extends HTMLElement {
     };
     this._renderSignature = null;
     this._pendingToggle = null;
+    this._pendingSubPanelView = null;
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
     }
@@ -67,6 +117,15 @@ class LdataPanelCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     this._maybeRender();
+    // The nested sub-panel card (if its modal is open) has its own live
+    // entities that _computeSignature never tracks (it only tracks the
+    // linked panel's Watts/Amps total, not every entity on it), so it
+    // needs feeding directly — _render() already does this on a full
+    // rebuild via _syncSubPanelOverlay(), this covers the no-rebuild case.
+    if (this._pendingSubPanelView) {
+      const nested = this.shadowRoot?.querySelector(".ldata-subpanel-overlay-body ldata-panel-card");
+      if (nested) nested.hass = hass;
+    }
   }
 
   // ── Data discovery ──────────────────────────────────────────────────
@@ -84,12 +143,25 @@ class LdataPanelCard extends HTMLElement {
     return this._entityRegistryList(hass).filter((e) => e.device_id === deviceId);
   }
 
+  _indexEntitiesByDevice(hass) {
+    // One pass over the whole entity registry instead of the N separate
+    // O(all entities) scans _entitiesForDevice() would otherwise do — one
+    // per breaker device, every hass tick.
+    const index = new Map();
+    for (const entity of this._entityRegistryList(hass)) {
+      const list = index.get(entity.device_id);
+      if (list) list.push(entity);
+      else index.set(entity.device_id, [entity]);
+    }
+    return index;
+  }
+
   _pickBySuffix(entities, suffix) {
     // HA appends _2, _3, ... to an entity_id when the "natural" one is
     // already taken (typically by a stale/duplicate device) — match that
     // too, so a collision-suffixed entity_id (e.g. "..._status_2") doesn't
     // silently fall out of the panel with no error.
-    const pattern = new RegExp(`${suffix}(_\\d+)?$`);
+    const pattern = suffixPattern(suffix);
     return entities.find((e) => pattern.test(e.entity_id)) || null;
   }
 
@@ -122,29 +194,17 @@ class LdataPanelCard extends HTMLElement {
   _collectBreakers(hass) {
     const panelDeviceId = this._config.device_id;
     const allDevices = this._deviceRegistryList(hass);
-    const allEntities = this._entityRegistryList(hass);
     const breakerDevices = allDevices.filter((d) => d.via_device_id === panelDeviceId);
-
-    // Self-diagnosis for the empty state — since this card can't easily be
-    // tested against a live HA instance during development, surface exactly
-    // what it saw so a real failure is debuggable from the UI alone.
-    this._diagnostics = {
-      hassHasDevices: typeof hass.devices === "object" && hass.devices !== null,
-      hassHasEntities: typeof hass.entities === "object" && hass.entities !== null,
-      totalDevices: allDevices.length,
-      totalEntities: allEntities.length,
-      panelDeviceFound: allDevices.some((d) => d.id === panelDeviceId),
-      devicesLinkedToAnyPanel: allDevices.filter((d) => !!d.via_device_id).length,
-      devicesLinkedToThisPanel: breakerDevices.length,
-      entitiesWithUniqueId: allEntities.filter((e) => !!e.unique_id).length,
-      statusEntitiesFoundOnThisPanel: breakerDevices.filter((dev) =>
-        this._pickBySuffix(this._entitiesForDevice(hass, dev.id), LDATA_SUFFIXES.status)
-      ).length,
-    };
+    // One indexed pass over the entity registry, reused for every device
+    // looked up below (breakers, the panel's own Cloud Connected entity,
+    // and any linked sub-panel) instead of each doing its own separate
+    // full-registry scan via _entitiesForDevice().
+    const entitiesByDevice = this._indexEntitiesByDevice(hass);
+    const entitiesFor = (deviceId) => entitiesByDevice.get(deviceId) || [];
 
     const breakers = [];
     for (const dev of breakerDevices) {
-      const entities = this._entitiesForDevice(hass, dev.id);
+      const entities = entitiesFor(dev.id);
       const statusEnt = this._pickBySuffix(entities, LDATA_SUFFIXES.status);
       if (!statusEnt) continue; // not a breaker device (e.g. a CT) — skip
 
@@ -174,7 +234,6 @@ class LdataPanelCard extends HTMLElement {
         rating: statusState.attributes.rating,
         isOn: statusState.state === "on",
         available: statusState.state !== "unavailable",
-        statusEntityId: statusEnt.entity_id,
         switchEntityId: switchEnt ? switchEnt.entity_id : null,
         wattsEntityId: wattsEnt ? wattsEnt.entity_id : null,
         ampsEntityId: ampsEnt ? ampsEnt.entity_id : null,
@@ -190,7 +249,7 @@ class LdataPanelCard extends HTMLElement {
     // occupied-but-unmonitored position. The integration exposes them as an
     // attribute on the panel's own Cloud Connected entity (same pattern as
     // orientation/panel_size above).
-    const cloudEnt = this._pickBySuffix(this._entitiesForDevice(hass, panelDeviceId), LDATA_SUFFIXES.cloudConnected);
+    const cloudEnt = this._pickBySuffix(entitiesFor(panelDeviceId), LDATA_SUFFIXES.cloudConnected);
     const cloudState = cloudEnt && hass.states[cloudEnt.entity_id];
     const dumbBreakers = cloudState?.attributes?.dumb_breakers || [];
     const knownPositions = new Set(breakers.map((b) => b.position));
@@ -198,22 +257,58 @@ class LdataPanelCard extends HTMLElement {
       const position = Number(db.position);
       if (!Number.isFinite(position) || knownPositions.has(position)) continue;
       knownPositions.add(position);
+
+      // A dumb breaker that physically feeds a downstream sub-panel has no
+      // such link in Leviton's API — it's a user-authored mapping in the
+      // card's own config, matched by panel position. When present, borrow
+      // the linked panel device's own Watts/Amps entities (same "_watts"/
+      // "_amps" suffix convention used for breakers — the panel's own
+      // "both legs" total sensor is the only entity on that device whose
+      // entity_id ends bare in that suffix, leg-specific ones end in
+      // "_leg_1"/"_leg_2" instead) so this slot shows live sub-panel load.
+      const link = (this._config.sub_panels || []).find(
+        (sp) => Number(sp.breaker_position) === position
+      );
+      // Leviton's API never reports a rating for a dumb breaker (it carries
+      // no data at all) — same as panel_device_id/view_path, this only
+      // exists if the user typed it into the link entry, e.g. because they
+      // know it's a 50A double-pole feeding the sub-panel.
+      const rating = link && link.rating ? Number(link.rating) || null : null;
+      let linkedPanelDeviceId = null;
+      let linkedPanelName = null;
+      let linkedPanelViewPath = null;
+      let wattsEntityId = null;
+      let ampsEntityId = null;
+      if (link && link.panel_device_id) {
+        linkedPanelDeviceId = link.panel_device_id;
+        // No API or registry link exists from a device id to "the dashboard
+        // view showing that device's card" — a device can appear on any
+        // number of dashboards, or none, and that mapping isn't exposed to
+        // a Lovelace card. So it's opt-in, same as panel_device_id itself:
+        // if the user tells us exactly where that panel's own card lives,
+        // clicking jumps straight there instead of the generic device page.
+        linkedPanelViewPath = link.view_path || null;
+        const linkedDevice = hass.devices ? hass.devices[linkedPanelDeviceId] : null;
+        linkedPanelName = (linkedDevice && (linkedDevice.name_by_user || linkedDevice.name)) || null;
+        const linkedEntities = entitiesFor(linkedPanelDeviceId);
+        const wattsEnt = this._pickBySuffix(linkedEntities, LDATA_SUFFIXES.watts);
+        const ampsEnt = this._pickBySuffix(linkedEntities, LDATA_SUFFIXES.amps);
+        wattsEntityId = wattsEnt ? wattsEnt.entity_id : null;
+        ampsEntityId = ampsEnt ? ampsEnt.entity_id : null;
+      }
+
       breakers.push({
-        deviceId: null,
+        ...NON_SMART_BREAKER_DEFAULTS,
         position,
         poles: Number(db.poles) || 1,
-        canRemoteOn: false,
         name: db.name || "Unmonitored Breaker",
-        rating: null,
-        isOn: null,
-        available: false,
+        rating,
         isPlaceholder: true,
-        statusEntityId: null,
-        switchEntityId: null,
-        wattsEntityId: null,
-        ampsEntityId: null,
-        overCurrentEntityId: null,
-        underVoltageEntityId: null,
+        linkedPanelDeviceId,
+        linkedPanelName,
+        linkedPanelViewPath,
+        wattsEntityId,
+        ampsEntityId,
       });
     }
 
@@ -238,25 +333,42 @@ class LdataPanelCard extends HTMLElement {
     for (let position = 1; position <= slotCount; position++) {
       if (occupied.has(position)) continue;
       breakers.push({
-        deviceId: null,
+        ...NON_SMART_BREAKER_DEFAULTS,
         position,
         poles: 1,
-        canRemoteOn: false,
         name: "",
         rating: null,
-        isOn: null,
-        available: false,
         isEmpty: true,
-        statusEntityId: null,
-        switchEntityId: null,
         wattsEntityId: null,
         ampsEntityId: null,
-        overCurrentEntityId: null,
-        underVoltageEntityId: null,
       });
     }
 
     breakers.sort((a, b) => a.position - b.position);
+
+    // Self-diagnosis for the empty state only — since this card can't
+    // easily be tested against a live HA instance during development,
+    // surface exactly what it saw so a real failure is debuggable from the
+    // UI alone. Computed lazily here (rather than unconditionally above)
+    // because _diagnosticsHtml() is the only reader and it only renders
+    // when the panel ends up with zero breakers.
+    if (breakers.length === 0) {
+      const allEntities = this._entityRegistryList(hass);
+      this._diagnostics = {
+        hassHasDevices: typeof hass.devices === "object" && hass.devices !== null,
+        hassHasEntities: typeof hass.entities === "object" && hass.entities !== null,
+        totalDevices: allDevices.length,
+        totalEntities: allEntities.length,
+        panelDeviceFound: allDevices.some((d) => d.id === panelDeviceId),
+        devicesLinkedToAnyPanel: allDevices.filter((d) => !!d.via_device_id).length,
+        devicesLinkedToThisPanel: breakerDevices.length,
+        entitiesWithUniqueId: allEntities.filter((e) => !!e.unique_id).length,
+        statusEntitiesFoundOnThisPanel: breakerDevices.filter((dev) =>
+          this._pickBySuffix(entitiesFor(dev.id), LDATA_SUFFIXES.status)
+        ).length,
+      };
+    }
+
     return breakers;
   }
 
@@ -309,8 +421,8 @@ class LdataPanelCard extends HTMLElement {
 
   // ── Change detection (avoid re-rendering the DOM every hass tick) ──
 
-  _computeSignature(hass, breakers) {
-    const parts = [this._config.device_id, this._detectRotation(hass)];
+  _computeSignature(hass, breakers, rotate) {
+    const parts = [this._config.device_id, rotate];
     for (const b of breakers) {
       parts.push(b.deviceId, b.position, b.poles, b.isOn, b.available);
       for (const id of [b.wattsEntityId, b.ampsEntityId, b.overCurrentEntityId, b.underVoltageEntityId]) {
@@ -323,10 +435,14 @@ class LdataPanelCard extends HTMLElement {
   _maybeRender() {
     if (!this._hass || !this._config) return;
     const breakers = this._collectBreakers(this._hass);
-    const signature = this._computeSignature(this._hass, breakers);
+    // Computed once per tick and threaded through — _computeSignature and
+    // _render each used to call _detectRotation() independently, redoing
+    // the same panel-entity lookup twice for one render cycle.
+    const rotate = this._detectRotation(this._hass);
+    const signature = this._computeSignature(this._hass, breakers, rotate);
     if (signature === this._renderSignature) return;
     this._renderSignature = signature;
-    this._render(breakers);
+    this._render(breakers, rotate);
   }
 
   // ── Rendering ────────────────────────────────────────────────────────
@@ -337,6 +453,19 @@ class LdataPanelCard extends HTMLElement {
     const num = Number(state.state);
     if (!Number.isFinite(num)) return null;
     return decimals === undefined ? num.toString() : num.toFixed(decimals);
+  }
+
+  _slotStateClass(breaker) {
+    // A dumb breaker linked to a downstream sub-panel (via card config) gets
+    // its own fill, distinct from a plain unlinked dumb breaker, a normal
+    // unavailable/off breaker, and a truly empty spacer slot — checked
+    // before those since isPlaceholder breakers are always available: false
+    // but shouldn't look identical to a real breaker that's just temporarily
+    // offline, and a linked one shouldn't look like a plain dumb one either.
+    if (breaker.linkedPanelDeviceId) return "ldata-slot--subpanel";
+    if (breaker.isPlaceholder) return "ldata-slot--dumb";
+    if (!breaker.available) return "ldata-slot--unavailable";
+    return breaker.isOn ? "ldata-slot--on" : "ldata-slot--off";
   }
 
   _slotHtml(hass, placement) {
@@ -373,15 +502,7 @@ class LdataPanelCard extends HTMLElement {
     const watts = showPower ? this._fmt(hass, breaker.wattsEntityId, 0) : null;
     const amps = showPower ? this._fmt(hass, breaker.ampsEntityId, 1) : null;
 
-    // "Dumb" breakers get their own fill (distinct from both a normal
-    // unavailable/off breaker and a truly empty spacer slot)
-    const stateClass = breaker.isPlaceholder
-      ? "ldata-slot--dumb"
-      : !breaker.available
-      ? "ldata-slot--unavailable"
-      : breaker.isOn
-      ? "ldata-slot--on"
-      : "ldata-slot--off";
+    const stateClass = this._slotStateClass(breaker);
     const alarmClass = alarm ? " ldata-slot--alarm" : "";
 
     // A 2-pole breaker spans two rows in one column; since positions step by
@@ -406,20 +527,57 @@ class LdataPanelCard extends HTMLElement {
          </button>`
       : `<div class="ldata-slot-indicator" aria-hidden="true"></div>`;
 
+    // Where clicking this slot (or its sub-panel link) goes. A real breaker
+    // always goes to its own device page (data-nav-path). A linked dumb
+    // breaker either jumps to an explicitly configured dashboard view
+    // (`view_path`, also data-nav-path) if given, or — the default, and the
+    // actual point of the link — opens a live nested instance of this same
+    // card for the sub-panel's own device_id right in a modal (data-subpanel-
+    // device/-name), no separate dashboard required.
+    const navPath = breaker.deviceId
+      ? `/config/devices/device/${breaker.deviceId}`
+      : breaker.linkedPanelDeviceId && breaker.linkedPanelViewPath
+      ? breaker.linkedPanelViewPath
+      : null;
+    const subpanelModalAttrs =
+      breaker.linkedPanelDeviceId && !breaker.linkedPanelViewPath
+        ? ` data-subpanel-device="${this._escapeAttr(breaker.linkedPanelDeviceId)}" data-subpanel-name="${this._escapeAttr(
+            breaker.linkedPanelName || "Sub Panel"
+          )}"`
+        : "";
+    const subpanelDestLabel = breaker.linkedPanelViewPath
+      ? `${breaker.linkedPanelName || "sub-panel"}'s dashboard`
+      : `${breaker.linkedPanelName || "sub-panel"}'s live panel view`;
+    // Hoisted once — the tile itself and the sub-panel link nested inside
+    // it both need this exact same pair of attributes, since they're two
+    // different click targets pointed at the same destination.
+    const navPathAttr = navPath ? `data-nav-path="${this._escapeAttr(navPath)}"` : "";
+
     return `
       <div class="ldata-slot ${stateClass}${alarmClass}${tallClass}${sideClass}"
            style="grid-column: ${column}; grid-row: ${gridRow};"
-           ${breaker.deviceId ? `data-breaker-device="${breaker.deviceId}"` : ""}
+           ${navPathAttr}${subpanelModalAttrs}
            role="button" tabindex="0"
-           title="${this._escapeAttr(breaker.name)}${breaker.rating ? ` — ${breaker.rating}A` : ""}">
+           title="${this._escapeAttr(breaker.name)}${breaker.rating ? ` — ${breaker.rating}A` : ""}${
+             breaker.linkedPanelDeviceId ? ` — feeds ${this._escapeAttr(breaker.linkedPanelName || "sub-panel")}` : ""
+           }">
         <div class="ldata-slot-position">${positionLabel}</div>
         <div class="ldata-slot-body">
           <div class="ldata-slot-name">${this._escape(breaker.name)}</div>
+          ${
+            breaker.linkedPanelDeviceId
+              ? `<a href="#" class="ldata-slot-subpanel-link"
+                    ${navPathAttr}${subpanelModalAttrs}
+                    title="Open ${this._escapeAttr(subpanelDestLabel)}">↳ ${this._escape(
+                  breaker.linkedPanelName || "Sub Panel"
+                )}</a>`
+              : ""
+          }
           <div class="ldata-slot-meta">
             ${breaker.rating ? `<span class="ldata-slot-rating">${breaker.rating}A</span>` : ""}
-            ${watts !== null ? `<span class="ldata-slot-reading">${watts} W</span>` : ""}
             ${amps !== null ? `<span class="ldata-slot-reading">${amps} A</span>` : ""}
-            ${breaker.isPlaceholder ? `<span class="ldata-slot-reading">Not monitored</span>` : ""}
+            ${watts !== null ? `<span class="ldata-slot-reading">${watts} W</span>` : ""}
+            ${breaker.isPlaceholder && !breaker.linkedPanelDeviceId ? `<span class="ldata-slot-reading">Not monitored</span>` : ""}
           </div>
         </div>
         ${controlHtml}
@@ -429,12 +587,14 @@ class LdataPanelCard extends HTMLElement {
 
   _escape(str) {
     // Safe for HTML text-node content. NOT safe inside an attribute value —
-    // the textContent/innerHTML round-trip does not escape quote characters
-    // (quotes are only meaningful in attribute syntax, not text nodes), so
+    // this only escapes the characters meaningful in text-node syntax, not
+    // quote characters (quotes are only meaningful in attribute syntax), so
     // an unescaped `"` here could still break out of e.g. title="...".
-    const div = document.createElement("div");
-    div.textContent = str == null ? "" : String(str);
-    return div.innerHTML;
+    // A plain replace chain instead of a throwaway div/textContent/innerHTML
+    // round-trip — called many times per slot per render, and every call
+    // was allocating and discarding a DOM element just to escape a string.
+    if (str == null) return "";
+    return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
   _escapeAttr(str) {
@@ -472,13 +632,12 @@ class LdataPanelCard extends HTMLElement {
     `;
   }
 
-  _render(breakers) {
+  _render(breakers, rotate) {
     const hass = this._hass;
     const panelDevice = hass.devices ? hass.devices[this._config.device_id] : null;
     const title =
       this._config.title || (panelDevice && (panelDevice.name_by_user || panelDevice.name)) || "Panel";
 
-    const rotate = this._detectRotation(hass);
     const layout = this._computeLayout(breakers, rotate);
     const slotsHtml = layout.map((placement) => this._slotHtml(hass, placement)).join("");
     const empty = breakers.length === 0;
@@ -507,6 +666,15 @@ class LdataPanelCard extends HTMLElement {
           </div>
         </div>
       </div>
+      <div class="ldata-subpanel-overlay" tabindex="-1">
+        <div class="ldata-subpanel-overlay-box" role="dialog" aria-modal="true">
+          <div class="ldata-subpanel-overlay-header">
+            <div class="ldata-subpanel-overlay-title"></div>
+            <button type="button" class="ldata-subpanel-overlay-close" aria-label="Close">✕</button>
+          </div>
+          <div class="ldata-subpanel-overlay-body"></div>
+        </div>
+      </div>
     `;
 
     this.shadowRoot.querySelectorAll(".ldata-slot").forEach((el) => {
@@ -521,6 +689,8 @@ class LdataPanelCard extends HTMLElement {
 
     // The toggle is a control nested inside the slot's own click/keydown
     // target — stop it from bubbling so pressing it doesn't also navigate.
+    // No manual Enter/Space handling needed beyond that: a <button> already
+    // fires its own click on either key natively.
     this.shadowRoot.querySelectorAll(".ldata-slot-toggle").forEach((btn) => {
       btn.addEventListener("click", (ev) => {
         ev.stopPropagation();
@@ -531,35 +701,131 @@ class LdataPanelCard extends HTMLElement {
           canRemoteOn: btn.getAttribute("data-toggle-can-remote-on") === "true",
         });
       });
-      btn.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" || ev.key === " ") ev.stopPropagation();
+      this._stopKeydownPropagationOnActivate(btn);
+    });
+
+    // Same nested-control pattern as the toggle above — the link is inside
+    // the slot's own click target, so it needs its own handler with
+    // propagation stopped so the parent tile's handler doesn't also fire
+    // redundantly (they carry the same data-nav-path/data-subpanel-device
+    // and would otherwise just perform the same action twice). An <a> also
+    // fires its own click on Enter/Space natively, same as the toggle.
+    this.shadowRoot.querySelectorAll(".ldata-slot-subpanel-link").forEach((a) => {
+      a.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this._handleSlotAction(a);
       });
+      this._stopKeydownPropagationOnActivate(a);
     });
 
     const overlay = this.shadowRoot.querySelector(".ldata-confirm-overlay");
     if (overlay) {
-      overlay.addEventListener("click", (ev) => {
-        if (ev.target === overlay) this._closeConfirm();
-      });
-      overlay.addEventListener("keydown", (ev) => {
-        if (ev.key === "Escape") this._closeConfirm();
-      });
+      this._wireOverlayDismiss(overlay, () => this._closeConfirm());
       overlay.querySelector(".ldata-confirm-cancel")?.addEventListener("click", () => this._closeConfirm());
       overlay.querySelector(".ldata-confirm-confirm")?.addEventListener("click", () => this._confirmToggle());
     }
+
+    const subOverlay = this.shadowRoot.querySelector(".ldata-subpanel-overlay");
+    if (subOverlay) {
+      this._wireOverlayDismiss(subOverlay, () => this._closeSubPanelView());
+      subOverlay.querySelector(".ldata-subpanel-overlay-close")?.addEventListener("click", () => this._closeSubPanelView());
+    }
     // A re-render (e.g. from an unrelated wattage tick elsewhere on the
-    // panel) rebuilds this markup from scratch — reapply any dialog that
-    // was already open so it doesn't silently vanish mid-decision.
+    // panel) rebuilds this markup from scratch — reapply any dialog/modal
+    // that was already open so it doesn't silently vanish mid-decision.
     this._syncConfirmDialog();
+    this._syncSubPanelOverlay();
   }
 
   _onSlotClick(el) {
-    // Navigate to the breaker's own device page rather than toggling —
-    // the on/off switch on the slot handles control now.
-    const deviceId = el.getAttribute("data-breaker-device");
-    if (!deviceId) return;
-    history.pushState(null, "", `/config/devices/device/${deviceId}`);
+    // Not toggling — the on/off switch on the slot handles control now.
+    this._handleSlotAction(el);
+  }
+
+  _handleSlotAction(el) {
+    // A real breaker (or a sub-panel link with an explicit view_path)
+    // carries data-nav-path and just navigates. A sub-panel link without
+    // one carries data-subpanel-device/-name instead and opens the inline
+    // nested-card modal — the default, no-extra-config experience.
+    const navPath = el.getAttribute("data-nav-path");
+    if (navPath) {
+      this._navigateToPath(navPath);
+      return;
+    }
+    const subDeviceId = el.getAttribute("data-subpanel-device");
+    if (subDeviceId) {
+      this._openSubPanelView(subDeviceId, el.getAttribute("data-subpanel-name"));
+    }
+  }
+
+  _navigateToPath(path) {
+    if (!path) return;
+    history.pushState(null, "", path);
     window.dispatchEvent(new CustomEvent("location-changed"));
+  }
+
+  _openSubPanelView(deviceId, name) {
+    if (!deviceId) return;
+    this._pendingSubPanelView = { deviceId, name };
+    this._syncSubPanelOverlay();
+  }
+
+  _closeSubPanelView() {
+    this._pendingSubPanelView = null;
+    this._syncSubPanelOverlay();
+  }
+
+  _syncSubPanelOverlay() {
+    const overlay = this.shadowRoot.querySelector(".ldata-subpanel-overlay");
+    if (!overlay) return;
+    const pending = this._pendingSubPanelView;
+    overlay.classList.toggle("is-open", !!pending);
+    const body = overlay.querySelector(".ldata-subpanel-overlay-body");
+    if (!pending) {
+      if (body) body.innerHTML = "";
+      return;
+    }
+
+    const titleEl = overlay.querySelector(".ldata-subpanel-overlay-title");
+    if (titleEl) titleEl.textContent = pending.name || "Sub Panel";
+
+    // Rebuilt fresh every time this runs (including on every outer
+    // re-render while the modal is open, since _render() just replaced the
+    // whole shadow DOM — the overlay markup, this body div included, is
+    // regenerated along with everything else, so there's no persistent
+    // node to reuse here even in principle without restructuring _render()
+    // to stop wholesale-replacing the overlays on every breaker-grid
+    // update) — a nested instance of this same card, pointed at the linked
+    // panel's own device_id, is a complete, self-contained live view with
+    // nothing more to configure than the link already provides.
+    if (body) {
+      body.innerHTML = "";
+      const nested = document.createElement("ldata-panel-card");
+      nested.setConfig({ device_id: pending.deviceId, title: pending.name || undefined });
+      nested.hass = this._hass;
+      body.appendChild(nested);
+    }
+    overlay.focus();
+  }
+
+  _stopKeydownPropagationOnActivate(el) {
+    // For a native interactive element (<button>, <a>) nested inside the
+    // slot's own click/keydown target — Enter/Space already fires the
+    // element's own click natively, so this only needs to stop that keydown
+    // from also bubbling up to the parent tile's keydown handler.
+    el.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter" || ev.key === " ") ev.stopPropagation();
+    });
+  }
+
+  _wireOverlayDismiss(overlay, closeFn) {
+    overlay.addEventListener("click", (ev) => {
+      if (ev.target === overlay) closeFn();
+    });
+    overlay.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeFn();
+    });
   }
 
   _requestToggle(toggle) {
@@ -775,6 +1041,38 @@ class LdataPanelCard extends HTMLElement {
         background: color-mix(in srgb, var(--disabled-text-color, #9e9e9e) 20%, var(--card-background-color));
         opacity: 0.85;
       }
+      .ldata-slot--subpanel {
+        /* A dumb breaker linked (via card config) to a downstream sub-panel
+           device — its own blue-tinted fill, distinct from both the plain
+           grey "dumb" fill and the green "on" fill, so it reads at a glance
+           as "feeds another panel" rather than "just unmonitored". */
+        background: color-mix(in srgb, var(--primary-color, #03a9f4) 14%, var(--card-background-color));
+      }
+      .ldata-slot--subpanel .ldata-slot-indicator {
+        background: var(--primary-color, #03a9f4);
+      }
+      .ldata-slot-subpanel-link {
+        /* Block, not inline — puts it on its own line between the breaker
+           name and the Watts/Amps meta row instead of sharing a flex row
+           with them (which used to squeeze "↳ Sub Panel  1842 W  15.4 A"
+           onto one line). Underlined so it reads as an actual hyperlink,
+           not just colored text. */
+        display: block;
+        color: var(--primary-color, #03a9f4);
+        font-weight: 600;
+        font-size: 0.72em;
+        text-decoration: underline;
+        text-underline-offset: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        margin-top: 1px;
+      }
+      .ldata-slot-subpanel-link:hover,
+      .ldata-slot-subpanel-link:focus-visible {
+        color: var(--primary-color, #03a9f4);
+        opacity: 0.8;
+      }
       .ldata-slot--alarm {
         border-color: var(--error-color, #db4437);
         background: color-mix(in srgb, var(--error-color, #db4437) 16%, var(--card-background-color));
@@ -790,7 +1088,13 @@ class LdataPanelCard extends HTMLElement {
         min-width: 20px;
         padding: 2px 6px;
         border-radius: 10px;
-        background: var(--secondary-background-color);
+        /* A visible border plus a background pulled toward the text color
+           (not just the flat secondary-background-color, which sits too
+           close to the card's own background in some themes to read as a
+           distinct pill) — a little drop shadow for depth on top of that. */
+        border: 1px solid var(--divider-color);
+        background: color-mix(in srgb, var(--secondary-text-color) 16%, var(--secondary-background-color));
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
         color: var(--secondary-text-color);
         font-size: 0.7em;
         font-weight: 600;
@@ -812,10 +1116,30 @@ class LdataPanelCard extends HTMLElement {
       }
       .ldata-slot-meta {
         display: flex;
+        align-items: center;
         gap: 6px;
         font-size: 0.72em;
         color: var(--secondary-text-color);
         margin-top: 2px;
+      }
+      .ldata-slot-rating {
+        /* A fixed spec (the breaker's max amp rating), not a live reading —
+           styled as the same kind of pill as .ldata-slot-position (rounded,
+           bordered, shaded) instead of plain text, so it doesn't read as
+           just another number next to the live Watts/Amps beside it. Same
+           border/background/shadow recipe as .ldata-slot-position, kept as
+           a second declaration rather than a shared class since one is
+           absolutely positioned in the slot's corner and the other sits
+           inline in the meta row — only their surface look is shared. */
+        display: inline-flex;
+        padding: 1px 6px;
+        border-radius: 10px;
+        border: 1px solid var(--divider-color);
+        background: color-mix(in srgb, var(--secondary-text-color) 16%, var(--secondary-background-color));
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+        color: var(--secondary-text-color);
+        font-weight: 600;
+        line-height: 1.3;
       }
       .ldata-slot-indicator {
         position: absolute;
@@ -913,6 +1237,73 @@ class LdataPanelCard extends HTMLElement {
       .ldata-confirm-confirm {
         background: var(--primary-color);
         color: var(--text-primary-color, #fff);
+      }
+      .ldata-subpanel-overlay {
+        position: fixed;
+        inset: 0;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.5);
+        z-index: 10;
+        outline: none;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      .ldata-subpanel-overlay.is-open {
+        display: flex;
+      }
+      .ldata-subpanel-overlay-box {
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+        border-radius: var(--ha-card-border-radius, 8px);
+        max-width: 480px;
+        width: 100%;
+        max-height: 90vh;
+        overflow-y: auto;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+        box-sizing: border-box;
+      }
+      .ldata-subpanel-overlay-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 10px 8px 10px 16px;
+        border-bottom: 1px solid var(--divider-color);
+        /* Sticks to the top of the scrollable box so the close button stays
+           reachable even when the nested card's own content is taller than
+           the modal and the body scrolls. */
+        position: sticky;
+        top: 0;
+        background: var(--card-background-color);
+      }
+      .ldata-subpanel-overlay-title {
+        font-size: 1em;
+        font-weight: 600;
+      }
+      .ldata-subpanel-overlay-close {
+        background: none;
+        border: none;
+        color: var(--secondary-text-color);
+        font-size: 1.1em;
+        line-height: 1;
+        padding: 6px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .ldata-subpanel-overlay-close:hover,
+      .ldata-subpanel-overlay-close:focus-visible {
+        color: var(--primary-text-color);
+        background: var(--secondary-background-color);
+      }
+      .ldata-subpanel-overlay-body {
+        padding: 8px;
+      }
+      .ldata-subpanel-overlay-body ha-card {
+        /* Already inside our own modal box's shadow — the nested card's own
+           shadow would just double up and look wrong stacked on top of it. */
+        box-shadow: none;
       }
     `;
   }
