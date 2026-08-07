@@ -16,7 +16,7 @@ from .const import (
     DOMAIN,
     LOGGER_NAME,
 )
-from .decora_entity import DecoraEntity
+from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -229,8 +229,7 @@ async def async_setup_entry(
                     )
                 )
 
-    if entities:
-        async_add_entities(entities)
+    add_entities_grouped_by_decora_room(config_entry, async_add_entities, entities)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

@@ -4,10 +4,38 @@ import logging
 
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LOGGER_NAME, MANUFACTURER
+from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER
 from .coordinator import LDATAUpdateCoordinator
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
+
+
+def add_entities_grouped_by_decora_room(config_entry, async_add_entities, entities) -> None:
+    """Call async_add_entities once per Decora room, scoped to that room's subentry.
+
+    Mirrors ldata_base_entity.add_entities_grouped_by_panel — same shape,
+    same safe degradation (config_subentry_id ends up None for anything
+    unresolved, whether because the device has no room assigned — e.g. a
+    Wi-Fi bridge, which parse_bridge_devices always sets residentialRoomId
+    to None for — or the HA core doesn't support subentries yet), just
+    keyed by residentialRoomId (str) instead of panel id.
+    """
+    if not entities:
+        return
+    subentry_by_room = {
+        se.unique_id: se.subentry_id
+        for se in getattr(config_entry, "subentries", {}).values()
+        if se.subentry_type == DECORA_ROOM_SUBENTRY_TYPE and se.unique_id
+    }
+    groups: dict[str | None, list] = {}
+    for entity in entities:
+        room_id = entity.entity_data.get("residentialRoomId")
+        groups.setdefault(str(room_id) if room_id else None, []).append(entity)
+    for room_id, group in groups.items():
+        try:
+            async_add_entities(group, config_subentry_id=subentry_by_room.get(room_id))
+        except TypeError:
+            async_add_entities(group)
 
 
 class DecoraEntity(CoordinatorEntity[LDATAUpdateCoordinator]):

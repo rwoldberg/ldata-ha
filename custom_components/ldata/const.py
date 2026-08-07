@@ -9,6 +9,14 @@ MANUFACTURER = "Leviton"
 # own id/serialNumber — see __init__.py's subentry reconciliation.
 PANEL_SUBENTRY_TYPE = "panel"
 
+# Same idea as PANEL_SUBENTRY_TYPE, but for Decora Smart Wi-Fi devices, which
+# have no panel to group under. Leviton's own "room" concept (residentialRoomId
+# on each iotSwitch/iotBridge device, residentialRooms for the id -> name map)
+# is the natural grouping — it's what the Leviton app itself organizes devices
+# by (e.g. "Basement Office"). One subentry per discovered room (unique_id =
+# residentialRoomId) — see __init__.py's subentry reconciliation.
+DECORA_ROOM_SUBENTRY_TYPE = "decora_room"
+
 # Config entry data key holding the single residence this entry is scoped
 # to. Set during config flow for new setups (see config_flow.py's residence
 # picker); absent on entries created before this feature existed, in which

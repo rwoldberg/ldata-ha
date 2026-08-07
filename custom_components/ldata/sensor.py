@@ -49,7 +49,7 @@ from .const import (
     MAX_DAILY_ENERGY_KWH,
 )
 from .coordinator import LDATAUpdateCoordinator
-from .decora_entity import DecoraEntity
+from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 from .ldata_base_entity import add_entities_grouped_by_panel, find_panel
 from .ldata_ct_entity import LDATACTEntity
 from .ldata_entity import LDATAEntity
@@ -632,8 +632,7 @@ async def async_setup_entry(
             if dev_data.get("model") in DECORA_MODELS_GFCI:
                 decora_entities.append(DecoraGFCIStatusSensor(coordinator, dev_data))
 
-        if decora_entities:
-            async_add_entities(decora_entities)
+        add_entities_grouped_by_decora_room(config_entry, async_add_entities, decora_entities)
 
 
 class _DailyEnergySensorMixin:

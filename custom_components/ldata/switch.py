@@ -25,7 +25,7 @@ from .const import (
     POWER_OFF,
     POWER_ON,
 )
-from .decora_entity import DecoraEntity
+from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 from .ldata_base_entity import add_entities_grouped_by_panel, is_breaker_on
 from .ldata_entity import LDATAEntity
 from .ldata_service import LDATAAuthError
@@ -88,8 +88,7 @@ async def async_setup_entry(
             if model in DECORA_MODELS_GFCI and dev_data.get("enableBuzzer") is not None:
                 decora_entities.append(DecoraBuzzerSwitch(entry, dev_data))
 
-        if decora_entities:
-            async_add_entities(decora_entities)
+        add_entities_grouped_by_decora_room(config_entry, async_add_entities, decora_entities)
 
 
 class LDATASwitch(LDATAEntity, SwitchEntity):

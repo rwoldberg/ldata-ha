@@ -12,7 +12,7 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DECORA_MODELS_GFCI, DOMAIN, ENABLE_DECORA, ENABLE_DECORA_DEFAULT, LOGGER_NAME
-from .decora_entity import DecoraEntity
+from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 from .ldata_base_entity import add_entities_grouped_by_panel, find_panel, is_breaker_on
 from .ldata_entity import LDATAEntity
 
@@ -56,8 +56,7 @@ async def async_setup_entry(
             if dev_data.get("model") in DECORA_MODELS_GFCI:
                 decora_entities.append(DecoraGFCIFaultSensor(entry, dev_data))
 
-        if decora_entities:
-            async_add_entities(decora_entities)
+        add_entities_grouped_by_decora_room(config_entry, async_add_entities, decora_entities)
 
 
 class LDATABinarySensor(LDATAEntity, BinarySensorEntity):

@@ -20,7 +20,7 @@ from .const import (
     POWER_OFF,
     POWER_ON,
 )
-from .decora_entity import DecoraEntity
+from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -47,8 +47,7 @@ async def async_setup_entry(
         elif model in ("DW15S", "D215S") and "light" in name:
             entities.append(DecoraLight(coordinator, dev_data))
 
-    if entities:
-        async_add_entities(entities)
+    add_entities_grouped_by_decora_room(config_entry, async_add_entities, entities)
 
 
 class DecoraLight(DecoraEntity, LightEntity):

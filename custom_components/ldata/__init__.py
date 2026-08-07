@@ -15,7 +15,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
 
-from .const import DOMAIN, LOGGER_NAME, PANEL_SUBENTRY_TYPE
+from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
 from .ldata_service import VERSION
 
@@ -200,6 +200,25 @@ def _resolve_panel_id_for_device(device, existing_panel_ids: set[str], dev_reg) 
     return None
 
 
+def _resolve_decora_room_id_for_device(device, mac_to_room: dict[str, str]) -> str | None:
+    """Resolve which Decora room a device belongs to.
+
+    Unlike _resolve_panel_id_for_device above, this can't work from the
+    device registry alone — a Decora device's identifier is just (DOMAIN,
+    mac) with no via_device_id, and room membership (residentialRoomId) is a
+    Leviton-side device attribute, not something HA's registry encodes the
+    way panel/breaker/CT relationships are via identifiers/via_device_id. So
+    this needs mac_to_room, built fresh from the current coordinator data —
+    a device that's dropped out of it (e.g. a transient API hiccup) simply
+    isn't resolved this run; reconciliation runs on every setup, so it
+    converges again on the next successful fetch.
+    """
+    for identifier in device.identifiers:
+        if identifier[0] == DOMAIN and len(identifier) == 2 and identifier[1] in mac_to_room:
+            return mac_to_room[identifier[1]]
+    return None
+
+
 async def _async_purge_orphaned_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove this entry's devices that no longer have any entities.
 
@@ -231,16 +250,20 @@ async def _async_purge_orphaned_devices(hass: HomeAssistant, entry: ConfigEntry)
         )
 
 
-async def _async_reconcile_panel_subentries(
+async def _async_reconcile_subentries(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
 ) -> None:
-    """Ensure every discovered panel has a matching config subentry, and move
-    any pre-subentry devices/entities into their panel's subentry.
+    """Ensure every discovered panel and Decora room has a matching config
+    subentry, and move any pre-subentry devices/entities into theirs.
 
-    Safe to call on every setup — devices/entities that already have a
-    config_subentry_id are left alone, so this converges naturally without
-    needing a separate "have I migrated" flag. No-ops entirely on an HA core
-    old enough not to support subentries at all.
+    Panels and Decora devices are unrelated product lines sharing one config
+    entry, each grouped by its own natural key — panel id for panels/CTs/
+    breakers, Leviton's own residentialRoomId for Decora devices (there's no
+    panel to group those under). Safe to call on every setup —
+    devices/entities that already have a config_subentry_id are left alone,
+    so this converges naturally without needing a separate "have I migrated"
+    flag. No-ops entirely on an HA core old enough not to support subentries
+    at all.
     """
     try:
         from homeassistant.config_entries import ConfigSubentry
@@ -250,15 +273,20 @@ async def _async_reconcile_panel_subentries(
     if not coordinator.data:
         return
 
-    existing = {
+    existing_panel = {
         se.unique_id: se.subentry_id
         for se in entry.subentries.values()
         if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
     }
+    existing_room = {
+        se.unique_id: se.subentry_id
+        for se in entry.subentries.values()
+        if se.subentry_type == DECORA_ROOM_SUBENTRY_TYPE and se.unique_id
+    }
 
     for panel in coordinator.data.get("panels", []):
         panel_id = panel.get("id")
-        if not panel_id or panel_id in existing:
+        if not panel_id or panel_id in existing_panel:
             continue
         subentry = ConfigSubentry(
             data={},
@@ -267,17 +295,52 @@ async def _async_reconcile_panel_subentries(
             unique_id=panel_id,
         )
         hass.config_entries.async_add_subentry(entry, subentry)
-        existing[panel_id] = subentry.subentry_id
+        existing_panel[panel_id] = subentry.subentry_id
         _LOGGER.info(
             "Created config subentry for panel '%s' (%s)", subentry.title, panel_id
         )
 
-    if not existing:
+    # Only rooms that currently have at least one Decora device — rooms is
+    # every room Leviton knows about for the residence (kitchen, bedroom,
+    # etc., most of which have no smart devices in them), not just the ones
+    # relevant here; a subentry per room regardless would clutter Devices &
+    # Services with empty groups nobody asked for. Room ids are coerced to
+    # str throughout — Leviton's API has previously returned other ids
+    # (residence, panel) as raw JSON numbers rather than strings, and
+    # ConfigSubentry.unique_id needs to compare equal run over run.
+    room_names = {str(k): v for k, v in coordinator.data.get("rooms", {}).items()}
+    device_room_ids: set[str] = set()
+    mac_to_room: dict[str, str] = {}
+    for dev_id, dev in coordinator.data.get("decora_devices", {}).items():
+        room_id = dev.get("residentialRoomId")
+        if not room_id:
+            continue
+        room_id = str(room_id)
+        device_room_ids.add(room_id)
+        mac_to_room[str(dev.get("mac") or dev_id)] = room_id
+
+    for room_id in device_room_ids:
+        if room_id in existing_room:
+            continue
+        title = room_names.get(room_id) or f"Room {room_id}"
+        subentry = ConfigSubentry(
+            data={},
+            subentry_type=DECORA_ROOM_SUBENTRY_TYPE,
+            title=title,
+            unique_id=room_id,
+        )
+        hass.config_entries.async_add_subentry(entry, subentry)
+        existing_room[room_id] = subentry.subentry_id
+        _LOGGER.info(
+            "Created config subentry for Decora room '%s' (%s)", title, room_id
+        )
+
+    if not existing_panel and not existing_room:
         return
 
     dev_reg = dr.async_get(hass)
     ent_reg = er.async_get(hass)
-    existing_panel_ids = set(existing)
+    existing_panel_ids = set(existing_panel)
 
     # Config-entry-level subentries (ConfigSubentry, async_add_subentry — the
     # create step above) and device/entity-registry-level subentry support
@@ -301,7 +364,12 @@ async def _async_reconcile_panel_subentries(
     device_subentry: dict[str, str] = {}
     for device in devices:
         panel_id = _resolve_panel_id_for_device(device, existing_panel_ids, dev_reg)
-        subentry_id = existing.get(panel_id) if panel_id else None
+        subentry_id = existing_panel.get(panel_id) if panel_id else None
+        if not subentry_id:
+            # Not a panel-family device (or its panel isn't known this run)
+            # — try Decora room resolution before giving up on it.
+            room_id = _resolve_decora_room_id_for_device(device, mac_to_room)
+            subentry_id = existing_room.get(room_id) if room_id else None
         # Catch per-device, not around the whole loop — device_subentry_id
         # support can be missing on some HA cores (see the warning below),
         # and a broad try/except around the entire loop would silently stop
@@ -314,8 +382,9 @@ async def _async_reconcile_panel_subentries(
                 if device.config_subentry_id is None:
                     unresolved += 1
                     _LOGGER.warning(
-                        "Could not resolve a panel for device '%s' (%s) — leaving "
-                        "it out of any subentry. identifiers=%s via_device_id=%s",
+                        "Could not resolve a panel or Decora room for device '%s' "
+                        "(%s) — leaving it out of any subentry. identifiers=%s "
+                        "via_device_id=%s",
                         device.name, device.id, device.identifiers, device.via_device_id,
                     )
                 continue
@@ -333,14 +402,14 @@ async def _async_reconcile_panel_subentries(
             no_subentry_support += 1
             _LOGGER.debug(
                 "This Home Assistant core doesn't support config_subentry_id "
-                "on device '%s' (%s) yet — leaving it out of its panel's "
-                "subentry until HA is updated further.",
+                "on device '%s' (%s) yet — leaving it out of its subentry "
+                "until HA is updated further.",
                 device.name, device.id,
             )
 
     if no_subentry_support:
         _LOGGER.debug(
-            "%d device(s) could not be moved into their panel's subentry — "
+            "%d device(s) could not be moved into their subentry — "
             "this Home Assistant core supports config subentries at the "
             "integration level, but its device registry doesn't yet carry "
             "config_subentry_id on individual devices. Newly-created "
@@ -389,7 +458,7 @@ async def _async_reconcile_panel_subentries(
         # known, permanent-until-HA-updates condition that would otherwise
         # repeat identical noise on every single restart forever.
         _LOGGER.debug(
-            "%d entit(y/ies) could not be moved into their panel's subentry "
+            "%d entit(y/ies) could not be moved into their subentry "
             "— this HA core's entity registry doesn't support "
             "config_subentry_id yet. They'll show under their device but "
             "won't be grouped by subentry themselves until HA is updated "
@@ -399,7 +468,7 @@ async def _async_reconcile_panel_subentries(
 
     if moved:
         _LOGGER.info(
-            "Migrated %d device(s) / %d entities into panel subentries",
+            "Migrated %d device(s) / %d entities into panel/room subentries",
             len(device_subentry), moved,
         )
 
@@ -457,7 +526,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # pre-subentry devices/entities into theirs, before platforms set up —
     # so newly-discovered breakers get the right config_subentry_id from
     # the moment they're created instead of needing a second pass.
-    await _async_reconcile_panel_subentries(hass, entry, coordinator)
+    await _async_reconcile_subentries(hass, entry, coordinator)
 
     # This line will now only be reached if the first refresh was successful.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
