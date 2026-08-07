@@ -504,6 +504,18 @@ class LdataPanelCard extends HTMLElement {
 
     const stateClass = this._slotStateClass(breaker);
     const alarmClass = alarm ? " ldata-slot--alarm" : "";
+    // Spelled out rather than left to the red fill alone — a breaker can be
+    // red for either reason (or, rarely, both at once) and the color by
+    // itself doesn't say which. Own line below the name so it never has to
+    // compete with the position badge for the meta row's limited width on
+    // a 1-pole slot; the grid row (minmax(44px, auto)) just grows to fit it.
+    const alarmLabel = overCurrent && underVoltage
+      ? "Over Current, Under Voltage"
+      : overCurrent
+      ? "Over Current"
+      : underVoltage
+      ? "Under Voltage"
+      : null;
 
     // A 2-pole breaker spans two rows in one column; since positions step by
     // 2 within a column (confirmed: odd column = 1,3,5,..., even column =
@@ -560,7 +572,7 @@ class LdataPanelCard extends HTMLElement {
            role="button" tabindex="0"
            title="${this._escapeAttr(breaker.name)}${breaker.rating ? ` — ${breaker.rating}A` : ""}${
              breaker.linkedPanelDeviceId ? ` — feeds ${this._escapeAttr(breaker.linkedPanelName || "sub-panel")}` : ""
-           }">
+           }${alarmLabel ? ` — ${this._escapeAttr(alarmLabel)}` : ""}">
         <div class="ldata-slot-position">${positionLabel}</div>
         <div class="ldata-slot-body">
           <div class="ldata-slot-name">${this._escape(breaker.name)}</div>
@@ -573,6 +585,7 @@ class LdataPanelCard extends HTMLElement {
                 )}</a>`
               : ""
           }
+          ${alarmLabel ? `<div class="ldata-slot-alarm-text">${this._escape(alarmLabel)}</div>` : ""}
           <div class="ldata-slot-meta">
             ${breaker.rating ? `<span class="ldata-slot-rating">${breaker.rating}A</span>` : ""}
             ${amps !== null ? `<span class="ldata-slot-reading">${amps} A</span>` : ""}
@@ -1024,6 +1037,19 @@ class LdataPanelCard extends HTMLElement {
       .ldata-slot--left .ldata-slot-toggle {
         left: 8px;
       }
+      /* Left-column slots mirror their text toward the panel's center —
+         name, sub-panel link, and meta row all hug the slot's right edge
+         instead of trailing off after the position badge on the left.
+         --left/--right are assigned from the already-rotated column in
+         _computeLayout (not raw position parity), so this stays correct
+         under rotate_180 too — whichever column renders on the left visually
+         gets this, regardless of which position numbers land in it. */
+      .ldata-slot--left .ldata-slot-body {
+        text-align: right;
+      }
+      .ldata-slot--left .ldata-slot-meta {
+        justify-content: flex-end;
+      }
       .ldata-slot--on {
         background: color-mix(in srgb, var(--success-color, #4caf50) 12%, var(--card-background-color));
       }
@@ -1081,6 +1107,16 @@ class LdataPanelCard extends HTMLElement {
       @keyframes ldata-alarm-pulse {
         0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--error-color, #db4437) 45%, transparent); }
         50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--error-color, #db4437) 0%, transparent); }
+      }
+      .ldata-slot-alarm-text {
+        /* Its own line below the name, not squeezed into the meta row —
+           on a 1-pole slot the row just grows to fit it (grid-auto-rows is
+           minmax(44px, auto), not a fixed 44px), so this never has to
+           compete with the rating/Watts/Amps pills for width. */
+        font-size: 0.72em;
+        font-weight: 600;
+        color: var(--error-color, #db4437);
+        margin-top: 2px;
       }
       .ldata-slot-position {
         position: absolute;
