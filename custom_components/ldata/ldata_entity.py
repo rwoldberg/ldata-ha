@@ -38,7 +38,17 @@ class LDATAEntity(LDATABaseEntity):
             # globally unique). For panels, serialNumber is set to the same
             # value as id anyway (see parse_panels()), so this is a no-op
             # there — only breakers are actually affected.
-            "identifiers": {(DOMAIN, self.entity_data["id"])},
+            #
+            # stable_id (falling back to id where absent, e.g. panels/CTs)
+            # strips a breaker id-format change Leviton introduced in
+            # firmware 2.2.0 (a panel-serial suffix got appended to every
+            # breaker id) — confirmed via a real user's device registry that
+            # using raw "id" here forks every breaker into a second HA
+            # device the moment Leviton changes this format again. "id"
+            # itself is deliberately left alone elsewhere (WS subscriptions,
+            # the breakers cache, every entity's own coordinator lookup) —
+            # this stripped form exists only for device identity/unique_id.
+            "identifiers": {(DOMAIN, self.entity_data.get("stable_id", self.entity_data["id"]))},
             "name": self.entity_data["name"],
             "model": self.entity_data["model"],
             "hw_version": self.entity_data.get("hardware"),

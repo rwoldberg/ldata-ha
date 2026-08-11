@@ -87,8 +87,13 @@ class LDATABaseEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         self.coordinator_context = object()
 
     def _build_device_id(self) -> str:
-        """Build this entity's device id. Default shape; CT entities override."""
-        return "ldata_" + self.entity_data["id"]
+        """Build this entity's device id. Default shape; CT entities override.
+
+        Prefers stable_id over id where present (breakers only — see
+        ldata_entity.py's device_info for why) so unique_id/entity_id stay
+        put across a Leviton-side id-format change too, not just device_info.
+        """
+        return "ldata_" + self.entity_data.get("stable_id", self.entity_data["id"])
 
     async def async_added_to_hass(self) -> None:
         """When entity is added to hass."""

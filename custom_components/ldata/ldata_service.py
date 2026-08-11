@@ -1039,6 +1039,33 @@ class LDATAService:
         except (ValueError, TypeError):
             return None
 
+    def _stable_breaker_id(self, raw_id: str, panel_id: str) -> str:
+        """Return a breaker id stable across Leviton's own id-format changes.
+
+        Firmware 2.2.0 started reporting breaker ids with the panel's own
+        serial suffix appended (e.g. "4C45565275C6" -> "4C45565275C6_A65E"),
+        confirmed via a real user's device registry: every breaker split into
+        two HA devices overnight, the old bare-id one and a new suffixed-id
+        one, both fully populated with entities (so the existing orphan
+        purge — which only removes devices with zero entities — couldn't
+        touch either).
+
+        `raw_id` (the exact string Leviton's REST/WS API currently uses) must
+        stay untouched everywhere else — it's the dict key the whole
+        breakers cache, WS subscriptions, and every entity's own coordinator
+        lookup are keyed by, and Leviton's WS server already expects the
+        suffixed form back for subscriptions to route correctly. This
+        stripped-down form exists solely for device_info/unique_id, so a
+        future id-format change from Leviton doesn't fork every breaker's HA
+        device identity again the way this one did.
+        """
+        if "_" not in panel_id:
+            return raw_id
+        panel_suffix = "_" + panel_id.rsplit("_", 1)[-1]
+        if raw_id.endswith(panel_suffix) and len(raw_id) > len(panel_suffix):
+            return raw_id[: -len(panel_suffix)]
+        return raw_id
+
     def _check_zero_transition(
         self,
         breaker_id: str,
@@ -1777,6 +1804,7 @@ class LDATAService:
                         breaker_data["name"] = breaker["name"]
                         breaker_data["state"] = breaker["currentState"]
                         breaker_data["id"] = breaker["id"]
+                        breaker_data["stable_id"] = self._stable_breaker_id(breaker["id"], panel["id"])
                         breaker_data["model"] = breaker["model"]
                         breaker_data["poles"] = breaker["poles"]
                         breaker_data["serialNumber"] = breaker["serialNumber"]

@@ -250,6 +250,65 @@ async def _async_purge_orphaned_devices(hass: HomeAssistant, entry: ConfigEntry)
         )
 
 
+async def _async_purge_stale_breaker_duplicates(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
+) -> None:
+    """Remove devices left behind by Leviton's 2.2.0 breaker id-format change.
+
+    ldata_service.py's _stable_breaker_id() normalizes device identity going
+    forward so a breaker's entities land back on its original (pre-2.2.0)
+    device — confirmed working via a real user's diagnostics dump — but
+    that's forward-looking only: it doesn't touch device/entity registry
+    rows already created under the raw (suffixed) id before that fix
+    existed. Those rows don't naturally reach "zero entities" just because
+    the integration stopped recomputing that identity — they were already
+    fully populated — so _async_purge_orphaned_devices (which only removes
+    devices with zero remaining entities) can't reach them either. This
+    finds and removes exactly the superseded half of each such pair.
+
+    Deliberately narrow: only ever removes a device when its identifier is
+    the OLD raw (pre-normalization) id for a breaker Leviton is CURRENTLY
+    reporting, and only when a sibling device using that same breaker's
+    CURRENT stable_id also exists — i.e. only the half of a pair this exact
+    migration created, confirmed to already have a live replacement. A
+    breaker whose id has never changed format, or one with no known
+    replacement device, is never touched.
+    """
+    if not coordinator.data:
+        return
+
+    dev_reg = dr.async_get(hass)
+    device_id_by_identifier: dict[str, str] = {}
+    for device in dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id):
+        for identifier in device.identifiers:
+            if identifier[0] == DOMAIN and len(identifier) == 2:
+                device_id_by_identifier[identifier[1]] = device.id
+
+    removed = 0
+    for breaker in coordinator.data.get("breakers", {}).values():
+        raw_id = breaker.get("id")
+        stable_id = breaker.get("stable_id")
+        if not raw_id or not stable_id or raw_id == stable_id:
+            continue  # this breaker's id has never changed format
+        stale_device_id = device_id_by_identifier.get(raw_id)
+        current_device_id = device_id_by_identifier.get(stable_id)
+        if not stale_device_id or not current_device_id or stale_device_id == current_device_id:
+            continue  # no leftover pair here — nothing to clean up
+        dev_reg.async_remove_device(stale_device_id)
+        removed += 1
+        _LOGGER.info(
+            "Removed superseded device for breaker '%s' (old id %s, now %s)",
+            breaker.get("name", raw_id), raw_id, stable_id,
+        )
+
+    if removed:
+        _LOGGER.info(
+            "Removed %d device(s) left over from Leviton's 2.2.0 breaker "
+            "id-format change",
+            removed,
+        )
+
+
 async def _async_reconcile_subentries(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
 ) -> None:
@@ -534,6 +593,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Platforms have now registered every current entity against its device —
     # safe to remove any device that's left with none (see docstring).
     await _async_purge_orphaned_devices(hass, entry)
+
+    # Clean up the specific leftover-duplicate case from Leviton's 2.2.0
+    # breaker id-format change — these stay fully populated (see docstring),
+    # so the zero-entities purge above can't catch them.
+    await _async_purge_stale_breaker_duplicates(hass, entry, coordinator)
 
     # Set up a listener for options updates
     entry.add_update_listener(options_update_listener)
