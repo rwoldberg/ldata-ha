@@ -309,6 +309,45 @@ async def _async_purge_stale_breaker_duplicates(
         )
 
 
+def _sync_device_firmware_versions(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
+) -> None:
+    """Push firmware version changes from live data into the device registry.
+
+    HA only reads an entity's device_info when the entity is first added
+    (entity_platform's registry write at setup/reload) — it never re-reads
+    it on later coordinator updates. Without this, a firmware update
+    reported by Leviton (panel, breaker, or Decora device) would only show
+    up in HA after a manual integration reload. Registered as a coordinator
+    listener in async_setup_entry so it runs on every live data push.
+    """
+    if not coordinator.data:
+        return
+
+    dev_reg = dr.async_get(hass)
+    devices_by_identifier: dict[str, dr.DeviceEntry] = {}
+    for device in dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id):
+        for identifier in device.identifiers:
+            if identifier[0] == DOMAIN and len(identifier) == 2:
+                devices_by_identifier[identifier[1]] = device
+
+    def _sync(identity_key, sw_version) -> None:
+        if not identity_key or not sw_version:
+            return
+        device = devices_by_identifier.get(str(identity_key))
+        if device is not None and device.sw_version != sw_version:
+            dev_reg.async_update_device(device.id, sw_version=sw_version)
+
+    for panel in coordinator.data.get("panels", []):
+        _sync(panel.get("id"), panel.get("firmware"))
+
+    for breaker in coordinator.data.get("breakers", {}).values():
+        _sync(breaker.get("stable_id") or breaker.get("id"), breaker.get("firmware"))
+
+    for decora in coordinator.data.get("decora_devices", {}).values():
+        _sync(decora.get("mac") or decora.get("id"), decora.get("version"))
+
+
 async def _async_reconcile_subentries(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
 ) -> None:
@@ -598,6 +637,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # breaker id-format change — these stay fully populated (see docstring),
     # so the zero-entities purge above can't catch them.
     await _async_purge_stale_breaker_duplicates(hass, entry, coordinator)
+
+    # Keep sw_version live as Leviton pushes firmware updates — see
+    # _sync_device_firmware_versions docstring for why this can't just
+    # happen automatically via device_info.
+    entry.async_on_unload(
+        coordinator.async_add_listener(
+            lambda: _sync_device_firmware_versions(hass, entry, coordinator)
+        )
+    )
 
     # Set up a listener for options updates
     entry.add_update_listener(options_update_listener)
