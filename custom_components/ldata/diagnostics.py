@@ -75,7 +75,7 @@ async def async_get_config_entry_diagnostics(
     ent_reg = er.async_get(hass)
     devices = [
         _serialize_device(d)
-        for d in dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id)
+        for d in dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
     ]
     entities = [
         _serialize_entity(e)

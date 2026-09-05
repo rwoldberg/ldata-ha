@@ -15,7 +15,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
 
-from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, PANEL_SUBENTRY_TYPE
+from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER, PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
 from .ldata_service import VERSION
 
@@ -234,7 +234,7 @@ async def _async_purge_orphaned_devices(hass: HomeAssistant, entry: ConfigEntry)
     dev_reg = dr.async_get(hass)
     ent_reg = er.async_get(hass)
 
-    devices = list(dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id))
+    devices = list(dr.async_entries_for_config_entry(dev_reg, entry.entry_id))
     removed = 0
     for device in devices:
         if er.async_entries_for_device(ent_reg, device.id, include_disabled_entities=True):
@@ -279,7 +279,7 @@ async def _async_purge_stale_breaker_duplicates(
 
     dev_reg = dr.async_get(hass)
     device_id_by_identifier: dict[str, str] = {}
-    for device in dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id):
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
         for identifier in device.identifiers:
             if identifier[0] == DOMAIN and len(identifier) == 2:
                 device_id_by_identifier[identifier[1]] = device.id
@@ -326,7 +326,7 @@ def _sync_device_firmware_versions(
 
     dev_reg = dr.async_get(hass)
     devices_by_identifier: dict[str, dr.DeviceEntry] = {}
-    for device in dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id):
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
         for identifier in device.identifiers:
             if identifier[0] == DOMAIN and len(identifier) == 2:
                 devices_by_identifier[identifier[1]] = device
@@ -456,7 +456,7 @@ async def _async_reconcile_subentries(
     # previous run's entity pass was interrupted). Otherwise entity
     # migration would only ever get one shot, on the same run its device
     # was first moved, with no way to retry on a later load.
-    devices = dev_reg.devices.get_devices_for_config_entry_id(entry.entry_id)
+    devices = dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
     unresolved = 0
     no_subentry_support = 0
     device_subentry: dict[str, str] = {}
@@ -571,6 +571,46 @@ async def _async_reconcile_subentries(
         )
 
 
+def _async_ensure_panel_devices(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
+) -> None:
+    """Pre-create each panel's device registry entry before any platform
+    sets up breaker/CT entities.
+
+    Breaker (ldata_entity.py) and CT (ldata_ct_entity.py) device_info link
+    to their panel via via_device_id, which — unlike the deprecated
+    via_device (identifiers-tuple) form it replaces — requires the panel's
+    actual device registry id to already exist; HA no longer resolves a
+    not-yet-created device from identifiers on our behalf. Panel entities
+    themselves are added in the same platform batch as breakers, sometimes
+    after them (see add_entities_grouped_by_panel), so we can't rely on a
+    panel's own device_info to register it first. Called before
+    async_forward_entry_setups so this always wins that race.
+    """
+    if not coordinator.data:
+        return
+
+    dev_reg = dr.async_get(hass)
+    subentry_by_panel = {
+        se.unique_id: se.subentry_id
+        for se in entry.subentries.values()
+        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
+    }
+    for panel in coordinator.data.get("panels", []):
+        panel_id = panel.get("id")
+        if not panel_id:
+            continue
+        dev_reg.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            config_subentry_id=subentry_by_panel.get(panel_id),
+            identifiers={(DOMAIN, panel_id)},
+            name=panel.get("name", "Unknown Panel"),
+            manufacturer=MANUFACTURER,
+            model=panel.get("model"),
+            sw_version=panel.get("firmware"),
+        )
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the LDATA integration (runs once per HA process, independent
     of any config entry).
@@ -625,6 +665,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # so newly-discovered breakers get the right config_subentry_id from
     # the moment they're created instead of needing a second pass.
     await _async_reconcile_subentries(hass, entry, coordinator)
+
+    # Pre-create panel devices so breaker/CT device_info can link to them
+    # via via_device_id (see docstring) before platforms set up entities.
+    _async_ensure_panel_devices(hass, entry, coordinator)
 
     # This line will now only be reached if the first refresh was successful.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

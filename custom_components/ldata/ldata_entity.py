@@ -1,5 +1,7 @@
 """Defines a base LDATA entity."""
 
+from homeassistant.helpers import device_registry as dr
+
 from .const import _LEG1_POSITIONS, DOMAIN, MANUFACTURER
 from .coordinator import LDATAUpdateCoordinator
 from .ldata_base_entity import LDATABaseEntity
@@ -59,8 +61,20 @@ class LDATAEntity(LDATABaseEntity):
         # device to its panel device in HA's device registry so frontend code
         # (e.g. a panel-layout card) can discover "all breakers on this panel"
         # without needing a separate data source.
+        #
+        # via_device_id (not the deprecated via_device identifiers-tuple
+        # form) needs the panel's actual device id, which requires it to
+        # already exist in the registry — __init__.py's
+        # _async_ensure_panel_devices guarantees that before any breaker
+        # entity gets this far. self.hass is safe to use here: entity_platform
+        # sets it before device_info is read for registration.
         if panel_id := self.entity_data.get("panel_id"):
-            info["via_device"] = (DOMAIN, panel_id)
+            if self.hass and (
+                panel_device := dr.async_get(self.hass).async_get_device(
+                    identifiers={(DOMAIN, panel_id)}
+                )
+            ):
+                info["via_device_id"] = panel_device.id
         return info
 
     @property
