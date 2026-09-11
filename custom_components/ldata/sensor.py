@@ -1626,12 +1626,12 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
             return
 
         if self._last_update_time is None or self._state is None:
-            # First pxt run after startup or mode switch.  Any _state value
-            # restored from a previous hw-counter session is meaningless in
-            # pxt mode (hw mode reads a period counter; pxt integrates from 0).
-            # Reset to 0 so the sensor accumulates cleanly from this point.
-            self._state = 0.0
-            self._last_reported = None  # clear native_value monotonic clamp too
+            # First pxt run after startup or a hw→pxt mode switch.
+            # Preserve restored state only when it is explicitly from today.
+            # Missing/invalid date metadata cannot prove the value is same-day.
+            if self._state is None or self._last_date != today:
+                self._state = 0.0
+                self._last_reported = None
             self._last_update_time = now
             self._last_power = current_power
             self._last_date = today
