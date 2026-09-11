@@ -10,6 +10,7 @@ from homeassistant.components.lovelace.const import LOVELACE_DATA, MODE_STORAGE
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_ENTITY_ID, EVENT_HOMEASSISTANT_STARTED, Platform, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
@@ -17,7 +18,13 @@ import homeassistant.helpers.config_validation as cv
 
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER, PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
-from .ldata_service import VERSION
+from .ldata_service import (
+    LDATAAuthError,
+    LDATAConnectionError,
+    LDATAService,
+    TwoFactorRequired,
+    VERSION,
+)
 
 # URL path the panel card is served under — served directly from this
 # integration's own www/ folder (see _async_register_frontend below), so
@@ -639,6 +646,39 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Handle backward compatibility for username/email field
     username = entry.data.get("email", entry.data.get(CONF_USERNAME))
+
+    # Entries created by 1.x stored only username/password. Version 2.x expects
+    # token metadata and otherwise enters a reauth loop before trying those
+    # still-valid stored credentials. Migrate that legacy shape once.
+    if not entry.data.get("refresh_token") or not entry.data.get("userid"):
+        migration_service = LDATAService(
+            username,
+            entry.data[CONF_PASSWORD],
+            entry,
+        )
+        try:
+            authenticated = await hass.async_add_executor_job(
+                migration_service.auth_with_credentials
+            )
+        except (LDATAAuthError, TwoFactorRequired) as ex:
+            raise ConfigEntryAuthFailed(
+                "Legacy LDATA entry requires reauthentication"
+            ) from ex
+        except LDATAConnectionError as ex:
+            raise ConfigEntryNotReady(
+                "Unable to migrate legacy LDATA authentication metadata"
+            ) from ex
+
+        if not authenticated:
+            raise ConfigEntryAuthFailed(
+                "Legacy LDATA credential migration failed"
+            )
+
+        migrated_data = dict(entry.data)
+        migrated_data["refresh_token"] = migration_service.refresh_token
+        migrated_data["userid"] = migration_service.userid
+        hass.config_entries.async_update_entry(entry, data=migrated_data)
+        _LOGGER.info("Migrated legacy LDATA authentication metadata")
 
     coordinator = LDATAUpdateCoordinator(
         hass,
