@@ -59,6 +59,10 @@ class LDATAAuthError(Exception):
     """Raised for authentication failures that require re-auth."""
 
 
+class LDATAConnectionError(Exception):
+    """Raised for retryable login service or transport failures."""
+
+
 class LDATAService:
     """The LDATAService object."""
     _last_login_attempt_time = 0.0
@@ -220,14 +224,19 @@ class LDATAService:
         
         headers = {**defaultHeaders}
         data = {"email": self.username, "password": self.password}
-        
-        result = self.session.post(
-            "https://my.leviton.com/api/Person/login?include=user",
-            headers=headers,
-            json=data,
-            timeout=15,
-        )
-        
+
+        try:
+            result = self.session.post(
+                "https://my.leviton.com/api/Person/login?include=user",
+                headers=headers,
+                json=data,
+                timeout=15,
+            )
+        except requests.exceptions.RequestException as ex:
+            raise LDATAConnectionError(
+                "Unable to reach the Leviton login service"
+            ) from ex
+
         if result.status_code == 200:
             json_data = result.json()
             self.auth_token = json_data["id"]
@@ -259,8 +268,11 @@ class LDATAService:
                 )
                 raise LDATAAuthError(f"[v{self.version}] Invalid username or password")
 
-        # Handle other non-200, non-401/406 errors
-        raise LDATAAuthError(f"[v{self.version}] Login failed with status code: {result.status_code}")
+        # Rate limits and server errors are retryable setup failures, not proof
+        # that the user's stored credentials are invalid.
+        raise LDATAConnectionError(
+            f"Leviton login service returned HTTP {result.status_code}"
+        )
 
 
     def complete_2fa(self, code: str) -> bool:
