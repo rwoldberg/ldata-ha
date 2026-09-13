@@ -52,6 +52,25 @@ defaultHeaders = {
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 
+def _panel_firmware_versions(panel: dict) -> tuple[str, str | None]:
+    """Return running and available firmware across both panel schemas.
+
+    IotWhem uses ``version`` for the running image and ``downloaded`` for a
+    staged candidate. ResidentialBreakerPanel instead uses ``packageVer`` and
+    only treats ``updateVersion`` as a candidate when updateAvailability says
+    an update exists.
+    """
+    installed = panel.get("version") or panel.get("packageVer") or "unknown"
+    available = panel.get("downloaded")
+    if (
+        not available
+        and panel.get("updateAvailability")
+        and panel.get("updateAvailability") != "UP_TO_DATE"
+    ):
+        available = panel.get("updateVersion")
+    return installed, available or None
+
+
 class TwoFactorRequired(Exception):
     """Raised when 2FA code is required."""
 
@@ -1644,6 +1663,15 @@ class LDATAService:
         for panel in panels_json:
             panel_data = {}
             panel_data["firmware"] = panel.get("updateVersion", "unknown")
+            # WHEMS reports its running version in ``version`` and any
+            # downloaded candidate in ``downloaded``. Older LDATA responses
+            # may instead use packageVer/updateAvailability/updateVersion.
+            # Keep these separate from the existing ``firmware`` field so
+            # device-registry version behavior remains backward compatible.
+            (
+                panel_data["installed_firmware"],
+                panel_data["available_firmware"],
+            ) = _panel_firmware_versions(panel)
             panel_data["model"] = panel.get("model", "unknown")
             panel_data["id"] = panel.get("id")
             panel_data["name"] = panel.get("name", "Unknown Panel")
@@ -2494,6 +2522,25 @@ class LDATAService:
                                 panel["overVoltageThreshold"] = data["overVoltageThreshold"]
                             if "underVoltageThreshold" in data:
                                 panel["underVoltageThreshold"] = data["underVoltageThreshold"]
+
+                            # Firmware metadata changes infrequently, but the
+                            # cloud can include it in an IotWhem notification.
+                            # Preserve the last known values when a partial
+                            # WebSocket payload omits these fields.
+                            if data.get("version") or data.get("packageVer"):
+                                panel["installed_firmware"] = (
+                                    data.get("version") or data.get("packageVer")
+                                )
+                            if "downloaded" in data:
+                                panel["available_firmware"] = data.get("downloaded")
+                            elif (
+                                data.get("updateAvailability")
+                                and data.get("updateAvailability") != "UP_TO_DATE"
+                                and data.get("updateVersion")
+                            ):
+                                panel["available_firmware"] = data["updateVersion"]
+                            elif data.get("updateAvailability") == "UP_TO_DATE":
+                                panel["available_firmware"] = None
                             
                             # Update WiFi signal strength
                             if "rssi" in data and data["rssi"] is not None:
