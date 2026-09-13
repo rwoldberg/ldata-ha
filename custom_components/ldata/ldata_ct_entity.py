@@ -30,11 +30,13 @@ class LDATACTEntity(LDATABaseEntity):
         # form) needs the panel's actual device id — __init__.py's
         # _async_ensure_panel_devices guarantees it already exists by the
         # time any CT entity gets this far (see ldata_entity.py for the
-        # matching breaker-side comment).
+        # matching breaker-side comment, including why config_entry_id is
+        # required here — async_get_device_by_identifier replaces the
+        # deprecated async_get_device).
         panel_id = self.entity_data["panel_id"]
         if self.hass and (
-            panel_device := dr.async_get(self.hass).async_get_device(
-                identifiers={(DOMAIN, panel_id)}
+            panel_device := dr.async_get(self.hass).async_get_device_by_identifier(
+                (DOMAIN, panel_id), self.coordinator.config_entry.entry_id
             )
         ):
             info["via_device_id"] = panel_device.id

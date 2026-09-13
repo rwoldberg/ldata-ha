@@ -1680,16 +1680,18 @@ class LDATAService:
 
         for panel in panels_json:
             panel_data = {}
-            panel_data["firmware"] = panel.get("updateVersion", "unknown")
-            # WHEMS reports its running version in ``version`` and any
-            # downloaded candidate in ``downloaded``. Older LDATA responses
-            # may instead use packageVer/updateAvailability/updateVersion.
-            # Keep these separate from the existing ``firmware`` field so
-            # device-registry version behavior remains backward compatible.
+            # firmware mirrors installed_firmware (both device_info/sw_version
+            # and the dedicated firmware-availability diagnostic read from the
+            # same schema-aware source now — see _panel_firmware_versions).
+            # updateVersion does not exist on WHEMS panels at all — confirmed
+            # against a real WHEMS payload — so reading it directly here (the
+            # old approach) silently returned "unknown" for every WHEMS
+            # panel's installed firmware.
             (
                 panel_data["installed_firmware"],
                 panel_data["available_firmware"],
             ) = _panel_firmware_versions(panel)
+            panel_data["firmware"] = panel_data["installed_firmware"]
             panel_data["model"] = panel.get("model", "unknown")
             panel_data["id"] = panel.get("id")
             panel_data["name"] = panel.get("name", "Unknown Panel")
@@ -2557,6 +2559,7 @@ class LDATAService:
                                 panel["installed_firmware"] = (
                                     data.get("version") or data.get("packageVer")
                                 )
+                                panel["firmware"] = panel["installed_firmware"]
                             if "downloaded" in data:
                                 panel["available_firmware"] = data.get("downloaded")
                             elif (

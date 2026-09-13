@@ -68,10 +68,15 @@ class LDATAEntity(LDATABaseEntity):
         # _async_ensure_panel_devices guarantees that before any breaker
         # entity gets this far. self.hass is safe to use here: entity_platform
         # sets it before device_info is read for registration.
+        #
+        # async_get_device_by_identifier (not the deprecated async_get_device)
+        # requires config_entry_id since identifiers are only guaranteed
+        # unique within a config entry — the panel and this breaker always
+        # belong to the same one (one config entry per residence).
         if panel_id := self.entity_data.get("panel_id"):
             if self.hass and (
-                panel_device := dr.async_get(self.hass).async_get_device(
-                    identifiers={(DOMAIN, panel_id)}
+                panel_device := dr.async_get(self.hass).async_get_device_by_identifier(
+                    (DOMAIN, panel_id), self.coordinator.config_entry.entry_id
                 )
             ):
                 info["via_device_id"] = panel_device.id
