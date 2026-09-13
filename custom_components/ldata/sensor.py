@@ -595,6 +595,9 @@ async def async_setup_entry(
         entities_to_add.append(
             LDATAPanelWifiRSSISensor(coordinator, entity_data)
         )
+        entities_to_add.append(
+            LDATAPanelFirmwareUpdateSensor(coordinator, entity_data)
+        )
         
         entity_data_leg1 = {**entity_data, "poles": 1, "position": 1}
         entities_to_add.append(
@@ -2690,6 +2693,71 @@ class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
                 return "mdi:wifi-strength-1"
             else:
                 return "mdi:wifi-strength-alert-outline"
+
+
+class LDATAPanelFirmwareUpdateSensor(LDATAEntity, SensorEntity):
+    """Report firmware availability without offering an install action.
+
+    Applying firmware to electrical-panel hardware should remain an explicit
+    operation in My Leviton. This diagnostic only surfaces metadata already
+    returned by the cloud so an available update is not silently missed.
+    """
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, data) -> None:
+        """Initialize the panel firmware diagnostic."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.panel_data = data
+        self._panel_id = data["data"]["id"]
+        self._installed = data["data"].get(
+            "installed_firmware", data.get("firmware")
+        )
+        self._available = data["data"].get("available_firmware")
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+
+    @callback
+    def _state_update(self):
+        """Refresh firmware metadata from the latest panel snapshot."""
+        try:
+            panel = find_panel(self.coordinator, self._panel_id)
+            if panel is not None:
+                self._installed = panel.get(
+                    "installed_firmware", panel.get("firmware", self._installed)
+                )
+                self._available = panel.get("available_firmware")
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> StateType:
+        """Return the candidate version, or a stable up-to-date status."""
+        if self._available and self._available != self._installed:
+            return self._available
+        return "Up to date"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose running version and a machine-readable availability flag."""
+        attributes = super().extra_state_attributes
+        attributes["installed_version"] = self._installed
+        attributes["update_available"] = bool(
+            self._available and self._available != self._installed
+        )
+        return attributes
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Firmware Update"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "firmware_update"
+
+    @property
+    def icon(self) -> str:
+        return "mdi:update" if self.native_value != "Up to date" else "mdi:check-circle-outline"
 
 
 class DecoraSignalSensor(DecoraEntity, SensorEntity):
