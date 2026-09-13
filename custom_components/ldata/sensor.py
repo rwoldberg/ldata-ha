@@ -523,6 +523,9 @@ async def async_setup_entry(
             LDATABreakerOperationalStateSensor(coordinator, breaker_data)
         )
         entities_to_add.append(
+            LDATABreakerStateSensor(coordinator, breaker_data)
+        )
+        entities_to_add.append(
             LDATABreakerBleRSSISensor(coordinator, breaker_data)
         )
         entities_to_add.append(
@@ -2431,6 +2434,60 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
 
 # ── Breaker diagnostic sensors ───────────────────────────────────────
+
+
+class LDATABreakerStateSensor(LDATAEntity, SensorEntity):
+    """Expose raw breaker state and trip context."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, data) -> None:
+        """Initialize the raw breaker state sensor."""
+        super().__init__(data=data, coordinator=coordinator)
+        self.breaker_data = data
+        self._diagnostic_data = data
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Refresh raw state without collapsing trip details to on/off."""
+        try:
+            breakers = self.coordinator.data.get("breakers", {})
+            self._diagnostic_data = breakers.get(self.breaker_data["id"], {})
+        except (AttributeError, KeyError, TypeError):
+            self._diagnostic_data = {}
+        self.async_write_ha_state()
+
+    @property
+    def native_value(self) -> StateType:
+        """Return Leviton's raw state so new trip states remain visible."""
+        return self._diagnostic_data.get("state")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return an allowlist of non-sensitive trip diagnostics."""
+        data = self._diagnostic_data
+        return {
+            "second_pole_state": data.get("state2"),
+            "previous_state": data.get("previous_state"),
+            "previous_second_pole_state": data.get("previous_state2"),
+            "change_reason": data.get("change_reason"),
+            "remote_state": data.get("remoteState"),
+            "meter_chip_ok": data.get("meter_chip_ok"),
+            "locked": data.get("locked"),
+            "branch_type": data.get("branch_type"),
+            "critical": data.get("critical"),
+            "critical_second_pole": data.get("critical2"),
+        }
+
+    @property
+    def name_suffix(self) -> str | None:
+        """Return the entity name suffix."""
+        return "Breaker State"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        """Return the stable unique ID suffix."""
+        return "breaker_state"
 
 
 class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):

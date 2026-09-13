@@ -1352,6 +1352,22 @@ class LDATAService:
             existing["remoteState"] = raw["remoteState"]
             if existing["remoteState"] == "":
                 existing["remoteState"] = "RemoteON"
+
+        diagnostic_fields = {
+            "currentState2": "state2",
+            "currentStatePrev": "previous_state",
+            "currentStatePrev2": "previous_state2",
+            "chgReason": "change_reason",
+            "meterChipOk": "meter_chip_ok",
+            "locked": "locked",
+            "critical": "critical",
+            "critical2": "critical2",
+        }
+        for raw_key, cached_key in diagnostic_fields.items():
+            if raw_key in raw:
+                existing[cached_key] = raw[raw_key]
+        if "branchType" in raw:
+            existing["branch_type"] = raw["branchType"] or ""
         
         # blinkLED state (set via REST, may also arrive via WS)
         if "blinkLED" in raw:
@@ -1837,6 +1853,14 @@ class LDATAService:
                         breaker_data["overCurrent"] = breaker.get("overCurrent", False)
                         breaker_data["overVoltage"] = breaker.get("overVoltage", False)
                         breaker_data["underVoltage"] = breaker.get("underVoltage", False)
+                        breaker_data["state2"] = breaker.get("currentState2")
+                        breaker_data["previous_state"] = breaker.get("currentStatePrev")
+                        breaker_data["previous_state2"] = breaker.get("currentStatePrev2")
+                        breaker_data["change_reason"] = breaker.get("chgReason")
+                        breaker_data["meter_chip_ok"] = breaker.get("meterChipOk")
+                        breaker_data["locked"] = breaker.get("locked")
+                        breaker_data["critical"] = breaker.get("critical")
+                        breaker_data["critical2"] = breaker.get("critical2")
                         _ble_rssi = self._none_or_float(breaker, "bleRSSI")
                         # 0 dBm is not a real BLE signal — 2-pole breakers report 0
                         breaker_data["bleRSSI"] = _ble_rssi if _ble_rssi is not None and _ble_rssi < 0 else None
