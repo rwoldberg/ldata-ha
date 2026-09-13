@@ -92,7 +92,10 @@ class DecoraEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     @property
     def unique_id(self):
         """Return the unique ID of the entity."""
-        mac = self.entity_data.get("mac", self._dev_id)
+        # Bridge records can include an explicit null MAC. ``dict.get`` with a
+        # default does not handle that case, so use the normalized device ID
+        # to keep multiple bridges collision-free.
+        mac = self.entity_data.get("mac") or self._dev_id
         if suffix := self.unique_id_suffix:
             return f"{self.coordinator.user}-{mac}_{suffix}"
         return f"{self.coordinator.user}-{mac}"
@@ -110,7 +113,7 @@ class DecoraEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     @property
     def device_info(self):
         """Return device information about this device."""
-        mac = self.entity_data.get("mac", str(self._dev_id))
+        mac = self.entity_data.get("mac") or str(self._dev_id)
         info = {
             "identifiers": {(DOMAIN, mac)},
             "name": self.entity_data["name"],

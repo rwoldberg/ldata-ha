@@ -19,6 +19,7 @@ from .const import (
     _LEG1_POSITIONS, CONF_RESIDENCE_ID, DECORA_MODELS_ALL, ENABLE_DECORA,
     ENABLE_DECORA_DEFAULT, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
     CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
+    DEVICE_TYPE_BRIDGE, is_decora_bridge,
 )
 
 try:
@@ -735,6 +736,7 @@ class LDATAService:
                 continue
             devices[f"bridge_{dev_id}"] = {
                 "id": f"bridge_{dev_id}",
+                "device_type": DEVICE_TYPE_BRIDGE,
                 "name": b.get("name", f"Wi-Fi Bridge {dev_id}"),
                 "model": "MLWSB",
                 "manufacturer": "Leviton",
@@ -2709,7 +2711,9 @@ class LDATAService:
                     "subscription": {"modelName": "IotCt", "modelId": int(ct_id)}
                 })
 
-            for dev_id in self.status_data.get("decora_devices", {}):
+            for dev_id, dev_data in self.status_data.get("decora_devices", {}).items():
+                if is_decora_bridge(dev_data):
+                    continue
                 subscriptions.append({
                     "type": "subscribe",
                     "subscription": {"modelName": "IotSwitch", "modelId": int(dev_id)}

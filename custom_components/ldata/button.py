@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DECORA_MODELS_GFCI, DOMAIN, LOGGER_NAME
+from .const import DECORA_MODELS_GFCI, DOMAIN, LOGGER_NAME, is_decora_bridge
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -26,8 +26,10 @@ async def async_setup_entry(
         return
 
     entities = []
-    for dev_id, dev_data in coordinator.data.get("decora_devices", {}).items():
-        # Identify button — all devices
+    for dev_data in coordinator.data.get("decora_devices", {}).values():
+        if is_decora_bridge(dev_data):
+            continue
+        # Identify button — iotSwitch devices only
         entities.append(DecoraIdentifyButton(coordinator, dev_data))
         # Silence Buzzer button — GFCI only
         if dev_data.get("model") in DECORA_MODELS_GFCI:
@@ -49,7 +51,10 @@ class DecoraIdentifyButton(DecoraEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Press the button."""
         device = self._get_device_data()
-        if not device:
+        # Platform setup already excludes bridges, but keep the mutation
+        # boundary defensive in case an entity survives a classification
+        # change or is instantiated outside the normal setup path.
+        if not device or is_decora_bridge(device):
             return
         residence_id = device.get("residenceId")
         await self.coordinator.hass.async_add_executor_job(
