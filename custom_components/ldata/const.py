@@ -146,3 +146,11 @@ DECORA_MODELS_OUTLET = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_OU
 DECORA_MODELS_GFCI = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_GFCI in d[1]]
 DECORA_MODELS_CONTROLLER = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_CONTROLLER in d[1]]
 DECORA_MODELS_BRIDGE = [d[0] for d in SUPPORTED_DECORA_DEVICES if DEVICE_TYPE_BRIDGE in d[1]]
+
+
+def is_decora_bridge(device: dict) -> bool:
+    """Return whether a normalized Decora record represents an iotBridge."""
+    return (
+        device.get("device_type") == DEVICE_TYPE_BRIDGE
+        or device.get("model") in DECORA_MODELS_BRIDGE
+    )
