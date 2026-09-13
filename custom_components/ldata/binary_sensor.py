@@ -34,6 +34,7 @@ async def async_setup_entry(
             breaker_data = entry.data["breakers"][breaker_id]
             sensors_to_add.append(LDATABinarySensor(entry, breaker_data))
             sensors_to_add.append(LDATABreakerOverCurrentSensor(entry, breaker_data))
+            sensors_to_add.append(LDATABreakerOverVoltageSensor(entry, breaker_data))
             sensors_to_add.append(LDATABreakerUnderVoltageSensor(entry, breaker_data))
 
     if "panels" in entry.data:
@@ -272,7 +273,7 @@ class LDATAPanelUnderVoltageSensor(_PanelAlarmSensor):
 
 
 class _BreakerAlarmSensor(LDATAEntity, BinarySensorEntity):
-    """Base for breaker-level alarm binary sensors (over-current, under-voltage).
+    """Base for breaker-level current and voltage alarm binary sensors.
 
     Subclasses set _data_key/_name_suffix/_unique_id_suffix/_icon_off.
     """
@@ -327,6 +328,14 @@ class LDATABreakerOverCurrentSensor(_BreakerAlarmSensor):
     _name_suffix = "Over Current"
     _unique_id_suffix = "over_current"
     _icon_off = "mdi:current-ac"
+
+
+class LDATABreakerOverVoltageSensor(_BreakerAlarmSensor):
+    """Breaker over-voltage alarm previously omitted from entity setup."""
+
+    _data_key = "overVoltage"
+    _name_suffix = "Over Voltage"
+    _unique_id_suffix = "over_voltage"
 
 
 class LDATABreakerUnderVoltageSensor(_BreakerAlarmSensor):
