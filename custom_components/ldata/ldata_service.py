@@ -1516,9 +1516,21 @@ class LDATAService:
                 raise LDATAAuthError(f"[v{self.version}] Token validation failed. Please re-authenticate.")
 
         except LDATAAuthError:
-            # Re-raise LDATAAuthError to be caught by the coordinator
-            _LOGGER.warning(f"[v{self.version}] Authentication error in status().")
-            raise
+            # The stored token is dead, but we hold the account credentials —
+            # try a full login before surfacing a reauth flow to the UI.
+            # TwoFactorRequired and a genuine bad password still raise
+            # unchanged, so those cases reach the reauth flow as before.
+            _LOGGER.warning(
+                f"[v{self.version}] Stored token rejected — attempting credential re-login."
+            )
+            try:
+                if not self.auth_with_credentials():
+                    raise
+            except LDATAAuthError:
+                # Credentials rejected too — this is a real reauth case.
+                _LOGGER.warning(f"[v{self.version}] Authentication error in status().")
+                raise
+            _LOGGER.info(f"[v{self.version}] Credential re-login succeeded.")
         except requests.exceptions.RequestException as ex:
              # This is a network/DNS error, raise it for UpdateFailed
             
