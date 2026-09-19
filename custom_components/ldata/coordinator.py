@@ -393,7 +393,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
 
             # Log data if enabled
             self._log_data_if_enabled(returnData, "API")
-            
+
+            self._persist_refreshed_tokens()
+
             return returnData
 
         except LDATAAuthError as ex:
@@ -414,6 +416,36 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             )
             # This will result in the "Failed setup, will retry" message
             raise UpdateFailed(f"Error communicating with LDATA: {ex}") from ex
+
+    def _persist_refreshed_tokens(self) -> None:
+        """Persist a token refreshed during status() into the config entry.
+
+        status()'s credential-fallback path (see ldata_service.py) obtains a
+        fresh refresh_token/userid on the LDATAService instance when the
+        stored one expired, but only on that in-memory instance — it can't
+        write to the config entry itself (that call isn't safe from the
+        executor thread status() runs on). Without this, every future
+        restart would repeat the same expired-token-then-credential-fallback
+        detour instead of healing once. Cheap to call unconditionally: a
+        dict-equality-free comparison, and a no-op unless something changed.
+        """
+        entry = self.config_entry
+        if not entry:
+            return
+        if (
+            self._service.refresh_token == entry.data.get("refresh_token", "")
+            and self._service.userid == entry.data.get("userid", "")
+        ):
+            return
+        self._hass.config_entries.async_update_entry(
+            entry,
+            data={
+                **entry.data,
+                "refresh_token": self._service.refresh_token,
+                "userid": self._service.userid,
+            },
+        )
+        _LOGGER.info(f"[v{self._service.version}] Persisted refreshed LDATA auth token")
 
     @property
     def service(self) -> LDATAService:

@@ -2,7 +2,7 @@
 
 All notable changes to the Leviton LDATA integration are documented here.
 
-## 2.0.11 - pending
+## 2.0.11 - 2026-09-18
 
 ### Added
 - **Breaker Over Voltage alarm** — a new sensor for each smart breaker, alongside the existing Over Current and Under Voltage alarms. (#94)
@@ -17,3 +17,4 @@ All notable changes to the Leviton LDATA integration are documented here.
 - Panel, breaker, and Decora device firmware versions shown in Home Assistant now update live instead of only refreshing after a restart.
 - **Panel firmware version was showing "unknown."** The panel's installed firmware version — shown on the device page and used by the Firmware Update sensor — was reading from a field that doesn't exist on newer WHEMS-based panels, so it always displayed "unknown." It now reads the correct field and updates live as new data arrives. (follow-up to #96)
 - Improved compatibility with upcoming Home Assistant releases by moving off two internal APIs that Home Assistant has marked for removal. No visible change today — this just keeps the integration working on future Home Assistant updates.
+- **An expired login could force you to re-authenticate even though your saved password still worked.** This is now handled automatically — the integration retries your stored username and password before ever asking you to sign in again. (#98)

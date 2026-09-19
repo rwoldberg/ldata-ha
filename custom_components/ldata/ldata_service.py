@@ -1515,10 +1515,43 @@ class LDATAService:
                 _LOGGER.debug(f"[v{self.version}] Token validation failed. Forcing re-auth.")
                 raise LDATAAuthError(f"[v{self.version}] Token validation failed. Please re-authenticate.")
 
-        except LDATAAuthError:
-            # Re-raise LDATAAuthError to be caught by the coordinator
-            _LOGGER.warning(f"[v{self.version}] Authentication error in status().")
-            raise
+        except LDATAAuthError as ex:
+            # The stored token is dead — either missing, or confirmed invalid
+            # after refresh_auth()'s own 3 retries (which clears it and raises
+            # rather than returning False, unlike the no-token case). Fall
+            # back to a fresh username/password login before giving up:
+            # without this, ANY token expiry forces a UI reauth even though
+            # the stored credentials are still perfectly valid. Previously
+            # only the one-time 1.x->2.x migration in __init__.py had this
+            # fallback — ongoing token expiry during normal operation never
+            # did (confirmed regression report: worked in 2.0.5, broke once
+            # this three-strike retry path started raising instead of
+            # returning False).
+            _LOGGER.warning(
+                f"[v{self.version}] Stored token invalid ({ex}); retrying with stored credentials."
+            )
+            try:
+                if not self.auth_with_credentials():
+                    raise LDATAAuthError(
+                        f"[v{self.version}] Credential login failed after token expiry."
+                    )
+            except (LDATAAuthError, TwoFactorRequired) as cred_ex:
+                # Credentials themselves are no good, or the account now
+                # requires 2FA — neither is resolvable from this background
+                # path, so this is a genuine case for the UI reauth flow.
+                _LOGGER.warning(
+                    f"[v{self.version}] Credential fallback failed in status(): {cred_ex}"
+                )
+                raise LDATAAuthError(
+                    f"[v{self.version}] Token expired and credential fallback failed: {cred_ex}"
+                ) from cred_ex
+            # LDATAConnectionError from the fallback attempt (network/server
+            # error, not a credential rejection) is deliberately NOT caught
+            # here — it propagates as-is so the coordinator treats it as a
+            # retryable failure (UpdateFailed) rather than forcing a reauth.
+            _LOGGER.info(
+                f"[v{self.version}] Recovered from expired token using stored credentials."
+            )
         except requests.exceptions.RequestException as ex:
              # This is a network/DNS error, raise it for UpdateFailed
             
