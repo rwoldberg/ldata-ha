@@ -303,6 +303,9 @@ Addon is auto reloading on submit.
 - Allow Breaker Control (default off)
   - HA will not create Switch entities for breaker control (Breakers are only treated as Sensors)
 
+- Allow Identify (default off)
+  - HA will not create the per-breaker Blink LED switch used to physically locate a breaker. Independent of Allow Breaker Control — a config with breaker control off can still enable this (or vice versa) if you just want the ability to blink a breaker's LED without granting power control.
+
 - Enable Decora Smart Wi-Fi devices (default off)
   - Discovers and creates entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account (a separate Leviton product line from the LDATA/WHEM breaker panels). Leave off if you don't have any — it avoids extra API calls on every update. Can be set at initial setup or toggled later here.
 

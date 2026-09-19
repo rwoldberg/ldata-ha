@@ -6,7 +6,8 @@
                     "username": "Nom d'utilisateur my.leviton.com",
                     "password": "Mot de passe my.leviton.com",
                     "three_phase": "Service réseau 120/208V (Appartement/Copropriété)",
-                    "allow_breaker_control": "Autoriser le contrôle des disjoncteurs"
+                    "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
+                    "allow_led_blink": "Autoriser l'identification"
                 },
                 "title": "Configurer LDATA"
             },
@@ -36,6 +37,7 @@
                 "data": {
                     "three_phase": "Service réseau 120/208V (Appartement/Copropriété)",
                     "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
+                    "allow_led_blink": "Autoriser l'identification",
                     "gap_handling": "Gestion des interruptions (ancien firmware uniquement)",
                     "gap_threshold": "Seuil d'interruption (mins)",
                     "ha_inform_rate": "Taux d'information HA (secondes)",
@@ -50,6 +52,7 @@
                     "ha_inform_rate": "Fréquence de mise à jour des capteurs dans Home Assistant (2-600 secondes). Des valeurs plus basses = plus réactif mais charge système et écritures DB plus élevées.",
                     "three_phase": "Activer uniquement si votre service est triphasé 120/208V (courant dans les appartements et copropriétés avec transformateurs partagés). Dans ce mode, les tensions des disjoncteurs bipolaires sont multipliées par √3/2 (~0,866) pour afficher la tension correcte de 208V ligne à ligne au lieu de 240V incorrect. NE PAS activer pour un service résidentiel monophasé standard 120/240V.",
                     "allow_breaker_control": "Lorsqu'activé, HA créera des interrupteurs permettant de déclencher/réinitialiser les disjoncteurs. Lorsque désactivé, les disjoncteurs sont uniquement traités comme des capteurs.",
+                    "allow_led_blink": "Lorsqu'activé, HA créera un interrupteur par disjoncteur pour faire clignoter sa LED afin de l'identifier physiquement. Lorsque désactivé, aucune entité de contrôle LED n'est créée. Indépendant d'Autoriser le contrôle des disjoncteurs.",
                     "gap_handling": "Repli pour anciens firmwares sans compteurs d'énergie matériels. Ignorer: plus sûr. Extrapoler: dernière puissance connue. Moyenne: compromis. Panneaux avec firmware 2.0+ utilisent des compteurs matériels et ignorent ce paramètre.",
                     "gap_threshold": "Durée sans données avant activation de la gestion des interruptions (1-30 minutes). Uniquement pour le repli puissance×temps sur ancien firmware.",
                     "log_warnings": "Journaliser les plantages de l'intégration ou les erreurs Web.",

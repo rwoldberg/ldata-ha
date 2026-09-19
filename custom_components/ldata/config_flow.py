@@ -18,6 +18,8 @@ from .const import (
     LOGGER_NAME,
     ALLOW_BREAKER_CONTROL,
     ALLOW_BREAKER_CONTROL_DEFAULT,
+    ALLOW_LED_BLINK,
+    ALLOW_LED_BLINK_DEFAULT,
     ENABLE_DECORA,
     ENABLE_DECORA_DEFAULT,
     THREE_PHASE,
@@ -46,6 +48,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required("password"): str,
         vol.Required("three_phase"): bool,
         vol.Required("allow_breaker_control"): bool,
+        vol.Required(ALLOW_LED_BLINK, default=ALLOW_LED_BLINK_DEFAULT): bool,
         vol.Required(ENABLE_DECORA, default=ENABLE_DECORA_DEFAULT): bool,
     }
 )
@@ -294,6 +297,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_PASSWORD): str,
                 vol.Required(THREE_PHASE, default=self.user_data.get(THREE_PHASE, THREE_PHASE_DEFAULT)): bool,
                 vol.Required(ALLOW_BREAKER_CONTROL, default=self.user_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)): bool,
+                vol.Required(ALLOW_LED_BLINK, default=self.user_data.get(ALLOW_LED_BLINK, ALLOW_LED_BLINK_DEFAULT)): bool,
                 vol.Required(ENABLE_DECORA, default=self.user_data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT)): bool,
             })
 
@@ -396,6 +400,10 @@ class OptionsFlow(config_entries.OptionsFlow):
             vol.Optional(
                 ALLOW_BREAKER_CONTROL,
                 default=current_options.get(ALLOW_BREAKER_CONTROL, current_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)),
+            ): bool,
+            vol.Optional(
+                ALLOW_LED_BLINK,
+                default=current_options.get(ALLOW_LED_BLINK, current_data.get(ALLOW_LED_BLINK, ALLOW_LED_BLINK_DEFAULT)),
             ): bool,
             vol.Optional(
                 ENABLE_DECORA,

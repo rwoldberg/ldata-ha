@@ -2,6 +2,11 @@
 
 All notable changes to the Leviton LDATA integration are documented here.
 
+## 2.0.12 - pending
+
+### Changed
+- **The breaker "Blink LED" switch is now opt-in**, behind a new **Allow Identify** option (off by default), separate from Allow Breaker Control. Previously it was always created, even on a fully read-only setup — if you use it to physically locate breakers, enable it under Settings > Devices & Services > Leviton LDATA > Configure after upgrading. (#91)
+
 ## 2.0.11 - 2026-09-18
 
 ### Added

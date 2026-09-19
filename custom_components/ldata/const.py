@@ -31,6 +31,8 @@ THREE_PHASE = "three_phase"
 THREE_PHASE_DEFAULT = False
 ALLOW_BREAKER_CONTROL = "allow_breaker_control"
 ALLOW_BREAKER_CONTROL_DEFAULT = False
+ALLOW_LED_BLINK = "allow_led_blink"
+ALLOW_LED_BLINK_DEFAULT = False
 ENABLE_DECORA = "enable_decora"
 ENABLE_DECORA_DEFAULT = False
 

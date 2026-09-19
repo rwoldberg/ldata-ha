@@ -18,6 +18,7 @@
                     "password": "my.leviton.com Password",
                     "three_phase": "120/208V Network Service (Apartment/Condo)",
                     "allow_breaker_control": "Allow breaker control",
+                    "allow_led_blink": "Allow Identify",
                     "enable_decora": "Enable Decora Smart Wi-Fi devices"
                 },
                 "title": "Configure LDATA"
@@ -45,6 +46,7 @@
                 "data": {
                     "three_phase": "120/208V Network Service (Apartment/Condo)",
                     "allow_breaker_control": "Allow Breaker Control",
+                    "allow_led_blink": "Allow Identify",
                     "enable_decora": "Enable Decora Smart Wi-Fi devices",
                     "gap_handling": "Gap Handling (older firmware only)",
                     "gap_threshold": "Gap Threshold (mins)",
@@ -60,6 +62,7 @@
                     "ha_inform_rate": "How often to update sensors in Home Assistant (2-600 seconds). Lower values = more responsive but higher system load and DB writes.",
                     "three_phase": "Enable only if your service is 120/208V three-phase (common in apartments and condos with shared utility transformers). In this mode, two-pole breaker voltages are multiplied by \u221a3/2 (~0.866) to report the correct 208V line-to-line voltage instead of the incorrect 240V. Do NOT enable for standard 120/240V single-phase residential service.",
                     "allow_breaker_control": "When enabled, HA will create switch entities allowing you to trip/reset breakers. When disabled, breakers are only treated as sensors.",
+                    "allow_led_blink": "When enabled, HA will create a switch per breaker to blink its LED for physical identification. When disabled, no LED-control entities are created. Independent of Allow Breaker Control.",
                     "enable_decora": "When enabled, LDATA will also discover and create entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account. Leave disabled if you don't have any \u2014 it avoids extra API calls on every update.",
                     "gap_handling": "Fallback for older firmware without hardware energy counters. How breaker daily energy sensors handle gaps when no data is received. Skip: safest. Extrapolate: assume last known power. Average: compromise. Panels with firmware 2.0+ use hardware counters and ignore this setting.",
                     "gap_threshold": "Time without data before gap handling activates (1-30 minutes). Only applies to power\u00d7time fallback on older firmware.",

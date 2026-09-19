@@ -15,6 +15,8 @@ from .const import (
     LOGGER_NAME,
     ALLOW_BREAKER_CONTROL,
     ALLOW_BREAKER_CONTROL_DEFAULT,
+    ALLOW_LED_BLINK,
+    ALLOW_LED_BLINK_DEFAULT,
     DECORA_MODELS_FAN,
     DECORA_MODELS_GFCI,
     DECORA_MODELS_LIGHT,
@@ -53,12 +55,19 @@ async def async_setup_entry(
             switches.append(LDATASwitch(entry, breaker_data))
         add_entities_grouped_by_panel(config_entry, async_add_entities, switches)
 
-    # Blink LED switches are always created (DIAGNOSTIC, independent of breaker control)
-    blink_switches = []
-    for breaker_id in entry.data.get("breakers", {}):
-        breaker_data = entry.data["breakers"][breaker_id]
-        blink_switches.append(LDATABlinkLEDSwitch(entry, breaker_data))
-    add_entities_grouped_by_panel(config_entry, async_add_entities, blink_switches)
+    # Blink LED switches are a separate physical-actuation permission from
+    # breaker control — a user with a read-only config reasonably expects no
+    # actuator entities at all, even a low-risk one like this (see issue #91).
+    allow_led_blink = config_entry.options.get(
+        ALLOW_LED_BLINK,
+        config_entry.data.get(ALLOW_LED_BLINK, ALLOW_LED_BLINK_DEFAULT),
+    )
+    if allow_led_blink is True:
+        blink_switches = []
+        for breaker_id in entry.data.get("breakers", {}):
+            breaker_data = entry.data["breakers"][breaker_id]
+            blink_switches.append(LDATABlinkLEDSwitch(entry, breaker_data))
+        add_entities_grouped_by_panel(config_entry, async_add_entities, blink_switches)
 
     # ── Decora Smart Wi-Fi Switches & Outlets ──
     enable_decora = config_entry.options.get(
