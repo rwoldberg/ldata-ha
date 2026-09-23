@@ -1,0 +1,43 @@
+blueprint:
+  name: Leviton LDATA - Firmware Update Notification
+  description: >
+    Notifies you whenever a Leviton LDATA panel or Decora Smart Wi-Fi device
+    has a new firmware version available. Automatically covers every
+    current and future update.* entity created by the Leviton LDATA
+    integration — no need to pick individual devices, and no changes
+    needed here when you add a new device later.
+  domain: automation
+  source_url: https://github.com/rwoldberg/ldata-ha/blob/main/blueprints/automation/ldata_firmware_notify.yaml
+  input:
+    notify_action:
+      name: Notification action
+      description: >
+        Which notify action to call. Defaults to a persistent notification
+        card inside Home Assistant (bell icon, top right) — change this to
+        a mobile app action such as notify.mobile_app_your_phone for a push
+        notification instead.
+      default: persistent_notification.create
+      selector:
+        text: {}
+
+triggers:
+  - trigger: event
+    event_type: state_changed
+
+conditions:
+  - condition: template
+    value_template: >
+      {{ trigger.event.data.entity_id in (integration_entities('ldata') | select('match', '^update\.') | list)
+         and trigger.event.data.new_state.state == 'on'
+         and trigger.event.data.old_state.state != 'on' }}
+
+actions:
+  - action: !input notify_action
+    data:
+      title: "Firmware update available"
+      message: >
+        {{ trigger.event.data.new_state.attributes.friendly_name }}:
+        {{ trigger.event.data.new_state.attributes.installed_version }} →
+        {{ trigger.event.data.new_state.attributes.latest_version }}
+
+mode: queued

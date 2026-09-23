@@ -710,6 +710,7 @@ class LDATAService:
                 "serial": sw.get("serial"),
                 "mac": sw.get("mac"),
                 "version": sw.get("version"),
+                "available_firmware": sw.get("downloaded"),
                 "power": sw.get("power", "OFF"),
                 "brightness": sw.get("brightness", 0),
                 "connected": sw.get("connected", False),
@@ -960,12 +961,13 @@ class LDATAService:
         """Get the ldata modules for all the residences the user has access to."""
         return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels", "LDATA")
 
-    def _put_request(self, url: str, json_data: dict, context_str: str, referer: str = None) -> object:
-        """Helper to handle PUT requests with standardized error handling."""
+    def _put_request(self, url: str, json_data: dict, context_str: str, referer: str = None, method: str = "PUT") -> object:
+        """Helper to handle PUT/PATCH requests with standardized error handling."""
         headers = self._auth_headers(**({"referer": referer} if referer else {}))
 
         try:
-            result = self.session.put(
+            result = self.session.request(
+                method,
                 url,
                 headers=headers,
                 json=json_data,
@@ -992,14 +994,17 @@ class LDATAService:
         return None
 
     def put_residential_breaker_panels(self, panel_id: str, panel_type: str) -> None:
-        """Call PUT on the ResidentialBreakerPanels API this must be done to force an update of the power values."""
+        """Force an update of the power values via a bandwidth PATCH.
+
+        v1.66.0 HAR confirms the official app switched this endpoint from PUT
+        to PATCH (same {"bandwidth": 1} body); PUT no longer appears in traffic.
+        """
         if panel_type == "LDATA":
             url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
         else:
             url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-        
-        # Call the new helper
-        self._put_request(url, {"bandwidth": 1}, "put_residential_breaker_panels")
+
+        self._put_request(url, {"bandwidth": 1}, "put_residential_breaker_panels", method="PATCH")
 
     def remote_off(self, breaker_id):
         """Turn off a breaker."""
@@ -2133,12 +2138,15 @@ class LDATAService:
 
     def _bandwidth_toggle(self, panel_id: str, panel_type: str = "WHEMS"):
         """Toggle bandwidth 1→0→1 to force the panel to refresh its energy counters.
-        
-        The Leviton web app does this exact sequence before fetching CT data.
-        Just sending bandwidth:1 repeatedly doesn't trigger a new reading —
+
+        The Leviton web app does this exact sequence when (re-)entering the panel
+        view. Just sending bandwidth:1 repeatedly doesn't trigger a new reading —
         the panel needs to see the 0→1 transition to push fresh
         energyConsumption/energyImport values to the cloud.
-        
+
+        v1.66.0 HAR confirms the app now sends all three steps as PATCH rather
+        than PUT (same {"bandwidth": ...} bodies).
+
         While the toggle is in progress, the zero-transition guard suppresses
         zero-counter increments for breakers on this panel, because the
         bandwidth:0 step causes the cloud to send transient zeros.
@@ -2152,20 +2160,20 @@ class LDATAService:
             url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
         else:
             url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-        
+
         headers = self._auth_headers()
 
         try:
             # Step 1: bandwidth:1 (wake up)
-            r1 = self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+            r1 = self.session.patch(url, headers=headers, json={"bandwidth": 1}, timeout=5)
             if r1.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth expired during bandwidth toggle (step 1): {r1.status_code}")
             # Step 2: bandwidth:0 (turn off)
-            r2 = self.session.put(url, headers=headers, json={"bandwidth": 0}, timeout=5)
+            r2 = self.session.patch(url, headers=headers, json={"bandwidth": 0}, timeout=5)
             if r2.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth expired during bandwidth toggle (step 2): {r2.status_code}")
             # Step 3: bandwidth:1 (turn back on — this 0→1 transition triggers the refresh)
-            r3 = self.session.put(url, headers=headers, json={"bandwidth": 1}, timeout=5)
+            r3 = self.session.patch(url, headers=headers, json={"bandwidth": 1}, timeout=5)
             if r3.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth expired during bandwidth toggle (step 3): {r3.status_code}")
             _LOGGER.debug(f"[v{self.version}] Bandwidth toggle 1→0→1 for {panel_type} panel {panel_id}")
@@ -2648,13 +2656,17 @@ class LDATAService:
 
         # Update fields present in the notification
         for field in (
-            "power", "brightness", "connected", "rssi", "localIP",
+            "power", "brightness", "connected", "rssi", "localIP", "version",
             "autoOffTime", "statusLED", "loadType", "fadeOnTime", "fadeOffTime",
             "triacOff", "reversePhase", "dimLED", "motionMode", "motionNightMode",
             "motionDisableTime", "motionTimeout", "motionOccupied", "fault", "enableBuzzer",
         ):
             if field in data:
                 device[field] = data[field]
+        # "downloaded" is Leviton's raw field name for the available firmware
+        # candidate; renamed here to match parse_decora_devices()'s naming.
+        if "downloaded" in data:
+            device["available_firmware"] = data["downloaded"]
 
         devices[dev_id] = device
         new_status_data["decora_devices"] = devices
@@ -2662,10 +2674,12 @@ class LDATAService:
         return True
 
     async def _ws_bandwidth_put(self, session: aiohttp.ClientSession, panel_info: list) -> None:
-        """PUT bandwidth:1 to every panel — this is what keeps the WebSocket alive.
+        """PATCH bandwidth:1 to every panel — this is what keeps the WebSocket alive.
 
-        v1.54.2 HAR shows the app sends TWO bandwidth:1 PUTs back-to-back
-        every 50 seconds. Must PUT to EVERY panel using the correct endpoint.
+        v1.54.2 HAR showed the app sending TWO bandwidth:1 PUTs back-to-back
+        every 50 seconds. v1.66.0 HAR confirms the same cadence/body but via
+        PATCH instead — PUT no longer appears in the app's traffic. Must send
+        to EVERY panel using the correct endpoint.
         """
         if not panel_info:
             return
@@ -2687,29 +2701,29 @@ class LDATAService:
                         url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
                     else:
                         url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-                    async with session.put(
+                    async with session.patch(
                         url,
                         headers=headers,
                         json={"bandwidth": 1},
                         timeout=aiohttp.ClientTimeout(total=10)
                     ) as resp:
                         if resp.status in (401, 403, 406):
-                            # This keepalive PUT has no other error-surfacing path — if the
+                            # This keepalive PATCH has no other error-surfacing path — if the
                             # auth token has expired, silently continuing to "succeed" at
                             # debug level would let the WebSocket look connected indefinitely
                             # while the cloud has actually stopped honoring us.
                             _LOGGER.warning(
-                                f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id} "
+                                f"[v{self.version}] Bandwidth PATCH {panel_type} panel {panel_id} "
                                 f"got HTTP {resp.status} — auth token may have expired."
                             )
                         else:
-                            _LOGGER.debug(f"[v{self.version}] Bandwidth PUT {panel_type} panel {panel_id} (round {_round+1}): {resp.status}")
+                            _LOGGER.debug(f"[v{self.version}] Bandwidth PATCH {panel_type} panel {panel_id} (round {_round+1}): {resp.status}")
                 except aiohttp.ClientConnectionResetError:
-                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id}: connection reset (expected)")
+                    _LOGGER.debug(f"[v{self.version}] Bandwidth PATCH panel {panel_id}: connection reset (expected)")
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    _LOGGER.debug(f"[v{self.version}] Bandwidth PUT panel {panel_id} failed: {e}")
+                    _LOGGER.debug(f"[v{self.version}] Bandwidth PATCH panel {panel_id} failed: {e}")
 
     async def _ws_apiversion_heartbeat(self, session: aiohttp.ClientSession) -> None:
         """GET /apiversion — the Leviton web app polls this every ~10s.
@@ -3065,7 +3079,7 @@ class LDATAService:
                         while True:
                             current_time = asyncio.get_event_loop().time()
                             
-                            # Bandwidth PUT every 20 seconds (this keeps WebSocket alive!)
+                            # Bandwidth PATCH every 20 seconds (this keeps WebSocket alive!)
                             if current_time - last_bandwidth_put_time >= BANDWIDTH_PUT_INTERVAL:
                                 bandwidth_put_count += 1
                                 last_bandwidth_put_time = current_time
@@ -3079,7 +3093,7 @@ class LDATAService:
                                     except Exception:
                                         pass
                                 _track_task(asyncio.create_task(_safe_bandwidth_put(), name="ldata_bandwidth_put"))
-                                _LOGGER.debug(f"[v{self.version}] Bandwidth PUT #{bandwidth_put_count} ({len(panel_info)} panels)")
+                                _LOGGER.debug(f"[v{self.version}] Bandwidth PATCH #{bandwidth_put_count} ({len(panel_info)} panels)")
                             
                             # API version heartbeat every 10 seconds (keeps server session alive for v2 firmware)
                             if current_time - last_heartbeat_time >= APIVERSION_HEARTBEAT_INTERVAL:
