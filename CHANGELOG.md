@@ -2,7 +2,7 @@
 
 All notable changes to the Leviton LDATA integration are documented here.
 
-## 2.0.12 - pending
+## 2.0.12 - 2026-09-23
 
 ### Added
 - **Firmware update entities for your panel and Decora Smart Wi-Fi devices**, using Home Assistant's native Update platform. When Leviton has a newer firmware version available, it now shows up under Settings > Updates (with the usual sidebar badge), so you can set up a notification automation instead of checking the My Leviton app. Installing an update still happens there — this integration only reports availability.
