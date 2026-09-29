@@ -640,10 +640,31 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
+def _title_without_password(entry: ConfigEntry) -> str | None:
+    """Return a replacement title if the entry's title contains its password.
+
+    Versions from April 2023 to October 2025 built the title from the username
+    and the password. Titles are shown in the UI and written to logs and
+    diagnostics, and nothing rewrote them when the config flow was fixed.
+    """
+    password = entry.data.get(CONF_PASSWORD)
+    if not password or password not in entry.title:
+        return None
+    username = entry.data.get("email", entry.data.get(CONF_USERNAME))
+    return f"Leviton LDATA ({username})"
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up LDATA from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
+
+    if (title := _title_without_password(entry)) is not None:
+        hass.config_entries.async_update_entry(entry, title=title)
+        _LOGGER.warning(
+            "The title of this LDATA entry contained the account password and "
+            "has been renamed; consider changing the password"
+        )
 
     # Handle backward compatibility for username/email field
     username = entry.data.get("email", entry.data.get(CONF_USERNAME))
