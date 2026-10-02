@@ -651,7 +651,14 @@ def _title_without_password(entry: ConfigEntry) -> str | None:
     if not password or password not in entry.title:
         return None
     username = entry.data.get("email", entry.data.get(CONF_USERNAME))
-    return f"Leviton LDATA ({username})"
+    if not username:
+        return None
+    new_title = f"Leviton LDATA ({username})"
+    # Compare with the target, not by substring: a password that is part of
+    # the username would otherwise match again after every rename.
+    if new_title == entry.title:
+        return None
+    return new_title
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
