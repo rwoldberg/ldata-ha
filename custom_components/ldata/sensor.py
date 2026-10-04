@@ -833,8 +833,6 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         attributes["use_hw_counters"] = self._use_hw_counters
         attributes["energy_key"] = self._energy_key
         attributes["panel_energy_key"] = self._panel_energy_key
-        if self._last_update_time is not None:
-            attributes["last_update_time"] = self._last_update_time
         return attributes
 
     @property
@@ -1390,8 +1388,6 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
         attributes["last_date"] = self._last_date.isoformat() if self._last_date else None
         attributes["energy_key"] = self._energy_key
         attributes["use_hw_counters"] = self._use_hw_counters
-        if self._last_update_time is not None:
-            attributes["last_update_time"] = self._last_update_time
         return attributes
 
     def _get_ct_consumption(self) -> float | None:
