@@ -1,6 +1,7 @@
 """The LDATA integration."""
 from __future__ import annotations
 import logging
+import re
 from pathlib import Path
 
 import voluptuous as vol
@@ -640,22 +641,31 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
 
-def _title_without_password(entry: ConfigEntry) -> str | None:
-    """Return a replacement title if the entry's title contains its password.
+# Versions from April 2023 to October 2025 titled entries with the repr of a
+# (username, password[, three_phase]) tuple, e.g.
+#   Leviton LDATA (('user@example.com', 'hunter2', False))
+# Clean titles use single parentheses, so the double-paren shape identifies a
+# legacy title without needing to find the password inside it. Searching for
+# the password misses ones that repr() escaped (backslashes, mixed quotes) and
+# can rename a title the user chose if a short password happens to be a
+# substring of it.
+_LEGACY_TITLE = re.compile(r"^Leviton LDATA \(\(.*\)\)$", re.DOTALL)
 
-    Versions from April 2023 to October 2025 built the title from the username
-    and the password. Titles are shown in the UI and written to logs and
-    diagnostics, and nothing rewrote them when the config flow was fixed.
+
+def _title_without_password(entry: ConfigEntry) -> str | None:
+    """Return a replacement title if the entry still has a legacy password title.
+
+    Titles are shown in the UI and written to logs and diagnostics, and
+    nothing rewrote them when the config flow was fixed.
     """
-    password = entry.data.get(CONF_PASSWORD)
-    if not password or password not in entry.title:
+    if not _LEGACY_TITLE.match(entry.title):
         return None
     username = entry.data.get("email", entry.data.get(CONF_USERNAME))
     if not username:
         return None
     new_title = f"Leviton LDATA ({username})"
-    # Compare with the target, not by substring: a password that is part of
-    # the username would otherwise match again after every rename.
+    # A username that itself starts with "(" can produce a clean title that
+    # still matches the pattern; don't "rename" to the same value.
     if new_title == entry.title:
         return None
     return new_title

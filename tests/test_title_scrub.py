@@ -56,3 +56,23 @@ def test_password_inside_username_renames_only_once() -> None:
 def test_entry_without_username_is_left_alone() -> None:
     entry = _entry("Leviton LDATA ((None, 'hunter2'))", {CONF_PASSWORD: "hunter2"})
     assert _title_without_password(entry) is None
+
+
+def test_password_escaped_by_repr_is_still_replaced() -> None:
+    # repr() doubles a backslash and escapes mixed quotes, so the raw password
+    # is not a substring of the legacy title.
+    for password in ("a\\b", "it's \"x\""):
+        entry = _entry(
+            f"Leviton LDATA ({('user@example.com', password)})",
+            {CONF_USERNAME: "user@example.com", CONF_PASSWORD: password},
+        )
+        assert password not in entry.title
+        assert _title_without_password(entry) == "Leviton LDATA (user@example.com)"
+
+
+def test_title_chosen_by_user_is_left_alone_even_if_it_contains_the_password() -> None:
+    entry = _entry(
+        "Home",
+        {CONF_USERNAME: "user@example.com", CONF_PASSWORD: "Home"},
+    )
+    assert _title_without_password(entry) is None

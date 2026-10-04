@@ -8,36 +8,36 @@ from custom_components.ldata.sensor import (
 )
 
 
-def _attributes(cls) -> dict:
-    sensor = MagicMock()
-    sensor._midnight_baseline = 1.0
-    sensor._last_date = None
-    sensor._use_hw_counters = False
-    sensor._energy_key = "import"
-    sensor._panel_energy_key = "import"
-    sensor._last_update_time = 1759140000.0
-    # Skip the base classes: only the attributes this class adds matter here.
-    base = type("Base", (), {"extra_state_attributes": {}})
-    prop = cls.__dict__["extra_state_attributes"]
-    original = prop.fget
-    import builtins
-
-    real_super = builtins.super
-
-    def fake_super(*args):
-        return base()
-
-    original.__globals__["super"] = fake_super
-    try:
-        return original(sensor)
-    finally:
-        original.__globals__.pop("super", None)
-        assert builtins.super is real_super
+def _coordinator() -> MagicMock:
+    coordinator = MagicMock()
+    coordinator.user = "test-user"
+    coordinator.data = {}
+    coordinator.async_add_listener.return_value = MagicMock()
+    return coordinator
 
 
 def test_breaker_daily_sensor_has_no_update_timestamp() -> None:
-    assert "last_update_time" not in _attributes(LDATADailyUsageSensor)
+    data = {"id": "breaker-1", "name": "Kitchen", "poles": 1, "position": 1}
+    sensor = LDATADailyUsageSensor(_coordinator(), data, False, "panel-1")
+    # What used to leak into the attributes on every update.
+    sensor._last_update_time = 1759140000.0
+
+    attributes = sensor.extra_state_attributes
+
+    assert "last_update_time" not in attributes
+    # The attributes restore relies on are still published.
+    assert "midnight_baseline" in attributes
+    assert "last_date" in attributes
 
 
 def test_ct_daily_sensor_has_no_update_timestamp() -> None:
-    assert "last_update_time" not in _attributes(LDATACTDailyUsageSensor)
+    data = {"id": "ct-1", "panel_id": "panel-1", "name": "Grid", "channel": 1}
+    sensor = LDATACTDailyUsageSensor(_coordinator(), data)
+    sensor._last_update_time = 1759140000.0
+
+    attributes = sensor.extra_state_attributes
+
+    assert "last_update_time" not in attributes
+    assert attributes["energy_key"] == "consumption"
+    assert "midnight_baseline" in attributes
+    assert "last_date" in attributes
