@@ -1762,24 +1762,23 @@ class LDATAService:
                 v1, v2, three_phase=self._three_phase, average=True
             )
 
-        f1 = self._none_or_float(panel, "frequencyA")
-        f2 = self._none_or_float(panel, "frequencyB")
-        have_frequency = f1 is not None or f2 is not None
-        f1 = f1 or 0.0
-        f2 = f2 or 0.0
-        if f1 == 0:
+        # A frequencyA of 0 (or below) means the panel reports no frequency
+        # (LDATA panels), so fall back to the breakers' line frequency. The
+        # fields are only returned when a frequency above 0 was found, so a
+        # refresh never overwrites a breaker-derived frequency with 0.
+        f1 = self._none_or_float(panel, "frequencyA") or 0.0
+        f2 = self._none_or_float(panel, "frequencyB") or 0.0
+        if f1 <= 0:
             f1 = f2 = 0
             for bf1, bf2 in breaker_frequencies:
                 if bf1 > 0:
                     f1 = bf1
-                    have_frequency = True
                 if bf2 > 0:
                     f2 = bf2
-                    have_frequency = True
                 if f1 != 0 and f2 != 0:
                     break
-        if have_frequency:
-            if f2 == 0:
+        if f1 > 0 or f2 > 0:
+            if f2 <= 0:
                 f2 = f1
             fields["frequency1"] = f1
             fields["frequency2"] = f2

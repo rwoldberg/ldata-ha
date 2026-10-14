@@ -149,6 +149,50 @@ def test_refresh_panel_status_frequency_falls_back_to_cached_breakers() -> None:
     assert panel["frequency"] == (60.02 + 59.98) / 2
 
 
+def test_refresh_panel_status_zero_frequency_keeps_cached_frequency() -> None:
+    # LDATA panels report frequencyA: 0; the setup breaker-derived value must survive.
+    for zero in (0, 0.0):
+        service = _service(
+            {"LDATA": [{"id": "LDATA-1", "connected": True, "frequencyA": zero, "frequencyB": zero}]}
+        )
+        service.status_data["panels"][0].update(frequency1=60.02, frequency2=59.98, frequency=60.0)
+        before = service.status_data
+
+        assert service.refresh_panel_status() is False
+        assert service.status_data is before
+        panel = service.status_data["panels"][0]
+        assert (panel["frequency1"], panel["frequency2"], panel["frequency"]) == (60.02, 59.98, 60.0)
+
+
+def test_refresh_panel_status_zero_frequency_uses_cached_breakers() -> None:
+    service = _service({"LDATA": [{"id": "LDATA-1", "connected": True, "frequencyA": 0}]})
+    service.status_data["panels"][0].update(frequency1=0, frequency2=0, frequency=0.0)
+    service.status_data["breakers"] = {
+        "b1": {"panel_id": "LDATA-1", "frequency1": 60.02, "frequency2": 59.98},
+    }
+
+    assert service.refresh_panel_status() is True
+    panel = service.status_data["panels"][0]
+    assert (panel["frequency1"], panel["frequency2"]) == (60.02, 59.98)
+
+
+def test_refresh_panel_status_leaves_whems_voltage_to_the_websocket() -> None:
+    service = _service(
+        {"WHEMS": [{"id": "whem-1", "connected": True, "rmsVoltageA": 121.0, "rmsVoltageB": 119.0}]}
+    )
+    service.status_data["panels"] = [
+        {
+            "id": "whem-1", "name": "Panel", "panel_type": "WHEMS", "connected": True,
+            "voltage1": 0.0, "voltage2": 119.0, "voltage": 59.5,
+        }
+    ]
+    before = service.status_data
+
+    assert service.refresh_panel_status() is False
+    assert service.status_data is before
+    assert before["panels"][0]["voltage1"] == 0.0
+
+
 def test_refresh_panel_status_missing_fields_keep_cached_values() -> None:
     cached = {
         "voltage1": 120.0,
