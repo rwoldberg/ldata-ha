@@ -2660,6 +2660,16 @@ class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
         self.async_write_ha_state()
 
     @property
+    def available(self) -> bool:
+        """Return False while the panel has not reported an RSSI.
+
+        A hub connected over Ethernet reports ``rssi: null``; showing that
+        as unavailable instead of ``unknown`` makes it clear there is no
+        Wi-Fi reading, while a Wi-Fi hub still reports its signal.
+        """
+        return super().available and self._state is not None
+
+    @property
     def native_value(self) -> StateType:
         if self._state is not None:
             return round(self._state, 0)
