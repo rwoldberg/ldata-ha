@@ -1854,7 +1854,7 @@ class LDATAService:
             # Detect if this panel needs REST polling for breaker/CT data.
             # LWHEM firmware >= 2.0 no longer sends breaker data via WebSocket.
             # We use firmware version as an initial hint, then confirm via WS detection.
-            fw_str = panel.get("updateVersion", "0")
+            fw_str = str(panel.get("updateVersion") or "0")
             try:
                 fw_major = int(fw_str.split(".")[0])
             except (ValueError, IndexError):

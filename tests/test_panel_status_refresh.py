@@ -263,6 +263,14 @@ def test_extract_panel_fields_null_rssi_is_a_value_only_for_ldata() -> None:
 
 
 
+def test_parse_panels_tolerates_null_update_version() -> None:
+    service = LDATAService("", "", None)
+    panel = service.parse_panels(
+        [{"id": "LDATA-1", "name": "Panel", "ModuleType": "LDATA", "updateVersion": None}]
+    )["panels"][0]
+
+    assert panel["id"] == "LDATA-1"
+
 def test_parse_panels_reads_panel_fields() -> None:
     service = LDATAService("", "", None)
     panel = service.parse_panels(
