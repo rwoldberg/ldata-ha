@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, CT_POLL_INTERVAL
+from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
 from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -34,6 +34,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._websocket_task = None
         self._rest_poll_task = None
         self._ct_poll_task = None
+        self._panel_status_task = None
         self._debounce_timer = None
         self._websocket_connected = False
         self._websocket_ever_connected = False
@@ -75,6 +76,15 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             "ldata_ct_poll"
         )
 
+        # Re-read each panel's cloud connection state over REST. An offline
+        # panel sends no WebSocket data, so this is the only way its
+        # "connected" flag (and the Cloud Connected sensor) can change.
+        self._panel_status_task = self.config_entry.async_create_background_task(
+            self._hass,
+            self._panel_status_poll_loop(),
+            "ldata_panel_status_poll"
+        )
+
     def _handle_connection_change(self, connected: bool):
         """Handle WebSocket connection state changes."""
         was_connected = self._websocket_connected
@@ -86,6 +96,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             else:
                 _LOGGER.debug(f"[v{self._service.version}] WebSocket connected")
                 self._websocket_ever_connected = True
+            # Restart the push cadence that the disconnect branch below
+            # cancelled. Without this, HA receives nothing until new WS data
+            # arrives — which never happens while the panel is offline.
+            self._handle_websocket_update()
         elif not connected and was_connected:
             _LOGGER.debug(f"[v{self._service.version}] WebSocket disconnected")
             # Stop the self-re-arming timer so we don't push stale data
@@ -116,6 +130,14 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             except asyncio.CancelledError:
                 pass
         
+        # Cancel the panel status polling task
+        if self._panel_status_task:
+            self._panel_status_task.cancel()
+            try:
+                await self._panel_status_task
+            except asyncio.CancelledError:
+                pass
+
         # Cancel the WebSocket task if it exists
         if self._websocket_task:
             self._websocket_task.cancel()
@@ -238,6 +260,18 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             get_interval=lambda: CT_POLL_INTERVAL,
             needs_poll=lambda: self._service.needs_rest_poll,
             refresh=self._service.refresh_ct_data,
+        )
+
+    async def _panel_status_poll_loop(self):
+        """Poll each panel's cloud connection state and push an update when it changes."""
+        while not self._service.status_data and not self._service._shutdown_requested:
+            await asyncio.sleep(5)
+
+        await self._fallback_poll_loop(
+            loop_name="Panel status poll",
+            get_interval=lambda: PANEL_STATUS_POLL_INTERVAL,
+            needs_poll=lambda: True,
+            refresh=self._service.refresh_panel_status,
         )
 
     def _handle_websocket_update(self):

@@ -2419,6 +2419,72 @@ class LDATAService:
         
         return updated
 
+    def refresh_panel_status(self) -> bool:
+        """Re-read each panel's cloud connection state from the REST panel listing.
+
+        The WebSocket only reports "connected" inside a panel notification, and
+        an offline panel sends none, so the cached flag would otherwise keep its
+        last value until the entry is reloaded. This is a plain GET of the same
+        listing used at startup — no bandwidth toggle, no breaker include.
+
+        Returns True if any panel's connected flag changed.
+        """
+        if not self.status_data or not self.status_data.get("panels"):
+            return False
+
+        if not self.auth_token:
+            return False
+
+        urls = {
+            "LDATA": "https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels",
+            "WHEMS": "https://my.leviton.com/api/Residences/{residenceId}/iotWhems",
+        }
+        panel_types = {p.get("panel_type", "WHEMS") for p in self.status_data["panels"]}
+        connected_by_id = {}
+
+        for residence_id in self.residence_id_list:
+            for panel_type in panel_types:
+                if panel_type not in urls:
+                    continue
+                result = self.session.get(
+                    urls[panel_type].format(residenceId=residence_id),
+                    headers=self._auth_headers(filter="{}"),
+                    timeout=15,
+                )
+                if result.status_code == 401:
+                    raise LDATAAuthError(f"[v{self.version}] Auth token invalid (401) during panel status poll.")
+                if result.status_code != 200:
+                    _LOGGER.debug(f"[v{self.version}] Panel status poll for {panel_type} panels returned HTTP {result.status_code}")
+                    continue
+                for panel in result.json():
+                    panel_id = panel.get("id")
+                    # Same backend quirk as _fetch_panels(): LDATA panels can
+                    # also appear in the WHEMS listing; the LDATA listing is
+                    # authoritative for them.
+                    if not panel_id or (panel_type == "WHEMS" and panel_id.startswith("LDATA-")):
+                        continue
+                    connected_by_id[panel_id] = self._is_panel_connected(panel)
+
+        changed = False
+        panels = []
+        for panel in self.status_data["panels"]:
+            connected = connected_by_id.get(panel.get("id"))
+            if connected is not None and connected != panel.get("connected"):
+                _LOGGER.info(
+                    f"[v{self.version}] Panel {panel.get('name', panel.get('id'))} is now "
+                    f"{'connected to' if connected else 'disconnected from'} the Leviton cloud"
+                )
+                panel = {**panel, "connected": connected}
+                changed = True
+            panels.append(panel)
+
+        if changed:
+            new_status_data = self.status_data.copy()
+            new_status_data["panels"] = panels
+            self.status_data = new_status_data
+
+        return changed
+
     def _update_from_websocket(self, payload):
         """Update the internal status_data cache from a WebSocket notification.
         
