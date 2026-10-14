@@ -8,6 +8,7 @@ All notable changes to the Leviton LDATA integration are documented here.
 - **Daily energy sensors no longer publish a `last_update_time` attribute.** It changed on every update, forcing a database write for each daily energy sensor even when the reading hadn't moved. Dropping it reduces database writes and Home Assistant event traffic. If you used that attribute in a template or automation, use the sensor's own `last_updated` instead. (#101)
 
 ### Fixed
+- **Cloud Connected now turns off when your panel goes offline, and back on when it returns** — without reloading the integration. Previously it could stay "on" indefinitely, and Home Assistant could stop receiving updates altogether after one of Leviton's routine reconnects. Sensors still show their last known values while the panel is offline. (#103, fixes #102)
 - **Your account password could be visible in the integration's name.** Setups created between April 2023 and October 2025 were titled with the password included, shown on the Devices & Services page and written to logs. These are now renamed automatically to `Leviton LDATA (your email)`, and a warning in the log tells you it happened. If yours was affected, consider changing your Leviton password — the old name may still be in past logs and backups. (#100)
 
 ## 2.0.12 - 2026-09-23
