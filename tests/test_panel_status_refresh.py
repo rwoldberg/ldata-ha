@@ -56,6 +56,34 @@ def test_refresh_panel_status_only_queries_known_panel_types() -> None:
     assert urls == ["https://my.leviton.com/api/Residences/res-1/residentialBreakerPanels"]
 
 
+def test_refresh_panel_status_updates_voltage_with_connection_unchanged() -> None:
+    service = _service(
+        {"LDATA": [{"id": "LDATA-1", "connected": True, "rmsVoltage": 121.0, "rmsVoltage2": 119.0}]}
+    )
+    service.status_data["panels"][0].update(voltage1=0.0, voltage2=119.0, voltage=59.5)
+    before = service.status_data
+
+    assert service.refresh_panel_status() is True
+    panel = service.status_data["panels"][0]
+    assert panel["connected"] is True
+    assert panel["voltage1"] == 121.0
+    assert panel["voltage2"] == 119.0
+    assert panel["voltage"] == 120.0
+    assert service.status_data is not before
+    assert before["panels"][0]["voltage1"] == 0.0
+
+
+def test_refresh_panel_status_missing_voltage_keeps_cached_values() -> None:
+    service = _service({"LDATA": [{"id": "LDATA-1", "connected": True, "rmsVoltage": None}]})
+    service.status_data["panels"][0].update(voltage1=120.0, voltage2=121.0, voltage=120.5)
+    before = service.status_data
+
+    assert service.refresh_panel_status() is False
+    assert service.status_data is before
+    panel = service.status_data["panels"][0]
+    assert (panel["voltage1"], panel["voltage2"], panel["voltage"]) == (120.0, 121.0, 120.5)
+
+
 def _coordinator() -> LDATAUpdateCoordinator:
     coordinator = LDATAUpdateCoordinator.__new__(LDATAUpdateCoordinator)
     coordinator._hass = SimpleNamespace(loop=MagicMock())

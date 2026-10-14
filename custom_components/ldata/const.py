@@ -48,8 +48,9 @@ HA_INFORM_RATE_MAX = 600.0
 # refresh its hardware energy counters before the REST fetch.
 CT_POLL_INTERVAL = 300.0
 
-# Panel cloud-connection REST poll interval (seconds). An offline panel sends
-# no WebSocket data, so its "connected" flag is re-read from the panel listing.
+# Panel status REST poll interval (seconds). An offline panel sends no WebSocket
+# data, so its "connected" flag is re-read from the panel listing. LDATA panel
+# voltage has no WebSocket update path, so it is re-read from the same listing.
 PANEL_STATUS_POLL_INTERVAL = 120.0
 
 # Settle delay (seconds) after a bandwidth toggle before fetching CT/breaker data.

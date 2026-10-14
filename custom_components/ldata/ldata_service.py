@@ -2420,14 +2420,18 @@ class LDATAService:
         return updated
 
     def refresh_panel_status(self) -> bool:
-        """Re-read each panel's cloud connection state from the REST panel listing.
+        """Re-read each panel's cloud connection state and leg voltages from the REST panel listing.
 
         The WebSocket only reports "connected" inside a panel notification, and
         an offline panel sends none, so the cached flag would otherwise keep its
-        last value until the entry is reloaded. This is a plain GET of the same
-        listing used at startup — no bandwidth toggle, no breaker include.
+        last value until the entry is reloaded. LDATA panel voltage is likewise
+        only read in parse_panels() at setup: the WebSocket panel-voltage path
+        is IotWhem-only and the breaker REST refresh skips LDATA panels. This is
+        a plain GET of the same listing used at startup — no bandwidth toggle,
+        no breaker include. A voltage field missing from the listing leaves the
+        cached value unchanged.
 
-        Returns True if any panel's connected flag changed.
+        Returns True if any panel's connected flag or voltage changed.
         """
         if not self.status_data or not self.status_data.get("panels"):
             return False
@@ -2441,6 +2445,7 @@ class LDATAService:
         }
         panel_types = {p.get("panel_type", "WHEMS") for p in self.status_data["panels"]}
         connected_by_id = {}
+        voltages_by_id = {}
 
         for residence_id in self.residence_id_list:
             for panel_type in panel_types:
@@ -2464,6 +2469,15 @@ class LDATAService:
                     if not panel_id or (panel_type == "WHEMS" and panel_id.startswith("LDATA-")):
                         continue
                     connected_by_id[panel_id] = self._is_panel_connected(panel)
+                    # Same fields parse_panels() reads (WHEMS maps A/B to 1/2).
+                    if panel_type == "WHEMS":
+                        v1_key, v2_key = "rmsVoltageA", "rmsVoltageB"
+                    else:
+                        v1_key, v2_key = "rmsVoltage", "rmsVoltage2"
+                    voltages_by_id[panel_id] = (
+                        self._none_or_float(panel, v1_key),
+                        self._none_or_float(panel, v2_key),
+                    )
 
         changed = False
         panels = []
@@ -2475,6 +2489,23 @@ class LDATAService:
                     f"{'connected to' if connected else 'disconnected from'} the Leviton cloud"
                 )
                 panel = {**panel, "connected": connected}
+                changed = True
+            v1, v2 = voltages_by_id.get(panel.get("id"), (None, None))
+            if v1 is None:
+                v1 = panel.get("voltage1")
+            if v2 is None:
+                v2 = panel.get("voltage2")
+            if v1 is not None and v2 is not None and (
+                v1 != panel.get("voltage1") or v2 != panel.get("voltage2")
+            ):
+                voltage = self._combine_leg_voltage(
+                    v1, v2, three_phase=self._three_phase, average=True
+                )
+                _LOGGER.debug(
+                    f"[v{self.version}] Panel {panel.get('name', panel.get('id'))} voltage "
+                    f"{panel.get('voltage1')}/{panel.get('voltage2')} -> {v1}/{v2}"
+                )
+                panel = {**panel, "voltage1": v1, "voltage2": v2, "voltage": voltage}
                 changed = True
             panels.append(panel)
 
