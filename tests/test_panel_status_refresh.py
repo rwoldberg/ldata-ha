@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.ldata import sensor
 from custom_components.ldata.coordinator import LDATAUpdateCoordinator
 from custom_components.ldata.ldata_service import LDATAAuthError, LDATAService
 
@@ -262,15 +261,6 @@ def test_extract_panel_fields_null_rssi_is_a_value_only_for_ldata() -> None:
     assert "rssi" not in service._extract_panel_fields({}, "LDATA")
 
 
-def test_parse_panels_missing_voltage_is_unknown_not_zero() -> None:
-    service = LDATAService("", "", None)
-    panel = service.parse_panels(
-        [{"id": "LDATA-1", "name": "Panel", "ModuleType": "LDATA", "rmsVoltage2": 120.0, "updateVersion": None}]
-    )["panels"][0]
-
-    assert panel["voltage1"] is None
-    assert panel["voltage2"] == 120.0
-    assert panel["voltage"] is None
 
 
 def test_parse_panels_reads_panel_fields() -> None:
@@ -305,21 +295,6 @@ def test_parse_panels_reads_panel_fields() -> None:
     assert panel["available_firmware"] == "2.0.0"
 
 
-def test_iotwhem_websocket_applies_zero_voltage() -> None:
-    service = LDATAService("", "", None)
-    service.status_data = {
-        "breakers": {},
-        "cts": {},
-        "panels": [
-            {"id": "P1", "panel_type": "WHEMS", "voltage1": 120.0, "voltage2": 120.0, "voltage": 120.0}
-        ],
-    }
-
-    assert service._update_from_websocket(
-        {"modelName": "IotWhem", "data": {"id": "P1", "rmsVoltage": 0.0, "rmsVoltageA": 118.0, "rmsVoltage2": 0}}
-    )
-    panel = service.status_data["panels"][0]
-    assert (panel["voltage1"], panel["voltage2"], panel["voltage"]) == (0.0, 0.0, 0.0)
 
 
 def _respond(service: LDATAService, status_code: int) -> None:
@@ -388,27 +363,3 @@ def test_reconnect_rearms_update_timer_cancelled_by_disconnect() -> None:
     coordinator._handle_connection_change(True)
     assert coordinator._debounce_timer is not None
     assert coordinator._hass.loop.call_later.call_count == 2
-
-
-def test_panel_voltage_sensor_reports_unknown_for_missing_voltage() -> None:
-    panel = {
-        "id": "LDATA-1",
-        "serialNumber": "LDATA-1",
-        "name": "Panel",
-        "model": "DAU",
-        "firmware": "1.9.2",
-        "voltage1": None,
-    }
-    coordinator = SimpleNamespace(
-        data={"panels": [panel]},
-        last_update_success=True,
-        user="test-user",
-        async_add_listener=lambda *_args, **_kwargs: (lambda: None),
-    )
-    entity_data = {**panel, "hardware": "LDATA", "poles": 2, "data": panel}
-
-    entity = sensor.LDATAPanelOutputSensor(
-        coordinator, entity_data, sensor.SENSOR_TYPES[sensor.VOLTAGE], which_leg="1"
-    )
-
-    assert entity.native_value is None

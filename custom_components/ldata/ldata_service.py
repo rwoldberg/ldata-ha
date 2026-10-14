@@ -1845,8 +1845,8 @@ class LDATAService:
             panel_data["panel_size"] = panel.get("panelSize")
 
             # Panel-level diagnostic/alarm fields
-            panel_data["overVoltage"] = fields.get("overVoltage", False)
-            panel_data["underVoltage"] = fields.get("underVoltage", False)
+            panel_data["overVoltage"] = panel.get("overVoltage", False)
+            panel_data["underVoltage"] = panel.get("underVoltage", False)
             panel_data["overVoltageThreshold"] = fields.get("overVoltageThreshold")
             panel_data["underVoltageThreshold"] = fields.get("underVoltageThreshold")
             panel_data["rssi"] = fields.get("rssi")
@@ -1854,7 +1854,7 @@ class LDATAService:
             # Detect if this panel needs REST polling for breaker/CT data.
             # LWHEM firmware >= 2.0 no longer sends breaker data via WebSocket.
             # We use firmware version as an initial hint, then confirm via WS detection.
-            fw_str = str(panel.get("updateVersion") or "0")
+            fw_str = panel.get("updateVersion", "0")
             try:
                 fw_major = int(fw_str.split(".")[0])
             except (ValueError, IndexError):
@@ -1874,15 +1874,21 @@ class LDATAService:
                 f"— WebSocket for breaker data"
                 + (", CT REST polling disabled (v2: energy counters unused, power via WS)" if fw_major >= 2 else ", CT REST polling enabled if CTs present")
             )
-            if panel.get("rmsVoltage") is None or panel.get("rmsVoltage2") is None:
+            if "rmsVoltage" not in panel or "rmsVoltage2" not in panel:
                 _LOGGER.warning(
                     f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' response is "
-                    f"missing rmsVoltage/rmsVoltage2 — reporting unknown voltage until "
-                    f"the panel listing provides it."
+                    f"missing rmsVoltage/rmsVoltage2 — reporting 0V for this poll cycle "
+                    f"instead of failing the whole update."
                 )
-            panel_data["voltage1"] = fields.get("voltage1")
-            panel_data["voltage2"] = fields.get("voltage2")
-            panel_data["voltage"] = fields.get("voltage")
+            panel_data["voltage1"] = fields.get("voltage1", 0.0)
+            panel_data["voltage2"] = fields.get("voltage2", 0.0)
+            panel_data["voltage"] = fields.get(
+                "voltage",
+                self._combine_leg_voltage(
+                    panel_data["voltage1"], panel_data["voltage2"],
+                    three_phase=three_phase, average=True,
+                ),
+            )
             panel_data["frequency1"] = fields.get("frequency1", 0)
             panel_data["frequency2"] = fields.get("frequency2", 0)
             panel_data["frequency"] = fields.get("frequency", 0.0)
@@ -2769,14 +2775,8 @@ class LDATAService:
                             # Update voltage
                             if "rmsVoltage" in data or "rmsVoltage2" in data or "rmsVoltageA" in data or "rmsVoltageB" in data:
                                 # Handle both naming conventions
-                                # Explicit None checks: a real 0.0 V reading must not
-                                # fall through to the other key or be dropped.
-                                v1 = data.get("rmsVoltage")
-                                if v1 is None:
-                                    v1 = data.get("rmsVoltageA")
-                                v2 = data.get("rmsVoltage2")
-                                if v2 is None:
-                                    v2 = data.get("rmsVoltageB")
+                                v1 = data.get("rmsVoltage") or data.get("rmsVoltageA")
+                                v2 = data.get("rmsVoltage2") or data.get("rmsVoltageB")
                                 
                                 if v1 is not None:
                                     panel["voltage1"] = float(v1)

@@ -2067,11 +2067,11 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
         self.leg_to_total = which_leg
         super().__init__(data=data, coordinator=coordinator)
         self.panel_data = data
-        value = self.panel_data["data"][self.entity_description.key + self.leg_to_total]
         try:
-            # None (e.g. no rmsVoltage in the panel listing at setup) is unknown.
-            self._state = float(value) if value is not None else None
-        except (TypeError, ValueError):
+            self._state = float(
+                self.panel_data["data"][self.entity_description.key + self.leg_to_total]
+            )
+        except ValueError:
             self._state = 0.0
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
