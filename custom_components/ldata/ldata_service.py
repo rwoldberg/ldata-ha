@@ -2520,6 +2520,20 @@ class LDATAService:
         if not self.auth_token:
             return False
 
+        # Serialize with the breaker/CT polls so this listing GET can't land
+        # inside their bandwidth toggle, when the panel briefly drops off the
+        # cloud. Short timeout, unlike those polls: if one is mid-toggle, skip
+        # this cycle — the next one is only PANEL_STATUS_POLL_INTERVAL away.
+        if not self._rest_poll_lock.acquire(timeout=5):
+            _LOGGER.debug(f"[v{self.version}] Panel status poll skipped — another REST poll is running")
+            return False
+        try:
+            return self._refresh_panel_status_locked()
+        finally:
+            self._rest_poll_lock.release()
+
+    def _refresh_panel_status_locked(self) -> bool:
+        """Inner implementation of refresh_panel_status, called under _rest_poll_lock."""
         urls = {
             "LDATA": "https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels",
             "WHEMS": "https://my.leviton.com/api/Residences/{residenceId}/iotWhems",

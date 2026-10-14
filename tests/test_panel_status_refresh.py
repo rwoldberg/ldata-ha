@@ -3,9 +3,11 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 from custom_components.ldata import sensor
 from custom_components.ldata.coordinator import LDATAUpdateCoordinator
-from custom_components.ldata.ldata_service import LDATAService
+from custom_components.ldata.ldata_service import LDATAAuthError, LDATAService
 
 
 def _service(listings: dict[str, list[dict]]) -> LDATAService:
@@ -318,6 +320,47 @@ def test_iotwhem_websocket_applies_zero_voltage() -> None:
     )
     panel = service.status_data["panels"][0]
     assert (panel["voltage1"], panel["voltage2"], panel["voltage"]) == (0.0, 0.0, 0.0)
+
+
+def _respond(service: LDATAService, status_code: int) -> None:
+    service.session.get.side_effect = lambda url, **_kwargs: SimpleNamespace(
+        status_code=status_code, json=lambda: []
+    )
+
+
+def test_refresh_panel_status_raises_on_expired_token_and_releases_lock() -> None:
+    service = _service({})
+    _respond(service, 401)
+
+    with pytest.raises(LDATAAuthError):
+        service.refresh_panel_status()
+
+    # The lock must not stay held when the poll fails.
+    assert service._rest_poll_lock.acquire(blocking=False)
+    service._rest_poll_lock.release()
+
+
+def test_refresh_panel_status_ignores_server_errors() -> None:
+    service = _service({})
+    before = service.status_data
+    _respond(service, 503)
+
+    assert service.refresh_panel_status() is False
+    assert service.status_data is before
+    assert before["panels"][0]["connected"] is True
+
+
+def test_refresh_panel_status_skips_cycle_while_another_poll_holds_the_lock() -> None:
+    service = _service({"LDATA": [{"id": "LDATA-1", "model": "DAU", "connected": False}]})
+    before = service.status_data
+    service._rest_poll_lock = MagicMock()
+    service._rest_poll_lock.acquire.return_value = False
+
+    assert service.refresh_panel_status() is False
+
+    service.session.get.assert_not_called()
+    service._rest_poll_lock.release.assert_not_called()
+    assert service.status_data is before
 
 
 def _coordinator() -> LDATAUpdateCoordinator:
