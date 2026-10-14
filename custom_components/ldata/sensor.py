@@ -2652,9 +2652,10 @@ class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
         try:
             panel = find_panel(self.coordinator, self._panel_id)
             if panel is not None:
-                val = panel.get("rssi")
-                if val is not None:
-                    self._state = val
+                # Follow the coordinator's current value, including None, so a
+                # hub that moves from Wi-Fi to Ethernet becomes unavailable.
+                # WHEMS WebSocket updates only overwrite rssi when present.
+                self._state = panel.get("rssi")
         except (KeyError, TypeError):
             pass
         self.async_write_ha_state()

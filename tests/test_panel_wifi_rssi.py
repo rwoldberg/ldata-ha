@@ -80,3 +80,25 @@ def test_rssi_sensor_unavailable_when_coordinator_update_fails() -> None:
     coordinator.last_update_success = False
 
     assert sensor.available is False
+
+
+def test_rssi_sensor_becomes_unavailable_when_rssi_cleared() -> None:
+    panel = _panel(-58.0)
+    sensor, coordinator = _sensor(panel)
+    assert sensor.available is True
+
+    coordinator.data["panels"][0] = {**panel, "rssi": None}
+    sensor._state_update()
+
+    assert sensor.available is False
+    assert sensor.native_value is None
+
+
+def test_rssi_sensor_keeps_state_when_panel_missing() -> None:
+    sensor, coordinator = _sensor(_panel(-58.0))
+
+    coordinator.data["panels"] = []
+    sensor._state_update()
+
+    assert sensor.available is True
+    assert sensor.native_value == -58
