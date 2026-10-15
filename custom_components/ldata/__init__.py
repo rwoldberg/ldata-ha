@@ -770,8 +770,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
 
-    # Set up a listener for options updates
-    entry.add_update_listener(options_update_listener)
+    # Reload on options updates. The listener lives on the ConfigEntry, which
+    # survives reloads, so it must be removed on unload; otherwise each reload
+    # adds another one and a single options change reloads the entry once per
+    # earlier setup. HA also calls it on data, title and subentry updates; a
+    # persisted token refresh must not drop the WebSocket and make every
+    # entity unavailable, and reauth already reloads the entry itself. So
+    # reload only when the options differ from the ones this setup runs with,
+    # taken after platform setup, which may record import-sensor
+    # classifications in the options itself.
+    setup_options = dict(entry.options)
+
+    async def _async_entry_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
+        if entry.options != setup_options:
+            await options_update_listener(hass, entry)
+
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
 
     # Register services (only once, not per entry)
     if not hass.services.has_service(DOMAIN, SERVICE_RESET_ENERGY):
@@ -975,6 +989,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
         if coordinator:
             await coordinator.async_shutdown()
+
+        # The services are registered by whichever entry sets up first and
+        # serve every entry; remove them once no LDATA entry is loaded. The
+        # next setup registers them again.
+        if not any(
+            isinstance(coord, LDATAUpdateCoordinator)
+            for coord in hass.data[DOMAIN].values()
+        ):
+            for service in (SERVICE_RESET_ENERGY, SERVICE_RESET_PANEL):
+                hass.services.async_remove(DOMAIN, service)
 
     return unload_ok
 

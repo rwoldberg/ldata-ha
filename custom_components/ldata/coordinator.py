@@ -110,7 +110,15 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
     async def async_shutdown(self):
         """Gracefully shutdown the WebSocket connection and REST polling."""
         _LOGGER.debug("Shutting down LDATA coordinator")
-        
+
+        # Let DataUpdateCoordinator cancel its own pending work too. After
+        # async_request_refresh (fan/light/switch/select commands) its
+        # request-refresh debouncer keeps a cooldown timer, which refreshes
+        # again if a second request came in during the cooldown. Left
+        # running past this shutdown, that refresh finds the WebSocket
+        # disconnected and fetches status over REST for an unloaded entry.
+        await super().async_shutdown()
+
         # Signal the WebSocket to stop
         self._service._shutdown_requested = True
         
