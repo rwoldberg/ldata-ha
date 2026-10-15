@@ -322,7 +322,7 @@ async def async_setup_entry(
         eid = ent_reg.async_get_entity_id("sensor", DOMAIN, uid)
         if eid:
             ent_reg.async_remove(eid)
-            _LOGGER.info("Removed spurious import sensor from registry: %s", eid)
+            _LOGGER.info("Removed stale sensor from registry: %s", eid)
 
     for breaker_id, breaker_data in coordinator.data.get("breakers", {}).items():
         # NOTE: the daily consumption sensor is added AFTER solar classification
@@ -592,9 +592,17 @@ async def async_setup_entry(
         )
         
         # Panel diagnostic sensors
-        entities_to_add.append(
-            LDATAPanelWifiRSSISensor(coordinator, entity_data)
-        )
+        # An LDATA hub on Ethernet reports rssi: null and has no Wi-Fi signal
+        # to show, so don't create a sensor that can never have a value, and
+        # drop the entity an earlier version created for it.
+        if panel.get("rssi") is not None or panel.get("panel_type") != "LDATA":
+            entities_to_add.append(
+                LDATAPanelWifiRSSISensor(coordinator, entity_data)
+            )
+        else:
+            _remove_registry_entry(
+                f"{coordinator.user}-ldata_{entity_data['id']}_wifi_rssi"
+            )
 
         entity_data_leg1 = {**entity_data, "poles": 1, "position": 1}
         entities_to_add.append(
@@ -2652,9 +2660,11 @@ class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
         try:
             panel = find_panel(self.coordinator, self._panel_id)
             if panel is not None:
-                val = panel.get("rssi")
-                if val is not None:
-                    self._state = val
+                # Follow the coordinator's current value, including None, so a
+                # hub that moves from Wi-Fi to Ethernet stops showing its last
+                # Wi-Fi reading. WHEMS WebSocket updates only overwrite rssi
+                # when present.
+                self._state = panel.get("rssi")
         except (KeyError, TypeError):
             pass
         self.async_write_ha_state()
