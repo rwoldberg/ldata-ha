@@ -1889,21 +1889,23 @@ class LDATAService:
                 f"— WebSocket for breaker data"
                 + (", CT REST polling disabled (v2: energy counters unused, power via WS)" if fw_major >= 2 else ", CT REST polling enabled if CTs present")
             )
-            if "rmsVoltage" not in panel or "rmsVoltage2" not in panel:
+            # A missing (or null) leg voltage is unknown, not 0 V: a 0 V
+            # reading would look like a dead leg.
+            _panel_v1 = self._none_or_float(panel, "rmsVoltage")
+            _panel_v2 = self._none_or_float(panel, "rmsVoltage2")
+            if _panel_v1 is None or _panel_v2 is None:
                 _LOGGER.warning(
                     f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' response is "
-                    f"missing rmsVoltage/rmsVoltage2 — reporting 0V for this poll cycle "
-                    f"instead of failing the whole update."
+                    f"missing rmsVoltage/rmsVoltage2 — reporting unknown voltage until "
+                    f"the panel provides it."
                 )
-            panel_data["voltage1"] = fields.get("voltage1", 0.0)
-            panel_data["voltage2"] = fields.get("voltage2", 0.0)
-            panel_data["voltage"] = fields.get(
-                "voltage",
-                self._combine_leg_voltage(
-                    panel_data["voltage1"], panel_data["voltage2"],
-                    three_phase=three_phase, average=True,
-                ),
-            )
+                panel_data["voltage"] = None
+            else:
+                panel_data["voltage"] = self._combine_leg_voltage(
+                    _panel_v1, _panel_v2, three_phase=three_phase, average=True
+                )
+            panel_data["voltage1"] = _panel_v1
+            panel_data["voltage2"] = _panel_v2
             panel_data["frequency1"] = fields.get("frequency1", 0)
             panel_data["frequency2"] = fields.get("frequency2", 0)
             panel_data["frequency"] = fields.get("frequency", 0.0)
