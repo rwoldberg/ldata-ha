@@ -3093,7 +3093,12 @@ class LDATAService:
         Keepalive (based on official Leviton app):
         - PUT bandwidth:1 every 50 seconds (keeps WS alive)
         - GET /apiversion every 10 seconds (keeps server session alive)
-        - Subscribe once at start, re-subscribe if no data for 60 seconds
+        - Subscribe once at start. The server's own {"type":"keepalive"}
+          frames (every 30 s) prove the connection is alive; reconnect only
+          when they stop for KEEPALIVE_TIMEOUT, and re-send the subscriptions
+          on the same socket every KEEPALIVE_RESUBSCRIBE_INTERVAL without
+          data. Re-subscribe if no data for 60 seconds only on a connection
+          that sends no keepalives.
 
         decora_callback: called for Decora IotSwitch WS data specifically —
         immediate, no debounce (unlike update_callback, which the coordinator
@@ -3119,7 +3124,23 @@ class LDATAService:
         # activity. Without the app UI, we need more frequent PUTs to keep
         # the cloud pushing breaker data via WS.
         APIVERSION_HEARTBEAT_INTERVAL = 10  # GET /apiversion every 10 seconds (keeps server session alive)
-        STALE_DATA_THRESHOLD = 60        # Re-subscribe if no data for 60 seconds
+        STALE_DATA_THRESHOLD = 60        # Re-subscribe if no data for 60 seconds (no-keepalive servers only)
+        # The server sends {"type":"keepalive"} every 30 s. 90 s is three
+        # intervals: two late or lost frames plus the 15 s receive timeout
+        # never trip it, while a dead connection is still caught well within
+        # the old 6-minute re-subscribe ladder.
+        KEEPALIVE_TIMEOUT = 90
+        # Keepalives prove the socket is up, not that the server still holds
+        # our subscriptions. If it dropped them, keepalives would continue and
+        # nothing would notice until PROACTIVE_RECONNECT (55 min). So on a
+        # keepalive connection, re-send the subscriptions (same socket, no
+        # reconnect) after this long without a notification, and repeat at
+        # this interval. Idle breakers legitimately send nothing for the whole
+        # hour, so this fires on healthy connections too: 600 s keeps that to
+        # at most 5 extra subscribe rounds per connection (vs. one per minute
+        # under the old ladder) while bounding a silent subscription loss to
+        # 10 minutes instead of 55.
+        KEEPALIVE_RESUBSCRIBE_INTERVAL = 600
         PROACTIVE_RECONNECT = 3300       # Proactively reconnect every 55 minutes (before server timeout)
         
         _LOGGER.debug(f"[v{self.version}] WebSocket task starting...")
@@ -3315,6 +3336,9 @@ class LDATAService:
                         last_bandwidth_put_time = start_time
                         last_heartbeat_time = start_time
                         last_data_time = start_time
+                        # Set once the server sends its first keepalive on this connection.
+                        last_keepalive_time = None
+                        last_keepalive_resubscribe_time = start_time
                         
                         while True:
                             current_time = asyncio.get_event_loop().time()
@@ -3350,8 +3374,32 @@ class LDATAService:
                                         pass
                                 _track_task(asyncio.create_task(_safe_heartbeat(), name="ldata_heartbeat"))
                             
+                            if last_keepalive_time is not None:
+                                # The server sends keepalives, so a stream without
+                                # notifications is just a quiet house (breakers only
+                                # report on change). Re-subscribing or reconnecting
+                                # then only opens a window that drops updates, such
+                                # as the hourly energy burst. Reconnect only when
+                                # keepalives stop too; a re-subscribe cannot revive
+                                # a connection that sends nothing at all.
+                                silent_for = current_time - max(last_keepalive_time, last_data_time)
+                                if silent_for >= KEEPALIVE_TIMEOUT:
+                                    _LOGGER.debug(f"[v{self.version}] No keepalive for {silent_for:.0f}s, forcing reconnect")
+                                    break
+                                # The socket is alive but nothing arrived for a long
+                                # time: refresh the subscriptions in case the server
+                                # dropped them. No reconnect, no limit.
+                                quiet_for = current_time - max(last_data_time, last_keepalive_resubscribe_time)
+                                if quiet_for >= KEEPALIVE_RESUBSCRIBE_INTERVAL:
+                                    last_keepalive_resubscribe_time = current_time
+                                    _LOGGER.debug(f"[v{self.version}] No data for {quiet_for:.0f}s on a keepalive connection, re-subscribing")
+                                    try:
+                                        await send_subscriptions()
+                                    except aiohttp.ClientConnectionResetError:
+                                        _LOGGER.debug(f"[v{self.version}] Connection reset during re-subscribe")
+                                        break
                             # Re-subscribe if no data for 60 seconds (max 5 per connection)
-                            if current_time - last_data_time >= STALE_DATA_THRESHOLD:
+                            elif current_time - last_data_time >= STALE_DATA_THRESHOLD:
                                 resubscribe_count += 1
                                 last_data_time = current_time
                                 if resubscribe_count <= 5:
@@ -3428,6 +3476,14 @@ class LDATAService:
                                                     update_callback()
                                             except Exception as e:
                                                 _LOGGER.error(f"[v{self.version}] Decora callback error: {e}")
+                                    elif payload.get("type") == "keepalive":
+                                        # Server-level liveness frame. It proves the
+                                        # connection is up, not that subscriptions
+                                        # deliver data, so it only feeds the keepalive
+                                        # check above, not last_data_time. Stamped at
+                                        # receipt: current_time is from before the
+                                        # (up to 15 s) receive wait.
+                                        last_keepalive_time = asyncio.get_event_loop().time()
                                 except (ValueError, json.JSONDecodeError) as e:
                                     _LOGGER.warning(f"[v{self.version}] Invalid JSON: {e}")
                                     
