@@ -117,6 +117,72 @@ def _reset_energy_entity(entity, entity_id: str) -> str:
         return f"{entity_id}: lifetime guard cleared (was {current} kWh)"
 
 
+def _breaker_identifier_keys(breaker: dict) -> list[str]:
+    """Return the device identifier values a breaker's device may carry.
+
+    Current breaker devices are keyed by stable_id. id covers devices
+    registered before stable_id existed (Leviton's 2.2.0 id-format change),
+    and serialNumber covers devices registered before 2.0.9.
+    """
+    keys: list[str] = []
+    for field in ("stable_id", "id", "serialNumber"):
+        value = breaker.get(field)
+        if value and str(value) not in keys:
+            keys.append(str(value))
+    return keys
+
+
+def _resolve_reset_panel_id(identifiers, coordinators) -> str | None:
+    """Resolve a device's identifiers to the id of the panel it belongs to.
+
+    Identifier shapes:
+      (DOMAIN, panel_id)            — panel device
+      (DOMAIN, breaker_stable_id)   — breaker device (id or serialNumber
+                                      on older registries)
+      (DOMAIN, panel_id, ct_id)     — CT device
+    A panel or a breaker's stable_id/id match wins over a serialNumber
+    match, since serial numbers are not unique across breakers.
+    """
+    values: list[str] = []
+    for identifier in identifiers:
+        if len(identifier) < 2 or identifier[0] != DOMAIN:
+            continue
+        if len(identifier) == 3:
+            # CT device — second element is always panel_id
+            return identifier[1]
+        values.append(str(identifier[1]))
+    if not values:
+        return None
+
+    for field in ("panel", "stable_id", "id", "serialNumber"):
+        for coord in coordinators:
+            if field == "panel":
+                for panel in coord.data.get("panels", []):
+                    if str(panel.get("id")) in values:
+                        return panel["id"]
+                continue
+            for breaker in coord.data.get("breakers", {}).values():
+                value = breaker.get(field)
+                if value and str(value) in values and breaker.get("panel_id"):
+                    return breaker["panel_id"]
+    return None
+
+
+def _panel_device_identifiers(panel_id: str, coordinators) -> set[tuple]:
+    """Return the device identifiers of a panel, its breakers and its CTs."""
+    identifiers: set[tuple] = {(DOMAIN, panel_id)}
+    for coord in coordinators:
+        for breaker in coord.data.get("breakers", {}).values():
+            if breaker.get("panel_id") == panel_id:
+                identifiers.update(
+                    (DOMAIN, key) for key in _breaker_identifier_keys(breaker)
+                )
+        for ct_id, ct_data in coord.data.get("cts", {}).items():
+            if ct_data.get("panel_id") == panel_id:
+                identifiers.add((DOMAIN, panel_id, ct_id))
+    return identifiers
+
+
 async def _async_register_frontend(hass: HomeAssistant) -> None:
     """Serve the panel card from this integration's own www/ folder and
     register it as a genuine Lovelace resource, so users never need to copy
@@ -620,6 +686,70 @@ def _async_ensure_panel_devices(
         )
 
 
+async def _async_reset_panel_energy(hass: HomeAssistant, target_device_id: str) -> None:
+    """Reset all energy sensors for a WHEM panel after a factory reset.
+
+    Accepts any device belonging to the panel — the panel itself, a
+    breaker, or a CT.  Resolves the panel id, then resets
+    every daily and lifetime energy sensor associated with that panel.
+    """
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+
+    device = dev_reg.async_get(target_device_id)
+    if not device:
+        _LOGGER.error("reset_panel_energy: device %s not found", target_device_id)
+        return
+
+    coordinators = [
+        coord for coord in hass.data[DOMAIN].values()
+        if isinstance(coord, LDATAUpdateCoordinator) and coord.data
+    ]
+    panel_id = _resolve_reset_panel_id(device.identifiers, coordinators)
+
+    if not panel_id:
+        _LOGGER.error(
+            "reset_panel_energy: could not resolve panel for device '%s' (%s). "
+            "Select the WHEM panel device, or any breaker/CT that belongs to it.",
+            device.name, target_device_id
+        )
+        return
+
+    panel_device_identifiers = _panel_device_identifiers(panel_id, coordinators)
+
+    # Walk every sensor entity in every ldata config entry and reset
+    # the ones whose device identifier is in the panel set.
+    reset_lines: list[str] = []
+    for entry_id, coord in hass.data[DOMAIN].items():
+        if not isinstance(coord, LDATAUpdateCoordinator):
+            continue
+        for ent_entry in er.async_entries_for_config_entry(ent_reg, entry_id):
+            if ent_entry.domain != "sensor" or not ent_entry.device_id:
+                continue
+            ent_device = dev_reg.async_get(ent_entry.device_id)
+            if not ent_device:
+                continue
+            if not ent_device.identifiers.intersection(panel_device_identifiers):
+                continue
+            entity = _get_sensor_entity(hass, ent_entry.entity_id)
+            if entity is None or not hasattr(entity, "_accept_next_value"):
+                continue
+            reset_lines.append(_reset_energy_entity(entity, ent_entry.entity_id))
+
+    if reset_lines:
+        _LOGGER.warning(
+            "reset_panel_energy: reset %d energy sensors for panel %s (%s):\n  %s",
+            len(reset_lines), device.name, panel_id,
+            "\n  ".join(reset_lines)
+        )
+    else:
+        _LOGGER.warning(
+            "reset_panel_energy: no energy sensors found for panel %s (%s). "
+            "Ensure the integration is loaded and the panel has sensors.",
+            device.name, panel_id
+        )
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the LDATA integration (runs once per HA process, independent
     of any config entry).
@@ -851,108 +981,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if not hass.services.has_service(DOMAIN, SERVICE_RESET_PANEL):
         async def handle_reset_panel_energy(call: ServiceCall) -> None:
-            """Reset all energy sensors for a WHEM panel after a factory reset.
-
-            Accepts any device belonging to the panel — the panel itself, a
-            breaker, or a CT.  Resolves the panel serial number then resets
-            every daily and lifetime energy sensor associated with that panel.
-            """
-            target_device_id = call.data[ATTR_DEVICE_ID]
-            dev_reg = dr.async_get(hass)
-            ent_reg = er.async_get(hass)
-
-            device = dev_reg.async_get(target_device_id)
-            if not device:
-                _LOGGER.error("reset_panel_energy: device %s not found", target_device_id)
-                return
-
-            # Resolve the selected device to a panel serial number.
-            # Identifier shapes:
-            #   (DOMAIN, panel_serial)          — panel-level entity
-            #   (DOMAIN, breaker_serial)         — breaker entity
-            #   (DOMAIN, panel_serial, ct_id)    — CT entity (3-tuple)
-            panel_serial = None
-            for identifier in device.identifiers:
-                if len(identifier) < 2 or identifier[0] != DOMAIN:
-                    continue
-                if len(identifier) == 3:
-                    # CT device — second element is always panel_id
-                    panel_serial = identifier[1]
-                    break
-                serial = identifier[1]
-                # Check every coordinator: is this serial a panel or a breaker?
-                for coord in hass.data[DOMAIN].values():
-                    if not isinstance(coord, LDATAUpdateCoordinator) or not coord.data:
-                        continue
-                    for p in coord.data.get("panels", []):
-                        if p["serialNumber"] == serial:
-                            panel_serial = serial
-                            break
-                    if panel_serial:
-                        break
-                    for b_data in coord.data.get("breakers", {}).values():
-                        if b_data.get("serialNumber") == serial:
-                            panel_serial = b_data.get("panel_id")
-                            break
-                    if panel_serial:
-                        break
-                if panel_serial:
-                    break
-
-            if not panel_serial:
-                _LOGGER.error(
-                    "reset_panel_energy: could not resolve panel for device '%s' (%s). "
-                    "Select the WHEM panel device, or any breaker/CT that belongs to it.",
-                    device.name, target_device_id
-                )
-                return
-
-            # Build the set of HA device identifiers that belong to this panel:
-            #   • the panel device itself
-            #   • every breaker device whose panel_id matches
-            #   • every CT device whose panel_id matches (3-tuple)
-            panel_device_identifiers: set[tuple] = {(DOMAIN, panel_serial)}
-            for coord in hass.data[DOMAIN].values():
-                if not isinstance(coord, LDATAUpdateCoordinator) or not coord.data:
-                    continue
-                for b_data in coord.data.get("breakers", {}).values():
-                    if b_data.get("panel_id") == panel_serial:
-                        panel_device_identifiers.add((DOMAIN, b_data["serialNumber"]))
-                for ct_id, ct_data in coord.data.get("cts", {}).items():
-                    if ct_data.get("panel_id") == panel_serial:
-                        panel_device_identifiers.add((DOMAIN, panel_serial, ct_id))
-
-            # Walk every sensor entity in every ldata config entry and reset
-            # the ones whose device identifier is in the panel set.
-            reset_lines: list[str] = []
-            for entry_id, coord in hass.data[DOMAIN].items():
-                if not isinstance(coord, LDATAUpdateCoordinator):
-                    continue
-                for ent_entry in er.async_entries_for_config_entry(ent_reg, entry_id):
-                    if ent_entry.domain != "sensor" or not ent_entry.device_id:
-                        continue
-                    ent_device = dev_reg.async_get(ent_entry.device_id)
-                    if not ent_device:
-                        continue
-                    if not ent_device.identifiers.intersection(panel_device_identifiers):
-                        continue
-                    entity = _get_sensor_entity(hass, ent_entry.entity_id)
-                    if entity is None or not hasattr(entity, "_accept_next_value"):
-                        continue
-                    reset_lines.append(_reset_energy_entity(entity, ent_entry.entity_id))
-
-            if reset_lines:
-                _LOGGER.warning(
-                    "reset_panel_energy: reset %d energy sensors for panel %s (%s):\n  %s",
-                    len(reset_lines), device.name, panel_serial,
-                    "\n  ".join(reset_lines)
-                )
-            else:
-                _LOGGER.warning(
-                    "reset_panel_energy: no energy sensors found for panel %s (%s). "
-                    "Ensure the integration is loaded and the panel has sensors.",
-                    device.name, panel_serial
-                )
+            """Handle the reset_panel_energy service call."""
+            await _async_reset_panel_energy(hass, call.data[ATTR_DEVICE_ID])
 
         hass.services.async_register(
             DOMAIN,
