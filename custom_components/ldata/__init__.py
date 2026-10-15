@@ -472,6 +472,161 @@ def _sync_device_firmware_versions(
         _sync(decora.get("mac") or decora.get("id"), decora.get("version"))
 
 
+def _live_device_identifiers(data: dict) -> set[tuple[str, ...]]:
+    """Return the device identifiers the integration currently registers.
+
+    Mirrors each entity class's device_info: panels as (DOMAIN, panel_id),
+    breakers as (DOMAIN, stable_id or id) (ldata_entity.py), CTs as
+    (DOMAIN, panel_id, ct_id) (ldata_ct_entity.py) and Decora devices as
+    (DOMAIN, mac or id) (decora_entity.py). Elements are normalized to str
+    so ids restored from the registry's JSON storage compare equal
+    regardless of their original type.
+    """
+    live: set[tuple[str, ...]] = set()
+
+    for panel in data.get("panels") or []:
+        if panel.get("id"):
+            live.add((DOMAIN, str(panel["id"])))
+
+    for breaker in (data.get("breakers") or {}).values():
+        breaker_id = breaker.get("stable_id") or breaker.get("id")
+        if breaker_id:
+            live.add((DOMAIN, str(breaker_id)))
+
+    for ct in (data.get("cts") or {}).values():
+        if ct.get("panel_id") and ct.get("id") is not None:
+            live.add((DOMAIN, str(ct["panel_id"]), str(ct["id"])))
+
+    for decora in (data.get("decora_devices") or {}).values():
+        decora_id = decora.get("mac") or decora.get("id")
+        if decora_id:
+            live.add((DOMAIN, str(decora_id)))
+
+    return live
+
+
+def _device_fetch_sources(device: dr.DeviceEntry) -> set[str]:
+    """Return the fetches whose data decides whether a device is live.
+
+    CT identifiers are (DOMAIN, panel_id, ct_id). Panel, breaker and Decora
+    identifiers are all (DOMAIN, id), so the registered model tells them
+    apart: Decora entities register a model from LDATAService.DECORA_MODELS,
+    which the service never reports for a panel or breaker. A device with no
+    model could be either.
+    """
+    sources: set[str] = set()
+    for identifier in device.identifiers:
+        if identifier[0] != DOMAIN:
+            continue
+        if len(identifier) == 3:
+            sources.add(LDATAService.FETCH_PANELS)
+        elif device.model in LDATAService.DECORA_MODELS:
+            sources.add(LDATAService.FETCH_DECORA)
+        elif device.model is None:
+            sources.update((LDATAService.FETCH_PANELS, LDATAService.FETCH_DECORA))
+        else:
+            sources.add(LDATAService.FETCH_PANELS)
+    return sources
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Allow the user to delete a device Leviton no longer reports.
+
+    Without this hook HA refuses every manual device removal for this
+    integration. Devices left behind by an identifier change (e.g. breaker
+    devices keyed by the legacy serialNumber identifier) are not always
+    caught by the automatic purges in async_setup_entry, so users need a
+    way to delete them from the UI.
+
+    A device is removable only if none of its identifiers matches a panel,
+    breaker, CT or Decora device in the coordinator's current data. Live
+    devices are refused because the platforms would re-create them.
+
+    Absence from the data only means "no longer reported" when the fetch
+    that would have reported the device completed without errors: the
+    service logs and continues on panel/Decora fetch errors, leaving those
+    devices out of the data. If a fetch the device could belong to (see
+    _device_fetch_sources) was incomplete, or the data carries no fetch
+    status, the affected listings are re-read with
+    LDATAService.fetch_device_inventory and the device must be absent from
+    those too. status() does not run again while the WebSocket is up, so
+    this re-read is what lets removal work after a transient fetch failure
+    at startup without reloading the entry. Removal is refused when the
+    entry is not loaded, the coordinator has no data yet, or the re-read
+    fails. Every refusal is logged at info level with its reason.
+    """
+    name = device_entry.name_by_user or device_entry.name or device_entry.id
+    coordinator = hass.data.get(DOMAIN, {}).get(config_entry.entry_id)
+    if coordinator is None or not coordinator.data:
+        _LOGGER.info(
+            "Refusing to remove device %s: the LDATA entry is not loaded or has no data yet",
+            name,
+        )
+        return False
+
+    data = coordinator.data
+    live = _live_device_identifiers(data)
+    if _has_live_identifier(device_entry, live):
+        _LOGGER.info(
+            "Refusing to remove device %s: Leviton still reports it", name
+        )
+        return False
+
+    incomplete = data.get(LDATAService.INCOMPLETE_FETCHES)
+    if incomplete is None:
+        incomplete = (LDATAService.FETCH_PANELS, LDATAService.FETCH_DECORA)
+    unverified = _device_fetch_sources(device_entry).intersection(incomplete)
+    if not unverified:
+        return True
+
+    sources = ", ".join(sorted(unverified))
+    _LOGGER.info(
+        "Device %s is missing from the LDATA data, but the %s fetch was incomplete; "
+        "re-reading it before removal",
+        name,
+        sources,
+    )
+    try:
+        inventory, failed = await hass.async_add_executor_job(
+            coordinator.service.fetch_device_inventory, unverified
+        )
+    except Exception as err:  # noqa: BLE001 - an unexpected payload shape must refuse, not raise into the UI
+        _LOGGER.info(
+            "Refusing to remove device %s: the %s fetch is incomplete and re-reading it failed: %s",
+            name,
+            sources,
+            err,
+        )
+        return False
+    if failed:
+        _LOGGER.info(
+            "Refusing to remove device %s: the %s fetch is incomplete and re-reading it failed",
+            name,
+            ", ".join(sorted(failed)),
+        )
+        return False
+    if _has_live_identifier(device_entry, _live_device_identifiers(inventory)):
+        _LOGGER.info(
+            "Refusing to remove device %s: Leviton still reports it (found by re-reading the %s fetch)",
+            name,
+            sources,
+        )
+        return False
+    return True
+
+
+def _has_live_identifier(
+    device_entry: dr.DeviceEntry, live: set[tuple[str, ...]]
+) -> bool:
+    """Return True if any of the device's ldata identifiers is in live."""
+    return any(
+        identifier[0] == DOMAIN and tuple(str(part) for part in identifier) in live
+        for identifier in device_entry.identifiers
+    )
+
+
 async def _async_reconcile_subentries(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
 ) -> None:
