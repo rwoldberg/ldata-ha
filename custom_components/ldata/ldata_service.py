@@ -2790,8 +2790,14 @@ class LDATAService:
                             # Update voltage
                             if "rmsVoltage" in data or "rmsVoltage2" in data or "rmsVoltageA" in data or "rmsVoltageB" in data:
                                 # Handle both naming conventions
-                                v1 = data.get("rmsVoltage") or data.get("rmsVoltageA")
-                                v2 = data.get("rmsVoltage2") or data.get("rmsVoltageB")
+                                # Explicit None checks: a real 0.0 V reading must not
+                                # fall through to the other key or be dropped.
+                                v1 = data.get("rmsVoltage")
+                                if v1 is None:
+                                    v1 = data.get("rmsVoltageA")
+                                v2 = data.get("rmsVoltage2")
+                                if v2 is None:
+                                    v2 = data.get("rmsVoltageB")
                                 
                                 if v1 is not None:
                                     panel["voltage1"] = float(v1)
