@@ -1416,6 +1416,21 @@ class LDATAService:
                     existing["bleRSSI"] = val
             except (ValueError, TypeError):
                 pass
+
+        # Device metadata (same raw keys parse_panels() reads at setup). Only
+        # overwrite when the payload carries a value, so partial WS payloads
+        # keep the last known metadata.
+        metadata_fields = {
+            "firmwareVersionMeter": "firmware",
+            "hwVersion": "hardware",
+            "currentRating": "rating",
+            "model": "model",
+            "serialNumber": "serialNumber",
+            "canRemoteOn": "canRemoteOn",
+        }
+        for raw_key, cached_key in metadata_fields.items():
+            if raw.get(raw_key) is not None:
+                existing[cached_key] = raw[raw_key]
         
         # Capture energy counters (hardware-measured, not yet exposed as sensors)
         if "energyConsumption" in raw or "energyConsumption2" in raw:
