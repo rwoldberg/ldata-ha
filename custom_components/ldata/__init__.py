@@ -181,12 +181,26 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         _LOGGER.exception("Failed to auto-register the LDATA panel card as a Lovelace resource")
 
 
-def _resolve_panel_id_for_device(device, existing_panel_ids: set[str], dev_reg) -> str | None:
-    """Resolve which panel a device belongs to, using the device registry alone.
+def _resolve_panel_id_for_device(
+    device,
+    existing_panel_ids: set[str],
+    dev_reg,
+    breaker_panels: dict[str, str] | None = None,
+) -> str | None:
+    """Resolve which panel a device belongs to.
 
-    Doesn't touch coordinator.data at all — via_device_id and identifiers are
-    already persisted from prior runs, so this works even for a panel that's
-    currently offline or has since been removed from the account.
+    Panels and CTs carry their panel id in their identifiers. A breaker is
+    resolved from breaker_panels (breaker id -> panel id, built from the
+    current coordinator data) first, then from its persisted via_device_id
+    link, which also covers a breaker whose panel is currently offline.
+
+    The live data comes first because reconciliation runs before the
+    platforms register their entities, and the platforms are what write
+    via_device_id. A breaker device registered before its panel device
+    existed (integration versions before 2.0.10 linked breakers with the
+    via_device identifier tuple, which HA drops when the panel device does
+    not exist yet) has no link at that point, and a breaker moved to another
+    panel still links to the old one.
     """
     for identifier in device.identifiers:
         if identifier[0] != DOMAIN:
@@ -197,6 +211,14 @@ def _resolve_panel_id_for_device(device, existing_panel_ids: set[str], dev_reg) 
         if len(identifier) == 2 and identifier[1] in existing_panel_ids:
             # The panel device itself — its own identifier IS the panel id.
             return identifier[1]
+
+    if breaker_panels:
+        for identifier in device.identifiers:
+            if identifier[0] != DOMAIN or len(identifier) != 2:
+                continue
+            panel_id = breaker_panels.get(identifier[1])
+            if panel_id in existing_panel_ids:
+                return panel_id
 
     if device.via_device_id:
         # Breaker — resolve via the panel device it's linked to.
@@ -314,6 +336,99 @@ async def _async_purge_stale_breaker_duplicates(
         _LOGGER.info(
             "Removed %d device(s) left over from Leviton's 2.2.0 breaker "
             "id-format change",
+            removed,
+        )
+
+
+def _legacy_breaker_serials(coordinator: LDATAUpdateCoordinator) -> set[str]:
+    """Return the serial numbers that only old breaker devices are keyed by.
+
+    Breaker devices used Leviton's serialNumber as their identifier before
+    2.0.9, which switched to the breaker id (now stable_id) because serial
+    numbers are not unique. Every entity a platform still provides moved to
+    the new device when it was next registered. The old device stays behind
+    holding only entities no platform creates anymore (e.g. a breaker
+    frequency sensor, or a breaker switch while breaker control is off),
+    so the zero-entity purge never removes it. It has no via_device_id.
+
+    A serial that is also a current panel, breaker or CT id is left out, so
+    a live device is never mistaken for an old one.
+    """
+    if not coordinator.data:
+        return set()
+    current_ids: set[str] = set()
+    serials: set[str] = set()
+    for panel in coordinator.data.get("panels", []):
+        if panel.get("id"):
+            current_ids.add(str(panel["id"]))
+    for breaker_key, breaker in coordinator.data.get("breakers", {}).items():
+        for breaker_id in (breaker.get("stable_id"), breaker.get("id"), breaker_key):
+            if breaker_id:
+                current_ids.add(str(breaker_id))
+        if breaker.get("serialNumber"):
+            serials.add(str(breaker["serialNumber"]))
+    for ct_key in coordinator.data.get("cts", {}):
+        current_ids.add(str(ct_key))
+    for dev_key, dev in coordinator.data.get("decora_devices", {}).items():
+        current_ids.add(str(dev.get("mac") or dev_key))
+        current_ids.add(str(dev_key))
+    return serials - current_ids
+
+
+def _is_legacy_breaker_device(device, legacy_serials: set[str]) -> bool:
+    """Return whether a device is an old serialNumber-keyed breaker device."""
+    if not device.identifiers or device.via_device_id:
+        return False
+    return all(
+        identifier[0] == DOMAIN
+        and len(identifier) == 2
+        and identifier[1] in legacy_serials
+        for identifier in device.identifiers
+    )
+
+
+async def _async_purge_legacy_breaker_devices(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
+) -> None:
+    """Remove old serialNumber-keyed breaker devices and their dead entities.
+
+    See _legacy_breaker_serials. Runs after platform setup, so a device that
+    any platform registered a live entity on this run is kept.
+    """
+    legacy_serials = _legacy_breaker_serials(coordinator)
+    if not legacy_serials:
+        return
+
+    live_entity_ids: set[str] = set()
+    for platform in entity_platform.async_get_platforms(hass, DOMAIN):
+        if platform.config_entry and platform.config_entry.entry_id == entry.entry_id:
+            live_entity_ids.update(platform.entities)
+
+    dev_reg = dr.async_get(hass)
+    ent_reg = er.async_get(hass)
+    removed = 0
+    for device in list(dr.async_entries_for_config_entry(dev_reg, entry.entry_id)):
+        if not _is_legacy_breaker_device(device, legacy_serials):
+            continue
+        entities = er.async_entries_for_device(
+            ent_reg, device.id, include_disabled_entities=True
+        )
+        if any(ent.entity_id in live_entity_ids for ent in entities):
+            continue
+        for ent in entities:
+            ent_reg.async_remove(ent.entity_id)
+        dev_reg.async_remove_device(device.id)
+        removed += 1
+        _LOGGER.info(
+            "Removed old breaker device '%s' %s and %d entit(y/ies) no "
+            "platform provides anymore",
+            device.name, device.identifiers, len(entities),
+        )
+
+    if removed:
+        _LOGGER.info(
+            "Removed %d breaker device(s) left over from serial-number-based "
+            "device identifiers",
             removed,
         )
 
@@ -449,6 +564,20 @@ async def _async_reconcile_subentries(
     ent_reg = er.async_get(hass)
     existing_panel_ids = set(existing_panel)
 
+    # Breaker id -> panel id from the live data, under both the stable id
+    # (the device identifier since 2.2.0 normalization) and the raw id
+    # (identifier of breaker devices registered before it).
+    breaker_panels: dict[str, str] = {}
+    for breaker_key, breaker in coordinator.data.get("breakers", {}).items():
+        panel_id = breaker.get("panel_id")
+        if not panel_id:
+            continue
+        for breaker_id in (breaker.get("stable_id"), breaker.get("id"), breaker_key):
+            if breaker_id:
+                breaker_panels[str(breaker_id)] = str(panel_id)
+
+    legacy_serials = _legacy_breaker_serials(coordinator)
+
     # Config-entry-level subentries (ConfigSubentry, async_add_subentry — the
     # create step above) and device/entity-registry-level subentry support
     # (DeviceEntry.config_subentry_id, RegistryEntry.config_subentry_id)
@@ -469,8 +598,11 @@ async def _async_reconcile_subentries(
     unresolved = 0
     no_subentry_support = 0
     device_subentry: dict[str, str] = {}
+    devices_to_move: list = []
     for device in devices:
-        panel_id = _resolve_panel_id_for_device(device, existing_panel_ids, dev_reg)
+        panel_id = _resolve_panel_id_for_device(
+            device, existing_panel_ids, dev_reg, breaker_panels
+        )
         subentry_id = existing_panel.get(panel_id) if panel_id else None
         if not subentry_id:
             # Not a panel-family device (or its panel isn't known this run)
@@ -486,6 +618,15 @@ async def _async_reconcile_subentries(
         # one device that doesn't support it.
         try:
             if not subentry_id:
+                if _is_legacy_breaker_device(device, legacy_serials):
+                    # Removed after platform setup by
+                    # _async_purge_legacy_breaker_devices.
+                    _LOGGER.debug(
+                        "Leaving old breaker device '%s' %s out of the "
+                        "subentries",
+                        device.name, device.identifiers,
+                    )
+                    continue
                 if device.config_subentry_id is None:
                     unresolved += 1
                     _LOGGER.warning(
@@ -495,9 +636,9 @@ async def _async_reconcile_subentries(
                         device.name, device.id, device.identifiers, device.via_device_id,
                     )
                 continue
-            device_subentry[device.id] = subentry_id
             if device.config_subentry_id != subentry_id:
-                dev_reg.async_update_device(device.id, new_config_subentry_id=subentry_id)
+                devices_to_move.append(device)
+            device_subentry[device.id] = subentry_id
         except AttributeError:
             # debug, not warning — this is a known, permanent-until-HA-updates
             # condition on some HA core versions (subentries work at the
@@ -529,6 +670,11 @@ async def _async_reconcile_subentries(
             _LOGGER.debug("No devices found for this entry — nothing to reconcile.")
         return
 
+    # Entities move before their devices. When a device changes subentry, the
+    # entity registry removes the device's entities that are still in the old
+    # subentry (HA 2026.8+); the platforms then re-create them from the
+    # deleted-entity records. Moving the entities first leaves nothing for it
+    # to remove.
     moved = 0
     no_subentry_support = 0
     for ent_entry in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
@@ -560,6 +706,11 @@ async def _async_reconcile_subentries(
         except AttributeError:
             no_subentry_support += 1
 
+    for device in devices_to_move:
+        dev_reg.async_update_device(
+            device.id, new_config_subentry_id=device_subentry[device.id]
+        )
+
     if no_subentry_support:
         # debug, not warning — same reasoning as the device loop above: a
         # known, permanent-until-HA-updates condition that would otherwise
@@ -573,10 +724,10 @@ async def _async_reconcile_subentries(
             no_subentry_support,
         )
 
-    if moved:
+    if moved or devices_to_move:
         _LOGGER.info(
             "Migrated %d device(s) / %d entities into panel/room subentries",
-            len(device_subentry), moved,
+            len(devices_to_move), moved,
         )
 
 
@@ -760,6 +911,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # breaker id-format change — these stay fully populated (see docstring),
     # so the zero-entities purge above can't catch them.
     await _async_purge_stale_breaker_duplicates(hass, entry, coordinator)
+
+    # Remove breaker devices still keyed by Leviton's serialNumber (before
+    # 2.0.9) that hold only entities no platform creates anymore.
+    await _async_purge_legacy_breaker_devices(hass, entry, coordinator)
 
     # Keep sw_version live as Leviton pushes firmware updates — see
     # _sync_device_firmware_versions docstring for why this can't just
