@@ -1416,6 +1416,21 @@ class LDATAService:
                     existing["bleRSSI"] = val
             except (ValueError, TypeError):
                 pass
+
+        # Device metadata (same raw keys parse_panels() reads at setup). Only
+        # overwrite when the payload carries a value, so partial WS payloads
+        # keep the last known metadata.
+        metadata_fields = {
+            "firmwareVersionMeter": "firmware",
+            "hwVersion": "hardware",
+            "currentRating": "rating",
+            "model": "model",
+            "serialNumber": "serialNumber",
+            "canRemoteOn": "canRemoteOn",
+        }
+        for raw_key, cached_key in metadata_fields.items():
+            if raw.get(raw_key) is not None:
+                existing[cached_key] = raw[raw_key]
         
         # Capture energy counters (hardware-measured, not yet exposed as sensors)
         if "energyConsumption" in raw or "energyConsumption2" in raw:
@@ -1696,6 +1711,96 @@ class LDATAService:
 
         return result
 
+    @staticmethod
+    def _breaker_leg_frequencies(breaker: dict) -> tuple[float, float]:
+        """Return a raw breaker's (leg 1, leg 2) line frequency, 0.0 when absent.
+
+        Breakers on leg 2 report the panel's leg 2 frequency in lineFrequency,
+        so the pair is swapped for them (same mapping parse_panels() applies
+        to breaker frequency1/frequency2).
+        """
+        def _freq(key):
+            try:
+                return float(breaker.get(key) or 0.0)
+            except (TypeError, ValueError):
+                return 0.0
+
+        f, f2 = _freq("lineFrequency"), _freq("lineFrequency2")
+        if breaker.get("position") in _LEG1_POSITIONS:
+            return f, f2
+        return f2, f
+
+    def _extract_panel_fields(
+        self, panel: dict, panel_type: str, breaker_frequencies=()
+    ) -> dict:
+        """Extract the refreshable panel-level fields from a panel listing entry.
+
+        Shared by parse_panels() (setup) and refresh_panel_status() (poll) so
+        both read the listing the same way. A field is only returned when its
+        source key is present and not None (LDATA rssi: whenever the key is
+        present), so callers can tell "missing" from a real value (including
+        0.0). ``breaker_frequencies`` is an iterable of
+        (leg 1, leg 2) breaker frequencies used when the panel itself reports
+        no frequencyA (LDATA panels).
+        """
+        fields: dict[str, typing.Any] = {}
+
+        installed, available = _panel_firmware_versions(panel)
+        if panel.get("version") or panel.get("packageVer"):
+            fields["installed_firmware"] = installed
+            fields["firmware"] = installed
+        if panel.get("downloaded") is not None or panel.get("updateAvailability") is not None:
+            # None here is a real value: no update available.
+            fields["available_firmware"] = available
+
+        for key in ("overVoltage", "underVoltage", "overVoltageThreshold", "underVoltageThreshold"):
+            if panel.get(key) is not None:
+                fields[key] = panel[key]
+
+        # LDATA rssi is the exception to the "None means missing" rule: an
+        # LDATA hub on Ethernet reports rssi: null, so a present null is stored
+        # as None and only an absent key keeps the cached value. WHEMS panels
+        # get rssi over the WebSocket, so a null in their listing is treated
+        # as missing.
+        rssi = self._none_or_float(panel, "rssi")
+        if rssi is not None or (panel_type == "LDATA" and "rssi" in panel):
+            fields["rssi"] = rssi
+
+        v1 = self._none_or_float(panel, "rmsVoltage")
+        v2 = self._none_or_float(panel, "rmsVoltage2")
+        if v1 is not None:
+            fields["voltage1"] = v1
+        if v2 is not None:
+            fields["voltage2"] = v2
+        if v1 is not None and v2 is not None:
+            fields["voltage"] = self._combine_leg_voltage(
+                v1, v2, three_phase=self._three_phase, average=True
+            )
+
+        # A frequencyA of 0 (or below) means the panel reports no frequency
+        # (LDATA panels), so fall back to the breakers' line frequency. The
+        # fields are only returned when a frequency above 0 was found, so a
+        # refresh never overwrites a breaker-derived frequency with 0.
+        f1 = self._none_or_float(panel, "frequencyA") or 0.0
+        f2 = self._none_or_float(panel, "frequencyB") or 0.0
+        if f1 <= 0:
+            f1 = f2 = 0
+            for bf1, bf2 in breaker_frequencies:
+                if bf1 > 0:
+                    f1 = bf1
+                if bf2 > 0:
+                    f2 = bf2
+                if f1 != 0 and f2 != 0:
+                    break
+        if f1 > 0 or f2 > 0:
+            if f2 <= 0:
+                f2 = f1
+            fields["frequency1"] = f1
+            fields["frequency2"] = f2
+            fields["frequency"] = (float(f1) + float(f2)) / 2
+
+        return fields
+
     def parse_panels(self, panels_json) -> object:
         """Parse the panel json data."""
         status_data: dict[str, typing.Any] = {}
@@ -1725,10 +1830,17 @@ class LDATAService:
             # against a real WHEMS payload — so reading it directly here (the
             # old approach) silently returned "unknown" for every WHEMS
             # panel's installed firmware.
-            (
-                panel_data["installed_firmware"],
-                panel_data["available_firmware"],
-            ) = _panel_firmware_versions(panel)
+            raw_breakers = panel.get("residentialBreakers") or []
+            fields = self._extract_panel_fields(
+                panel,
+                panel.get("ModuleType", "WHEMS"),
+                (
+                    self._breaker_leg_frequencies(breaker)
+                    for breaker in raw_breakers
+                ),
+            )
+            panel_data["installed_firmware"] = fields.get("installed_firmware", "unknown")
+            panel_data["available_firmware"] = fields.get("available_firmware")
             panel_data["firmware"] = panel_data["installed_firmware"]
             panel_data["model"] = panel.get("model", "unknown")
             panel_data["id"] = panel.get("id")
@@ -1750,14 +1862,14 @@ class LDATAService:
             # Panel-level diagnostic/alarm fields
             panel_data["overVoltage"] = panel.get("overVoltage", False)
             panel_data["underVoltage"] = panel.get("underVoltage", False)
-            panel_data["overVoltageThreshold"] = panel.get("overVoltageThreshold")
-            panel_data["underVoltageThreshold"] = panel.get("underVoltageThreshold")
-            panel_data["rssi"] = self._none_or_float(panel, "rssi")
+            panel_data["overVoltageThreshold"] = fields.get("overVoltageThreshold")
+            panel_data["underVoltageThreshold"] = fields.get("underVoltageThreshold")
+            panel_data["rssi"] = fields.get("rssi")
             
             # Detect if this panel needs REST polling for breaker/CT data.
             # LWHEM firmware >= 2.0 no longer sends breaker data via WebSocket.
             # We use firmware version as an initial hint, then confirm via WS detection.
-            fw_str = panel.get("updateVersion", "0")
+            fw_str = str(panel.get("updateVersion") or "0")
             try:
                 fw_major = int(fw_str.split(".")[0])
             except (ValueError, IndexError):
@@ -1777,51 +1889,26 @@ class LDATAService:
                 f"— WebSocket for breaker data"
                 + (", CT REST polling disabled (v2: energy counters unused, power via WS)" if fw_major >= 2 else ", CT REST polling enabled if CTs present")
             )
-            if "rmsVoltage" not in panel or "rmsVoltage2" not in panel:
+            # A missing (or null) leg voltage is unknown, not 0 V: a 0 V
+            # reading would look like a dead leg.
+            _panel_v1 = self._none_or_float(panel, "rmsVoltage")
+            _panel_v2 = self._none_or_float(panel, "rmsVoltage2")
+            if _panel_v1 is None or _panel_v2 is None:
                 _LOGGER.warning(
                     f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' response is "
-                    f"missing rmsVoltage/rmsVoltage2 — reporting 0V for this poll cycle "
-                    f"instead of failing the whole update."
+                    f"missing rmsVoltage/rmsVoltage2 — reporting unknown voltage until "
+                    f"the panel provides it."
                 )
-            _panel_v1 = self.none_to_zero(panel, "rmsVoltage")
-            _panel_v2 = self.none_to_zero(panel, "rmsVoltage2")
-            panel_data["voltage"] = self._combine_leg_voltage(
-                _panel_v1, _panel_v2, three_phase=three_phase, average=True
-            )
+                panel_data["voltage"] = None
+            else:
+                panel_data["voltage"] = self._combine_leg_voltage(
+                    _panel_v1, _panel_v2, three_phase=three_phase, average=True
+                )
             panel_data["voltage1"] = _panel_v1
             panel_data["voltage2"] = _panel_v2
-            panel_data["frequency1"] = float(self.none_to_zero(panel, "frequencyA"))
-            panel_data["frequency2"] = float(self.none_to_zero(panel, "frequencyB"))
-            if panel_data["frequency1"] == 0:
-                panel_data["frequency1"] = 0
-                panel_data["frequency2"] = 0
-                if panel.get("residentialBreakers"): # Add check if breakers exist
-                    for breaker in panel["residentialBreakers"]:
-                        if breaker["position"] in _LEG1_POSITIONS:
-                            if float(self.none_to_zero(breaker, "lineFrequency")) > 0:
-                                panel_data["frequency1"] = float(
-                                    self.none_to_zero(breaker, "lineFrequency")
-                                )
-                            if float(self.none_to_zero(breaker, "lineFrequency2")) > 0:
-                                panel_data["frequency2"] = float(
-                                    self.none_to_zero(breaker, "lineFrequency2")
-                                )
-                        else:
-                            if float(self.none_to_zero(breaker, "lineFrequency")) > 0:
-                                panel_data["frequency2"] = float(
-                                    self.none_to_zero(breaker, "lineFrequency")
-                                )
-                            if float(self.none_to_zero(breaker, "lineFrequency2")) > 0:
-                                panel_data["frequency1"] = float(
-                                    self.none_to_zero(breaker, "lineFrequency2")
-                                )
-                        if panel_data["frequency1"] != 0 and panel_data["frequency2"] != 0:
-                            break
-            if panel_data["frequency2"] == 0:
-                panel_data["frequency2"] = panel_data["frequency1"]
-            panel_data["frequency"] = (
-                float(panel_data["frequency1"]) + float(panel_data["frequency2"])
-            ) / 2
+            panel_data["frequency1"] = fields.get("frequency1", 0)
+            panel_data["frequency2"] = fields.get("frequency2", 0)
+            panel_data["frequency"] = fields.get("frequency", 0.0)
             panels.append(panel_data)
             # Setup the CT list.
             if "CTs" in panel and panel["CTs"]: # Add check if CTs exist and is not None
@@ -2419,15 +2506,36 @@ class LDATAService:
         
         return updated
 
+    # Panel fields refresh_panel_status() re-reads for LDATA panels.
+    _REFRESHED_PANEL_FIELDS = (
+        "voltage1", "voltage2", "voltage",
+        "frequency1", "frequency2", "frequency",
+        "overVoltage", "underVoltage", "overVoltageThreshold", "underVoltageThreshold",
+        "rssi", "installed_firmware", "firmware", "available_firmware",
+    )
+
     def refresh_panel_status(self) -> bool:
-        """Re-read each panel's cloud connection state from the REST panel listing.
+        """Re-read panel state from the REST panel listing.
 
         The WebSocket only reports "connected" inside a panel notification, and
         an offline panel sends none, so the cached flag would otherwise keep its
-        last value until the entry is reloaded. This is a plain GET of the same
-        listing used at startup — no bandwidth toggle, no breaker include.
+        last value until the entry is reloaded. This is refreshed for every
+        panel type.
 
-        Returns True if any panel's connected flag changed.
+        LDATA panels are subscribed with modelName "IotWhem", so their
+        panel-level notifications never arrive, and the breaker REST refresh
+        skips them. Their voltage, frequency, alarm flags and thresholds, RSSI
+        and firmware versions are therefore only read in parse_panels() at
+        setup. For LDATA panels those fields are re-read here with the same
+        extraction parse_panels() uses (_extract_panel_fields). WHEMS panels get
+        them from their IotWhem WebSocket notifications.
+
+        This is a plain GET of the same listing used at startup — no bandwidth
+        toggle, no breaker include. A field missing from the listing (or None)
+        leaves the cached value unchanged, except LDATA rssi: null, which means
+        the hub is on Ethernet and is stored as None.
+
+        Returns True if any panel's connected flag or refreshed field changed.
         """
         if not self.status_data or not self.status_data.get("panels"):
             return False
@@ -2454,7 +2562,7 @@ class LDATAService:
             "WHEMS": "https://my.leviton.com/api/Residences/{residenceId}/iotWhems",
         }
         panel_types = {p.get("panel_type", "WHEMS") for p in self.status_data["panels"]}
-        connected_by_id = {}
+        raw_by_id: dict[str, tuple[str, dict]] = {}
 
         for residence_id in self.residence_id_list:
             for panel_type in panel_types:
@@ -2477,19 +2585,32 @@ class LDATAService:
                     # authoritative for them.
                     if not panel_id or (panel_type == "WHEMS" and panel_id.startswith("LDATA-")):
                         continue
-                    connected_by_id[panel_id] = self._is_panel_connected(panel)
+                    raw_by_id[panel_id] = (panel_type, panel)
 
         changed = False
         panels = []
         for panel in self.status_data["panels"]:
-            connected = connected_by_id.get(panel.get("id"))
-            if connected is not None and connected != panel.get("connected"):
+            panel_type, raw = raw_by_id.get(panel.get("id"), (None, None))
+            if raw is None:
+                panels.append(panel)
+                continue
+            connected = self._is_panel_connected(raw)
+            if connected != panel.get("connected"):
                 _LOGGER.info(
                     f"[v{self.version}] Panel {panel.get('name', panel.get('id'))} is now "
                     f"{'connected to' if connected else 'disconnected from'} the Leviton cloud"
                 )
                 panel = {**panel, "connected": connected}
                 changed = True
+            if panel_type == "LDATA":
+                updated = self._refreshed_panel_fields(panel, raw, panel_type)
+                if updated:
+                    _LOGGER.debug(
+                        f"[v{self.version}] Panel {panel.get('name', panel.get('id'))} refreshed "
+                        f"{', '.join(sorted(updated))} from the panel listing"
+                    )
+                    panel = {**panel, **updated}
+                    changed = True
             panels.append(panel)
 
         if changed:
@@ -2498,6 +2619,39 @@ class LDATAService:
             self.status_data = new_status_data
 
         return changed
+
+    def _refreshed_panel_fields(self, panel: dict, raw: dict, panel_type: str) -> dict:
+        """Return the cached panel fields whose listing value differs.
+
+        Fields missing from ``raw`` keep their cached value. When only one leg
+        voltage is present the combined voltage is recomputed with the cached
+        other leg. Frequency falls back to the cached breakers' frequencies,
+        as parse_panels() does with the raw breakers at setup.
+        """
+        panel_id = panel.get("id")
+        breaker_frequencies = (
+            (
+                float(b.get("frequency1") or 0.0),
+                float(b.get("frequency2") or 0.0),
+            )
+            for b in (self.status_data.get("breakers") or {}).values()
+            if b.get("panel_id") == panel_id
+        )
+        fields = self._extract_panel_fields(raw, panel_type, breaker_frequencies)
+
+        if ("voltage1" in fields or "voltage2" in fields) and "voltage" not in fields:
+            v1 = fields.get("voltage1", panel.get("voltage1"))
+            v2 = fields.get("voltage2", panel.get("voltage2"))
+            if v1 is not None and v2 is not None:
+                fields["voltage"] = self._combine_leg_voltage(
+                    v1, v2, three_phase=self._three_phase, average=True
+                )
+
+        return {
+            key: fields[key]
+            for key in self._REFRESHED_PANEL_FIELDS
+            if key in fields and fields[key] != panel.get(key)
+        }
 
     def _update_from_websocket(self, payload):
         """Update the internal status_data cache from a WebSocket notification.
@@ -2638,8 +2792,14 @@ class LDATAService:
                             # Update voltage
                             if "rmsVoltage" in data or "rmsVoltage2" in data or "rmsVoltageA" in data or "rmsVoltageB" in data:
                                 # Handle both naming conventions
-                                v1 = data.get("rmsVoltage") or data.get("rmsVoltageA")
-                                v2 = data.get("rmsVoltage2") or data.get("rmsVoltageB")
+                                # Explicit None checks: a real 0.0 V reading must not
+                                # fall through to the other key or be dropped.
+                                v1 = data.get("rmsVoltage")
+                                if v1 is None:
+                                    v1 = data.get("rmsVoltageA")
+                                v2 = data.get("rmsVoltage2")
+                                if v2 is None:
+                                    v2 = data.get("rmsVoltageB")
                                 
                                 if v1 is not None:
                                     panel["voltage1"] = float(v1)

@@ -90,23 +90,38 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
             self._state = None
         self.async_write_ha_state()
 
+    def _current_breaker_data(self) -> dict:
+        """Return this breaker's latest coordinator data, or {} if absent."""
+        try:
+            return self.coordinator.data["breakers"][self.breaker_data["id"]] or {}
+        except (KeyError, TypeError, AttributeError):
+            return {}
+
     @property
     def extra_state_attributes(self) -> dict[str, str]:
         """Returns the extra attributes for the breaker."""
         attributes = super().extra_state_attributes
+        # Read device metadata from the coordinator's current breaker data so
+        # it follows changes such as a breaker firmware update without a
+        # reload; fall back to the setup-time data if the breaker is missing.
+        current = self._current_breaker_data()
         attributes["id"] = self.breaker_data["id"]
-        attributes["rating"] = self.breaker_data["rating"]
+        attributes["rating"] = current.get("rating", self.breaker_data["rating"])
         attributes["position"] = self.breaker_data["position"]
-        attributes["model"] = self.breaker_data["model"]
+        attributes["model"] = current.get("model", self.breaker_data["model"])
         attributes["poles"] = self.breaker_data["poles"]
-        attributes["serialNumber"] = self.breaker_data["serialNumber"]
-        attributes["hardware"] = self.breaker_data["hardware"]
-        attributes["firmware"] = self.breaker_data["firmware"]
+        attributes["serialNumber"] = current.get(
+            "serialNumber", self.breaker_data["serialNumber"]
+        )
+        attributes["hardware"] = current.get("hardware", self.breaker_data["hardware"])
+        attributes["firmware"] = current.get("firmware", self.breaker_data["firmware"])
         attributes["panel_id"] = self.breaker_data["panel_id"]
         # Gen2 breakers can be reset remotely; Gen1 breakers report False and
         # must be reset by hand at the panel (frontend code uses this to warn
         # before a remote "on" that won't actually do anything on Gen1).
-        attributes["canRemoteOn"] = self.breaker_data.get("canRemoteOn", False)
+        attributes["canRemoteOn"] = current.get(
+            "canRemoteOn", self.breaker_data.get("canRemoteOn", False)
+        )
 
         return attributes
 

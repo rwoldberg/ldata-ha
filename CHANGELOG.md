@@ -6,8 +6,12 @@ All notable changes to the Leviton LDATA integration are documented here.
 
 ### Changed
 - **Daily energy sensors no longer publish a `last_update_time` attribute.** It changed on every update, forcing a database write for each daily energy sensor even when the reading hadn't moved. Dropping it reduces database writes and Home Assistant event traffic. If you used that attribute in a template or automation, use the sensor's own `last_updated` instead. (#101)
+- **Panel voltage shows "unknown" instead of 0 V when the panel doesn't report it.** The Voltage Leg 1 / Leg 2 sensors previously showed a misleading 0 V, which looked like a dead leg, whenever Leviton's data was missing a reading. A real 0 V reading is still shown as 0 V. (#107)
 
 ### Fixed
+- **LDATA panel readings no longer freeze after setup.** Voltage, frequency, over/under-voltage alarms, Wi-Fi signal and firmware version on LDATA panels now refresh every couple of minutes instead of staying at their startup values until you reload the integration. Setup also no longer fails if a panel reports no firmware version. (#104)
+- **Breaker details stay current.** The firmware, hardware, rating and model shown on each breaker, and the firmware version on its device page, now update after a breaker firmware change instead of waiting for a reload. (#106)
+- **A panel reporting 0 V is no longer ignored on WHEMS panels.** A real 0 V leg reading now shows as 0 V instead of keeping the previous voltage. (#108)
 - **Cloud Connected now turns off when your panel goes offline, and back on when it returns** — without reloading the integration. Previously it could stay "on" indefinitely, and Home Assistant could stop receiving updates altogether after one of Leviton's routine reconnects. Sensors still show their last known values while the panel is offline. (#103, fixes #102)
 - **Your account password could be visible in the integration's name.** Setups created between April 2023 and October 2025 were titled with the password included, shown on the Devices & Services page and written to logs. These are now renamed automatically to `Leviton LDATA (your email)`, and a warning in the log tells you it happened. If yours was affected, consider changing your Leviton password — the old name may still be in past logs and backups. (#100)
 
