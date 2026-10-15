@@ -13,7 +13,7 @@ from custom_components.ldata.sensor import (
 RSSI_UID = "test-user-ldata_LDATA-panel-1_wifi_rssi"
 
 
-def _panel(rssi, panel_type="LDATA") -> dict:
+def _panel(rssi, panel_type="LDATA", connected=True) -> dict:
     return {
         "id": "LDATA-panel-1",
         "name": "Panel",
@@ -21,6 +21,7 @@ def _panel(rssi, panel_type="LDATA") -> dict:
         "model": "LDATA",
         "firmware": "1.0",
         "panel_type": panel_type,
+        "connected": connected,
         "rssi": rssi,
         "voltage": 240.0,
         "voltage1": 120.0,
@@ -163,3 +164,14 @@ def test_rssi_sensor_keeps_state_when_panel_missing() -> None:
 
     assert sensor.available is True
     assert sensor.native_value == -58
+
+
+@pytest.mark.asyncio
+async def test_setup_keeps_rssi_entity_for_offline_ldata_panel_without_rssi() -> None:
+    # An offline Wi-Fi hub can report no RSSI too; it must keep its entity.
+    registry = _registry({RSSI_UID: "sensor.panel_wifi_signal"})
+
+    sensors = await _setup(_panel(None, connected=False), registry)
+
+    assert len(sensors) == 1
+    registry.async_remove.assert_not_called()

@@ -68,6 +68,10 @@ class LDATAPanelFirmwareUpdateEntity(LDATAEntity, UpdateEntity):
     """
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
+    # Must be set explicitly: UpdateEntity.entity_category falls back to
+    # DIAGNOSTIC for any entity without INSTALL support unless an
+    # _attr_entity_category (even None) is present.
+    _attr_entity_category = None
 
     def __init__(self, coordinator, data) -> None:
         """Initialize the panel firmware update entity."""
@@ -129,6 +133,7 @@ class LDATADecoraFirmwareUpdateEntity(DecoraEntity, UpdateEntity):
     """
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
+    _attr_entity_category = None  # explicit — see LDATAPanelFirmwareUpdateEntity
 
     def __init__(self, coordinator, data) -> None:
         """Init LDATADecoraFirmwareUpdateEntity."""

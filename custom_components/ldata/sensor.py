@@ -594,8 +594,15 @@ async def async_setup_entry(
         # Panel diagnostic sensors
         # An LDATA hub on Ethernet reports rssi: null and has no Wi-Fi signal
         # to show, so don't create a sensor that can never have a value, and
-        # drop the entity an earlier version created for it.
-        if panel.get("rssi") is not None or panel.get("panel_type") != "LDATA":
+        # drop the entity an earlier version created for it. Only while the
+        # panel is connected: an offline Wi-Fi hub can report no RSSI too, and
+        # removing its entity would throw away the user's name/area/settings.
+        wired_ldata_hub = (
+            panel.get("panel_type") == "LDATA"
+            and panel.get("rssi") is None
+            and panel.get("connected")
+        )
+        if not wired_ldata_hub:
             entities_to_add.append(
                 LDATAPanelWifiRSSISensor(coordinator, entity_data)
             )
