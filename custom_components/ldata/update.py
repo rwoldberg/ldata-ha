@@ -58,13 +58,17 @@ class LDATAPanelFirmwareUpdateEntity(LDATAEntity, UpdateEntity):
     Applying firmware to electrical-panel hardware should remain an explicit
     operation in My Leviton — no UpdateEntityFeature.INSTALL is declared, so
     HA never shows an install button. This only surfaces metadata already
-    returned by the cloud so an available update is not silently missed, and
-    lets HA's own Settings > Updates / notification system handle alerting.
+    returned by the cloud so an available update is not silently missed: the
+    entity turns "on" when a newer version is available, which can drive a
+    notification automation.
 
-    Deliberately NOT entity_category=DIAGNOSTIC: HA excludes diagnostic
-    entities from the Settings-level "Updates available" aggregation (sidebar
-    badge, Devices & Services banner) — they'd still work fine per-device,
-    but the entire point of using UpdateEntity here is that global surfacing.
+    Without INSTALL, the frontend's "Updates available" sidebar badge and
+    Settings dashboard card do not count this entity, whatever its category:
+    both only count updates that can be installed, and neither checks
+    entity_category.
+
+    entity_category is None rather than DIAGNOSTIC so the entity is listed
+    with the device's main entities instead of under Diagnostic.
     """
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
@@ -124,12 +128,11 @@ class LDATADecoraFirmwareUpdateEntity(DecoraEntity, UpdateEntity):
     """Report Decora Smart Wi-Fi device firmware availability.
 
     Same no-install-button design as LDATAPanelFirmwareUpdateEntity — this
-    only detects and surfaces an available update via HA's native Update
-    entity so it shows up in Settings > Updates and can drive a notification
-    automation; installing still happens in My Leviton.
-
-    Deliberately NOT entity_category=DIAGNOSTIC — see
-    LDATAPanelFirmwareUpdateEntity's docstring for why.
+    only detects an available update via HA's native Update entity so it can
+    drive a notification automation; installing still happens in My Leviton.
+    Like the panel entity, it is not counted in the "Updates available" badge
+    or Settings card, and its entity_category is None rather than DIAGNOSTIC
+    — see LDATAPanelFirmwareUpdateEntity's docstring.
     """
 
     _attr_device_class = UpdateDeviceClass.FIRMWARE
