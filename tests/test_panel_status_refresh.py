@@ -58,6 +58,253 @@ def test_refresh_panel_status_only_queries_known_panel_types() -> None:
     assert urls == ["https://my.leviton.com/api/Residences/res-1/residentialBreakerPanels"]
 
 
+def test_refresh_panel_status_updates_voltage_with_connection_unchanged() -> None:
+    service = _service(
+        {"LDATA": [{"id": "LDATA-1", "connected": True, "rmsVoltage": 121.0, "rmsVoltage2": 119.0}]}
+    )
+    service.status_data["panels"][0].update(voltage1=0.0, voltage2=119.0, voltage=59.5)
+    before = service.status_data
+
+    assert service.refresh_panel_status() is True
+    panel = service.status_data["panels"][0]
+    assert panel["connected"] is True
+    assert panel["voltage1"] == 121.0
+    assert panel["voltage2"] == 119.0
+    assert panel["voltage"] == 120.0
+    assert service.status_data is not before
+    assert before["panels"][0]["voltage1"] == 0.0
+
+
+def test_refresh_panel_status_missing_voltage_keeps_cached_values() -> None:
+    service = _service({"LDATA": [{"id": "LDATA-1", "connected": True, "rmsVoltage": None}]})
+    service.status_data["panels"][0].update(voltage1=120.0, voltage2=121.0, voltage=120.5)
+    before = service.status_data
+
+    assert service.refresh_panel_status() is False
+    assert service.status_data is before
+    panel = service.status_data["panels"][0]
+    assert (panel["voltage1"], panel["voltage2"], panel["voltage"]) == (120.0, 121.0, 120.5)
+
+
+def test_refresh_panel_status_updates_frequency_alarms_rssi_and_firmware() -> None:
+    service = _service(
+        {
+            "LDATA": [
+                {
+                    "id": "LDATA-1",
+                    "connected": True,
+                    "frequencyA": 60.1,
+                    "frequencyB": 59.9,
+                    "overVoltage": True,
+                    "underVoltage": False,
+                    "overVoltageThreshold": 132,
+                    "underVoltageThreshold": 108,
+                    "rssi": -61,
+                    "packageVer": "1.9.2",
+                    "updateAvailability": "UP_TO_DATE",
+                }
+            ]
+        }
+    )
+    service.status_data["panels"][0].update(
+        frequency1=60.0,
+        frequency2=60.0,
+        frequency=60.0,
+        overVoltage=False,
+        underVoltage=False,
+        overVoltageThreshold=130,
+        underVoltageThreshold=108,
+        rssi=-70.0,
+        installed_firmware="1.9.1",
+        firmware="1.9.1",
+        available_firmware="1.9.2",
+    )
+    before = service.status_data
+
+    assert service.refresh_panel_status() is True
+    panel = service.status_data["panels"][0]
+    assert (panel["frequency1"], panel["frequency2"]) == (60.1, 59.9)
+    assert panel["frequency"] == (60.1 + 59.9) / 2
+    assert panel["overVoltage"] is True
+    assert panel["underVoltage"] is False
+    assert panel["overVoltageThreshold"] == 132
+    assert panel["underVoltageThreshold"] == 108
+    assert panel["rssi"] == -61.0
+    assert panel["installed_firmware"] == panel["firmware"] == "1.9.2"
+    assert panel["available_firmware"] is None
+    assert before["panels"][0]["installed_firmware"] == "1.9.1"
+
+
+def test_refresh_panel_status_frequency_falls_back_to_cached_breakers() -> None:
+    service = _service({"LDATA": [{"id": "LDATA-1", "connected": True}]})
+    service.status_data["panels"][0].update(frequency1=0, frequency2=0, frequency=0.0)
+    service.status_data["breakers"] = {
+        "b1": {"panel_id": "LDATA-1", "frequency1": 60.02, "frequency2": 0.0},
+        "b2": {"panel_id": "LDATA-1", "frequency1": 0.0, "frequency2": 59.98},
+        "other": {"panel_id": "LDATA-2", "frequency1": 50.0, "frequency2": 50.0},
+    }
+
+    assert service.refresh_panel_status() is True
+    panel = service.status_data["panels"][0]
+    assert (panel["frequency1"], panel["frequency2"]) == (60.02, 59.98)
+    assert panel["frequency"] == (60.02 + 59.98) / 2
+
+
+def test_refresh_panel_status_zero_frequency_keeps_cached_frequency() -> None:
+    # LDATA panels report frequencyA: 0; the setup breaker-derived value must survive.
+    for zero in (0, 0.0):
+        service = _service(
+            {"LDATA": [{"id": "LDATA-1", "connected": True, "frequencyA": zero, "frequencyB": zero}]}
+        )
+        service.status_data["panels"][0].update(frequency1=60.02, frequency2=59.98, frequency=60.0)
+        before = service.status_data
+
+        assert service.refresh_panel_status() is False
+        assert service.status_data is before
+        panel = service.status_data["panels"][0]
+        assert (panel["frequency1"], panel["frequency2"], panel["frequency"]) == (60.02, 59.98, 60.0)
+
+
+def test_refresh_panel_status_zero_frequency_uses_cached_breakers() -> None:
+    service = _service({"LDATA": [{"id": "LDATA-1", "connected": True, "frequencyA": 0}]})
+    service.status_data["panels"][0].update(frequency1=0, frequency2=0, frequency=0.0)
+    service.status_data["breakers"] = {
+        "b1": {"panel_id": "LDATA-1", "frequency1": 60.02, "frequency2": 59.98},
+    }
+
+    assert service.refresh_panel_status() is True
+    panel = service.status_data["panels"][0]
+    assert (panel["frequency1"], panel["frequency2"]) == (60.02, 59.98)
+
+
+def test_refresh_panel_status_leaves_whems_voltage_to_the_websocket() -> None:
+    service = _service(
+        {"WHEMS": [{"id": "whem-1", "connected": True, "rmsVoltageA": 121.0, "rmsVoltageB": 119.0}]}
+    )
+    service.status_data["panels"] = [
+        {
+            "id": "whem-1", "name": "Panel", "panel_type": "WHEMS", "connected": True,
+            "voltage1": 0.0, "voltage2": 119.0, "voltage": 59.5,
+        }
+    ]
+    before = service.status_data
+
+    assert service.refresh_panel_status() is False
+    assert service.status_data is before
+    assert before["panels"][0]["voltage1"] == 0.0
+
+
+def test_refresh_panel_status_missing_fields_keep_cached_values() -> None:
+    cached = {
+        "voltage1": 120.0,
+        "voltage2": 121.0,
+        "voltage": 120.5,
+        "frequency1": 60.0,
+        "frequency2": 60.0,
+        "frequency": 60.0,
+        "overVoltage": True,
+        "underVoltage": False,
+        "overVoltageThreshold": 132,
+        "underVoltageThreshold": 108,
+        "rssi": -61.0,
+        "installed_firmware": "1.9.2",
+        "firmware": "1.9.2",
+        "available_firmware": "2.0.0",
+    }
+    service = _service(
+        {
+            "LDATA": [
+                {
+                    "id": "LDATA-1",
+                    "connected": True,
+                    "rmsVoltage": None,
+                    "frequencyA": None,
+                    "overVoltage": None,
+                    "packageVer": None,
+                }
+            ]
+        }
+    )
+    service.status_data["panels"][0].update(cached)
+    before = service.status_data
+
+    assert service.refresh_panel_status() is False
+    assert service.status_data is before
+    panel = service.status_data["panels"][0]
+    assert {key: panel[key] for key in cached} == cached
+
+
+def test_refresh_panel_status_single_leg_voltage_uses_cached_other_leg() -> None:
+    service = _service({"LDATA": [{"id": "LDATA-1", "connected": True, "rmsVoltage": 0.0}]})
+    service.status_data["panels"][0].update(voltage1=122.63, voltage2=121.0, voltage=121.815)
+
+    assert service.refresh_panel_status() is True
+    panel = service.status_data["panels"][0]
+    assert (panel["voltage1"], panel["voltage2"]) == (0.0, 121.0)
+    assert panel["voltage"] == 60.5
+
+
+def test_refresh_panel_status_null_rssi_clears_cached_rssi() -> None:
+    # A panel on Ethernet reports rssi: null; that is a value, not a missing key.
+    service = _service({"LDATA": [{"id": "LDATA-1", "connected": True, "rssi": None}]})
+    service.status_data["panels"][0].update(rssi=-61.0)
+
+    assert service.refresh_panel_status() is True
+    assert service.status_data["panels"][0]["rssi"] is None
+
+
+def test_extract_panel_fields_null_rssi_is_a_value_only_for_ldata() -> None:
+    service = LDATAService("", "", None)
+
+    assert service._extract_panel_fields({"rssi": None}, "LDATA") == {"rssi": None}
+    assert "rssi" not in service._extract_panel_fields({"rssi": None}, "WHEMS")
+    assert "rssi" not in service._extract_panel_fields({}, "LDATA")
+
+
+
+
+def test_parse_panels_tolerates_null_update_version() -> None:
+    service = LDATAService("", "", None)
+    panel = service.parse_panels(
+        [{"id": "LDATA-1", "name": "Panel", "ModuleType": "LDATA", "updateVersion": None}]
+    )["panels"][0]
+
+    assert panel["id"] == "LDATA-1"
+
+def test_parse_panels_reads_panel_fields() -> None:
+    service = LDATAService("", "", None)
+    panel = service.parse_panels(
+        [
+            {
+                "id": "LDATA-1",
+                "ModuleType": "LDATA",
+                "rmsVoltage": 121.0,
+                "rmsVoltage2": 119.0,
+                "overVoltageThreshold": 132,
+                "rssi": "-60",
+                "packageVer": "1.9.2",
+                "updateAvailability": "UPDATE_AVAILABLE",
+                "updateVersion": "2.0.0",
+                "residentialBreakers": [
+                    {"id": "b1", "model": "NONE-1", "position": 1, "poles": 1, "lineFrequency": 60.02},
+                    {"id": "b2", "model": "NONE-1", "position": 3, "poles": 1, "lineFrequency": 59.98},
+                ],
+            }
+        ]
+    )["panels"][0]
+
+    assert (panel["voltage1"], panel["voltage2"], panel["voltage"]) == (121.0, 119.0, 120.0)
+    assert (panel["frequency1"], panel["frequency2"]) == (60.02, 59.98)
+    assert panel["overVoltage"] is False
+    assert panel["overVoltageThreshold"] == 132
+    assert panel["underVoltageThreshold"] is None
+    assert panel["rssi"] == -60.0
+    assert panel["installed_firmware"] == panel["firmware"] == "1.9.2"
+    assert panel["available_firmware"] == "2.0.0"
+
+
+
+
 def _respond(service: LDATAService, status_code: int) -> None:
     service.session.get.side_effect = lambda url, **_kwargs: SimpleNamespace(
         status_code=status_code, json=lambda: []
