@@ -59,9 +59,10 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 # Daily energy sensors round to 2 decimal places; a true hardware/rounding
 # jitter dip is on the order of a hundredth of a kWh (e.g. 21.31 -> 21.30).
 # Used by the TOTAL_INCREASING native_value clamp below to distinguish real
-# jitter from a legitimate drop (midnight reset OR a mid-day correction from
-# a monotonic-guard/re-baseline/spike-rejection flow) — a ratio-based check
-# can't tell those apart since corrections aren't always near-zero.
+# jitter from a legitimate mid-day correction (monotonic-guard/re-baseline/
+# spike-rejection flow) — a ratio-based check can't tell those apart since
+# corrections aren't always near-zero. The clamp only applies within one day:
+# the day's reset always passes, however small yesterday's total was.
 _DAILY_JITTER_EPSILON_KWH = 0.05
 
 
@@ -667,6 +668,37 @@ class _DailyEnergySensorMixin:
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
+    # The _last_date that _last_reported was reported under.
+    _last_reported_date: datetime.date | None = None
+
+    async def async_added_to_hass(self) -> None:
+        """Seed the jitter clamp with the restored state.
+
+        The subclasses restore _state and _last_date before calling super(),
+        which runs this. LDATABaseEntity then runs the first update right
+        away when the coordinator has data. Without a reported value from
+        the restore, that update's 1.30 after a recorded 1.32 would reach
+        HA as a decrease. A restored _last_date from an earlier day still
+        lets the day's reset through.
+        """
+        if self._state is not None:
+            self._last_reported = round(self._state, 2)
+            self._last_reported_date = self._last_date
+        await super().async_added_to_hass()
+
+    @property
+    def _accept_next_value(self) -> bool:
+        """Flag the reset_energy_baseline service sets on every reset."""
+        return self._accept_next_value_flag
+
+    @_accept_next_value.setter
+    def _accept_next_value(self, value: bool) -> None:
+        # The service sets this True for a full reset and False with a forced
+        # value. Either way the state it leaves is deliberate, so the jitter
+        # clamp in native_value must not hold it back.
+        self._accept_next_value_flag = value
+        self._last_reported = None
+
     @property
     def native_value(self) -> StateType:
         """Return the used kilowatts of the device."""
@@ -675,16 +707,24 @@ class _DailyEnergySensorMixin:
             # TOTAL_INCREASING clamp: never report a decrease within a day.
             # Hardware counter jitter (e.g. 21.31→21.30) or rounding can
             # cause tiny dips that trigger HA recorder warnings.
-            # Midnight resets (val near 0 while _last_reported is high) are
-            # allowed — HA handles those natively for TOTAL_INCREASING.
-            if self._last_reported is not None and val < self._last_reported:
-                # Only hold back genuinely tiny dips (hardware/rounding jitter,
-                # e.g. 21.31 -> 21.30). Any larger drop is a real change —
-                # either a midnight reset or a legitimate mid-day correction —
-                # and must be reported, not frozen at a stale high value.
-                if (self._last_reported - val) <= _DAILY_JITTER_EPSILON_KWH:
-                    return self._last_reported  # Jitter — hold previous value
+            # Only hold back genuinely tiny dips (hardware/rounding jitter,
+            # e.g. 21.31 -> 21.30). Any larger drop is a real change — a
+            # legitimate mid-day correction — and must be reported, not
+            # frozen at a stale high value.
+            # A new day (_last_date changed) is never clamped: the day's
+            # reset must reach HA, which handles it natively for
+            # TOTAL_INCREASING. Held back, a day that ended at <= 0.05 kWh
+            # would carry its total into the next day, and HA would miss
+            # that much of the new day's energy.
+            if (
+                self._last_reported is not None
+                and val < self._last_reported
+                and self._last_date == self._last_reported_date
+                and (self._last_reported - val) <= _DAILY_JITTER_EPSILON_KWH
+            ):
+                return self._last_reported  # Jitter — hold previous value
             self._last_reported = val
+            self._last_reported_date = self._last_date
             return val
         return 0.0
 
@@ -956,16 +996,22 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
             if self._use_hw_counters:
                 if self.panel_total:
-                    self._update_panel_total_hw(today, is_new_day)
+                    day_started = self._update_panel_total_hw(today, is_new_day)
                 else:
-                    self._update_single_breaker_hw(today, is_new_day)
+                    day_started = self._update_single_breaker_hw(today, is_new_day)
             else:
                 if self.panel_total:
-                    self._update_panel_total_pxt(today, is_new_day)
+                    day_started = self._update_panel_total_pxt(today, is_new_day)
                 else:
-                    self._update_single_breaker_pxt(today, is_new_day)
+                    day_started = self._update_single_breaker_pxt(today, is_new_day)
 
-            self._last_date = today
+            # The update helpers return True once they have started a new
+            # day. Without a usable reading (null counters at midnight, a
+            # missing breaker) they return before that: _last_date then stays
+            # on the previous day, so the next update starts the day instead
+            # of counting on from yesterday's total.
+            if not is_new_day or day_started:
+                self._last_date = today
         except Exception:
             if _log_warnings_enabled(self.coordinator):
                 _LOGGER.exception("Error updating daily usage sensor for %s", self.entity_id)
@@ -973,7 +1019,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
     # ── Hardware counter mode ────────────────────────────────────────────
 
-    def _update_single_breaker_hw(self, today: datetime.date, is_new_day: bool):
+    def _update_single_breaker_hw(self, today: datetime.date, is_new_day: bool) -> bool | None:
         """Update daily energy for a single breaker using hardware counter.
         
         Uses energyImport for solar breakers, energyConsumption for normal
@@ -1008,11 +1054,11 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
                 # MAX_DAILY_ENERGY_KWH re-baseline when the real value arrives.
                 self._midnight_baseline = None
                 self._state = 0.0
-                return
+                return True
 
             self._midnight_baseline = consumption
             self._state = 0.0
-            return
+            return True
 
         if self._midnight_baseline is None:
             # Deferred from midnight (null CT values) or lost on restart.
@@ -1056,7 +1102,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
         self._state = daily
 
-    def _update_panel_total_hw(self, today: datetime.date, is_new_day: bool):
+    def _update_panel_total_hw(self, today: datetime.date, is_new_day: bool) -> bool | None:
         """Update daily energy for the panel total by summing all lifetime counters.
         
         This relies natively on the monotonic guard to protect against partial sums 
@@ -1109,11 +1155,11 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
                     "(pre-toggle null). Baseline will be set on first real poll.",
                     self.entity_id, current_lifetime_sum,
                 )
-                return
+                return True
 
             self._midnight_baseline = current_lifetime_sum
             self._state = 0.0
-            return
+            return True
 
         if self._midnight_baseline is None:
             # Baseline was deferred (CT null at midnight) or lost on restart.
@@ -1170,7 +1216,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
         self._state = daily
 
-    def _update_single_breaker_pxt(self, today: datetime.date, is_new_day: bool):
+    def _update_single_breaker_pxt(self, today: datetime.date, is_new_day: bool) -> bool | None:
         """Update daily energy for a single breaker using power×time integration.
 
         Power direction handling for bidirectional (solar/import) breakers:
@@ -1222,7 +1268,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
             self._state = 0.0
             self._last_update_time = now
             self._last_power = current_power
-            return
+            return True
 
         if self._last_update_time is None or self._state is None:
             # First pxt run after startup or a hw→pxt mode switch.
@@ -1248,7 +1294,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         self._last_update_time = now
         self._last_power = current_power
 
-    def _update_panel_total_pxt(self, today: datetime.date, is_new_day: bool):
+    def _update_panel_total_pxt(self, today: datetime.date, is_new_day: bool) -> bool | None:
         """Update daily energy for panel total using power×time integration.
 
         Sums each breaker's power contribution in the direction matching
@@ -1287,7 +1333,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
             self._state = 0.0
             self._last_update_time = now
             self._last_power = current_power
-            return
+            return True
 
         if self._last_update_time is None or self._state is None:
             self._last_update_time = now
