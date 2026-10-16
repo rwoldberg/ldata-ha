@@ -19,6 +19,7 @@ from .const import (
     _LEG1_POSITIONS, CONF_RESIDENCE_ID, DECORA_MODELS_ALL, ENABLE_DECORA,
     ENABLE_DECORA_DEFAULT, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
     CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
+    PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD,
     DEVICE_TYPE_BRIDGE, is_decora_bridge,
 )
 
@@ -112,6 +113,10 @@ class LDATAService:
         # Without serialization the CT toggle (bandwidth:0) can corrupt a
         # concurrent breaker GET, causing the cloud to return stale zeros.
         self._rest_poll_lock = threading.Lock()
+        # Consecutive failed panel status polls, and whether the WARNING for
+        # the current failure streak has been logged (see refresh_panel_status).
+        self._panel_status_poll_failures = 0
+        self._panel_status_poll_warned = False
         # Cache for the latest status data to support WebSocket updates
         self.status_data = None
         # Three-phase voltage calculation mode — cached from options so all
@@ -420,6 +425,29 @@ class LDATAService:
         headers = {**defaultHeaders, "authorization": self.auth_token}
         headers.update(extra)
         return headers
+
+    def _get_retry_dropped_connection(self, url: str, **kwargs):
+        """GET ``url`` on the shared session, retrying once if the connection was dropped.
+
+        The session keeps its connection to my.leviton.com alive between
+        requests, and the server closes a keep-alive connection after 120 s
+        idle. When that close races with the next request, the request fails
+        before any response with ConnectionError ("Connection aborted.",
+        RemoteDisconnected or ConnectionResetError). urllib3 discards the
+        broken connection, so the retry opens a new one. Only GETs go through
+        here, so sending the request twice is safe.
+
+        Timeouts are not retried: a ConnectTimeout or ReadTimeout means the
+        server is slow or unreachable, not that a pooled connection went
+        stale, and a retry would hold _rest_poll_lock for another timeout.
+        """
+        try:
+            return self.session.get(url, **kwargs)
+        except requests.exceptions.ConnectionError as ex:
+            if isinstance(ex, requests.exceptions.Timeout):
+                raise
+            _LOGGER.debug(f"[v{self.version}] REST GET failed on a dropped connection ({ex}); retrying on a new connection")
+            return self.session.get(url, **kwargs)
 
     def _residence_api_get(self, url: str, context_str: str, clear_tokens_on_failure: bool = False):
         """GET a residence/account API endpoint with the shared status/auth-error handling.
@@ -2551,9 +2579,47 @@ class LDATAService:
             _LOGGER.debug(f"[v{self.version}] Panel status poll skipped — another REST poll is running")
             return False
         try:
-            return self._refresh_panel_status_locked()
+            changed = self._refresh_panel_status_locked()
+        except requests.exceptions.RequestException as ex:
+            self._record_panel_status_poll_failure(ex)
+            return False
         finally:
             self._rest_poll_lock.release()
+
+        if self._panel_status_poll_warned:
+            _LOGGER.info(
+                f"[v{self.version}] Panel status poll recovered after "
+                f"{self._panel_status_poll_failures} failed attempts"
+            )
+        self._panel_status_poll_failures = 0
+        self._panel_status_poll_warned = False
+        return changed
+
+    def _record_panel_status_poll_failure(self, ex: Exception) -> None:
+        """Count a failed panel status poll; warn once per failure streak.
+
+        A failed poll only leaves the cached panel state as it was until the
+        next poll, PANEL_STATUS_POLL_INTERVAL later, so a single failure is
+        logged at debug. The WARNING is logged once, when the streak reaches
+        PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD, and recovery is logged once
+        at INFO when a poll succeeds after that.
+        """
+        self._panel_status_poll_failures += 1
+        error = f"{type(ex).__name__}: {ex}"
+        if (
+            self._panel_status_poll_failures >= PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD
+            and not self._panel_status_poll_warned
+        ):
+            self._panel_status_poll_warned = True
+            _LOGGER.warning(
+                f"[v{self.version}] Panel status poll failed {self._panel_status_poll_failures} "
+                f"times in a row; panel connection state is not being refreshed. Last error: {error}"
+            )
+        else:
+            _LOGGER.debug(
+                f"[v{self.version}] Panel status poll failed "
+                f"(#{self._panel_status_poll_failures} in a row): {error}"
+            )
 
     def _refresh_panel_status_locked(self) -> bool:
         """Inner implementation of refresh_panel_status, called under _rest_poll_lock."""
@@ -2568,7 +2634,7 @@ class LDATAService:
             for panel_type in panel_types:
                 if panel_type not in urls:
                     continue
-                result = self.session.get(
+                result = self._get_retry_dropped_connection(
                     urls[panel_type].format(residenceId=residence_id),
                     headers=self._auth_headers(filter="{}"),
                     timeout=15,

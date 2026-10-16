@@ -52,7 +52,19 @@ CT_POLL_INTERVAL = 300.0
 # data, so its "connected" flag is re-read from the panel listing. LDATA panel-level
 # fields (voltage, frequency, alarms, RSSI, firmware) have no WebSocket
 # update path, so they are re-read from the same listing.
-PANEL_STATUS_POLL_INTERVAL = 120.0
+#
+# Kept below LEVITON_KEEPALIVE_IDLE_TIMEOUT so the session's pooled connection
+# is reused between polls instead of being closed by the server. At exactly the
+# idle timeout, each poll raced the server's close and about 1 in 20 failed with
+# RemoteDisconnected / ConnectionResetError.
+PANEL_STATUS_POLL_INTERVAL = 110.0
+
+# my.leviton.com closes a keep-alive connection after this many seconds idle.
+LEVITON_KEEPALIVE_IDLE_TIMEOUT = 120.0
+
+# Consecutive failed panel status polls before a WARNING is logged. A single
+# failure only delays the refresh by one interval, so it is logged at debug.
+PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD = 3
 
 # Settle delay (seconds) after a bandwidth toggle before fetching CT/breaker data.
 # After bandwidth:0 the panel briefly disconnects; waiting before the REST fetch
