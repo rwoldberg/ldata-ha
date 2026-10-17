@@ -368,9 +368,21 @@ class OptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Return the options form."""
         if user_input is not None:
-            if "log_fields" in user_input and not user_input["log_fields"].strip():
+            # Home Assistant's frontend leaves an emptied optional text field
+            # out of the submission, so a missing log_fields means the user
+            # cleared it.
+            user_input.setdefault("log_fields", "")
+            if not user_input["log_fields"].strip():
                 user_input["log_fields"] = ""
-            return self.async_create_entry(title="", data=user_input)
+            # The entry's options also hold keys this form does not show: the
+            # sensor platform's import-sensor classifications
+            # (confirmed_solar_import_uids, suppressed_import_uids), and the gap
+            # options when they are hidden. async_create_entry replaces all of
+            # entry.options, so start from the current options and apply the
+            # form values on top.
+            return self.async_create_entry(
+                title="", data={**self.config_entry.options, **user_input}
+            )
         
         current_options = self.config_entry.options
         current_data = self.config_entry.data
@@ -454,9 +466,11 @@ class OptionsFlow(config_entries.OptionsFlow):
                 "enable_specific_logging",
                 default=current_options.get("enable_specific_logging", False),
             ): bool,
+            # suggested_value, not default: a default would refill the stored
+            # value when the user clears the field.
             vol.Optional(
                 "log_fields",
-                default=current_options.get("log_fields", ""),
+                description={"suggested_value": current_options.get("log_fields", "")},
             ): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
         })
 

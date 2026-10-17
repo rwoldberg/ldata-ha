@@ -3441,6 +3441,14 @@ class LDATAService:
                                 break
                         
                     finally:
+                        # Keepalive requests still in flight use this session
+                        # and would outlive a cancelled loop (reload/unload),
+                        # since nothing else owns them. Cancel them, and wait a
+                        # bounded time for them to finish.
+                        for task in background_tasks:
+                            task.cancel()
+                        if background_tasks:
+                            await asyncio.wait(list(background_tasks), timeout=5)
                         notify_connection(False)
                         if not ws.closed:
                             try:
