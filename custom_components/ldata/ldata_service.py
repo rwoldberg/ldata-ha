@@ -3010,8 +3010,10 @@ class LDATAService:
                   new_status_data["cts"] = cts
                   updated = True
                   
-        # Handle IotWhem (The Panel itself)
-        elif model_name == "IotWhem":
+        # Handle IotWhem / ResidentialBreakerPanel (The Panel itself). Both
+        # carry panel fields plus embedded ResidentialBreaker (and, for
+        # IotWhem, IotCt) arrays in the same shape.
+        elif model_name in ("IotWhem", "ResidentialBreakerPanel"):
              panel_id = data.get("id")
              has_breaker_data = "ResidentialBreaker" in data
              has_ct_data = "IotCt" in data
@@ -3084,8 +3086,18 @@ class LDATAService:
                        if panel.get("id") == panel_id:
                             panel = panel.copy()
                             
-                            # Update connected status
-                            if "connected" in data:
+                            # Update connected status. LDATA panels follow the
+                            # REST rule in _is_panel_connected: a DAU reports
+                            # status "READY" instead of connected=True, so its
+                            # raw connected flag alone is not a connection state.
+                            # A DAU frame without status leaves it unchanged.
+                            if model_name == "ResidentialBreakerPanel":
+                                if panel.get("model") == "DAU":
+                                    if "status" in data:
+                                        panel["connected"] = self._is_panel_connected({**data, "model": "DAU"})
+                                elif "connected" in data:
+                                    panel["connected"] = self._is_panel_connected(data)
+                            elif "connected" in data:
                                 panel["connected"] = data["connected"]
                             
                             # Update voltage
@@ -3111,12 +3123,19 @@ class LDATAService:
                                         three_phase=self._three_phase, average=True
                                     )
                             
-                            # Update frequency
+                            # Update frequency. An LDATA panel reports no
+                            # frequency of its own (frequencyA 0), and its
+                            # frequency comes from the breakers (see
+                            # _extract_panel_fields), so a value of 0 or below
+                            # from a ResidentialBreakerPanel is ignored.
                             if "frequencyA" in data or "frequencyB" in data:
-                                if data.get("frequencyA") is not None:
-                                    panel["frequency1"] = float(data["frequencyA"])
-                                if data.get("frequencyB") is not None:
-                                    panel["frequency2"] = float(data["frequencyB"])
+                                ldata_panel = model_name == "ResidentialBreakerPanel"
+                                f1 = data.get("frequencyA")
+                                f2 = data.get("frequencyB")
+                                if f1 is not None and not (ldata_panel and float(f1) <= 0):
+                                    panel["frequency1"] = float(f1)
+                                if f2 is not None and not (ldata_panel and float(f2) <= 0):
+                                    panel["frequency2"] = float(f2)
                                 
                                 if panel.get("frequency1") is not None and panel.get("frequency2") is not None:
                                     panel["frequency"] = (panel["frequency1"] + panel["frequency2"]) / 2
@@ -3151,12 +3170,18 @@ class LDATAService:
                             elif data.get("updateAvailability") == "UP_TO_DATE":
                                 panel["available_firmware"] = None
                             
-                            # Update WiFi signal strength
+                            # Update WiFi signal strength. As in
+                            # _extract_panel_fields, an LDATA hub on Ethernet
+                            # reports rssi: null, so a present null from a
+                            # ResidentialBreakerPanel clears it. An absent key
+                            # keeps the cached value.
                             if "rssi" in data and data["rssi"] is not None:
                                 try:
                                     panel["rssi"] = float(data["rssi"])
                                 except (ValueError, TypeError):
                                     pass
+                            elif "rssi" in data and model_name == "ResidentialBreakerPanel":
+                                panel["rssi"] = None
                             
                             panels[i] = panel
                             new_status_data["panels"] = panels
@@ -3354,9 +3379,18 @@ class LDATAService:
 
         if self.status_data:
             for panel in self.status_data.get("panels", []):
+                # The WS model name matches the REST model of the panel:
+                # IotWhems/{id} for WHEMS, ResidentialBreakerPanels/{id} for
+                # LDATA. An IotWhem subscription with an LDATA panel id
+                # delivers nothing.
+                model_name = (
+                    "ResidentialBreakerPanel"
+                    if panel.get("panel_type") == "LDATA"
+                    else "IotWhem"
+                )
                 subscriptions.append({
                     "type": "subscribe",
-                    "subscription": {"modelName": "IotWhem", "modelId": panel["id"]}
+                    "subscription": {"modelName": model_name, "modelId": panel["id"]}
                 })
 
             for b_id in self.status_data.get("breakers", {}):
