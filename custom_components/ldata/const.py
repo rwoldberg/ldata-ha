@@ -107,6 +107,27 @@ HW_COUNTER_NONE_TOLERANCE = 3
 # running 24h = 1152 kWh, so 500 kWh per breaker is extremely generous.
 MAX_DAILY_ENERGY_KWH = 500.0
 
+# Hardware energy counters are only trusted while they behave like lifetime
+# counters. On a v1 panel, ldata_service.parse_panels() starts in hardware
+# mode when any breaker reports a non-zero energyConsumption, but some hubs
+# (seen on a DAU) report period-like values, or occasionally a value far above
+# anything the breaker could have drawn. Each reading that decreases, or rises
+# faster than the breaker's rating allows, counts as evidence; after
+# HW_COUNTER_DEMOTE_EVIDENCE of them the panel is switched to power×time.
+HW_COUNTER_DEMOTE_EVIDENCE = 3
+# A drop smaller than this is rounding, not evidence (matches the lifetime
+# sensors' ROUNDING_TOLERANCE).
+HW_COUNTER_DECREASE_TOLERANCE_KWH = 0.05
+# Readings below this are the transient zeros a bandwidth toggle produces and
+# are ignored, as the lifetime sensors do.
+HW_COUNTER_TRANSIENT_KWH = 1.0
+# Plausible-increase limit: rating × nominal voltage × elapsed × this margin
+# (voltage swell, rating tolerance), plus a floor for timing/rounding slack.
+HW_COUNTER_POWER_MARGIN = 1.5
+HW_COUNTER_MIN_PLAUSIBLE_KWH = 1.0
+# Used when a breaker reports no rating: the largest common residential feed.
+HW_COUNTER_DEFAULT_RATING_A = 125.0
+
 _LEG1_POSITIONS = [ 1, 2, 5, 6,  9, 10, 13, 14, 17, 18, 21, 22, 25, 26, 29, 30, 33, 34, 37, 38, 41, 42, 45, 46, 49, 50, 53, 54, 57, 58, 61, 62, 65, 66 ]
 
 # ── Decora Smart Wi-Fi Device Constants ──────────────────────────────────

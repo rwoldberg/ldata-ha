@@ -986,6 +986,16 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
                     _LOGGER.debug("Daily sensor %s: using hardware energy counters", self.entity_id)
                 else:
                     _LOGGER.debug("Daily sensor %s: using power×time fallback", self.entity_id)
+            elif self._use_hw_counters and not self._detect_mode():
+                # The service stopped trusting this panel's hardware counters
+                # (they did not behave like lifetime counters). Today's
+                # accumulated state is kept and power×time continues from it.
+                self._use_hw_counters = False
+                self._consecutive_none = 0
+                _LOGGER.debug(
+                    "Daily sensor %s: panel hardware counters no longer trusted "
+                    "— switching to power×time fallback", self.entity_id
+                )
 
             # Auto-detect energy key on first update (solar vs normal breaker)
             if self._energy_key is None and not self.panel_total:
@@ -1507,6 +1517,15 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
                     _LOGGER.debug("CT daily sensor %s: using hardware energy counters", self.entity_id)
                 else:
                     _LOGGER.debug("CT daily sensor %s: using power×time fallback", self.entity_id)
+            elif self._use_hw_counters and not self._detect_ct_mode():
+                # Panel hardware counters no longer trusted — see
+                # LDATADailyUsageSensor._state_update.
+                self._use_hw_counters = False
+                self._consecutive_none = 0
+                _LOGGER.debug(
+                    "CT daily sensor %s: panel hardware counters no longer trusted "
+                    "— switching to power×time fallback", self.entity_id
+                )
 
             today = dt_util.now().date()
             is_new_day = self._last_date is not None and self._last_date != today
@@ -1927,6 +1946,11 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         # Manual override: set via ldata.reset_energy_baseline service
         self._accept_next_value: bool = False
         self._consecutive_decrease: int = 0
+        # When the current state was last accepted (time.time()), restored from
+        # the previous run's last state so the plausibility check below also
+        # covers the time Home Assistant was down.
+        self._last_accepted_ts: float | None = None
+        self._implausible_rejections: int = 0
         # Power×time tracking for v2 panels (hw counters unavailable)
         self._last_power: float | None = None
         self._last_update_time: float | None = None  # time.time() epoch seconds
@@ -1942,7 +1966,8 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
-            except (ValueError, TypeError):
+                self._last_accepted_ts = last_state.last_updated.timestamp()
+            except (ValueError, TypeError, AttributeError):
                 pass
 
     def _use_pxt_mode(self) -> bool:
@@ -1952,6 +1977,28 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             if panel_id:
                 return not self.coordinator._service.panel_has_hw_counters(panel_id)
         return False  # default: hw counter path (safe for v1)
+
+    def _is_implausible_increase(self, new_value: float, new_data: dict) -> bool:
+        """Return True if the counter rose more than this breaker could have drawn.
+
+        Measured from the last accepted reading (or the restored state's
+        timestamp). A hub whose counter is not a real lifetime counter can
+        report a lifetime-sized value that then stays stable across polls,
+        which the pending-confirmation check in _check_spike_and_update would
+        accept. No amount of repetition makes a rise the breaker cannot carry
+        real, so this runs first. Unknown elapsed time means no check.
+        """
+        if self._state is None or self._last_accepted_ts is None:
+            return False
+        increase = new_value - float(self._state)
+        if increase <= 0:
+            return False
+        service = getattr(self.coordinator, "_service", None)
+        if service is None:
+            return False
+        elapsed = time.time() - self._last_accepted_ts
+        limit = service.max_plausible_energy_kwh({**self.breaker_data, **new_data}, elapsed)
+        return increase > limit
 
     def _update_pxt(self, new_data) -> None:
         """Accumulate lifetime energy from instantaneous power (used on v2 panels).
@@ -2041,6 +2088,7 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                     # First update — accept unconditionally
                     if self._state is None:
                         self._state = new_value
+                        self._last_accepted_ts = time.time()
                         self.async_write_ha_state()
                         return
 
@@ -2051,8 +2099,10 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                             self.entity_id, new_value, self._state
                         )
                         self._state = new_value
+                        self._last_accepted_ts = time.time()
                         self._accept_next_value = False
                         self._consecutive_decrease = 0
+                        self._implausible_rejections = 0
                         self.async_write_ha_state()
                         return
 
@@ -2072,6 +2122,22 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                     if new_value < float(self._state):
                         new_value = float(self._state)
 
+                    # Plausibility guard — a rise the breaker could not have
+                    # drawn is rejected however stable it is across polls
+                    # (the spike check below would accept it on the second
+                    # identical reading).
+                    if self._is_implausible_increase(new_value, new_data):
+                        self._implausible_rejections += 1
+                        if _log_data_warnings_enabled(self.coordinator):
+                            log_fn = _LOGGER.warning if self._implausible_rejections <= 1 else _LOGGER.debug
+                            log_fn(
+                                "Ignoring implausible increase for %s: new=%s, old=%s — more than "
+                                "this breaker could have drawn since the last accepted reading "
+                                "(use ldata.reset_energy_baseline service to accept it)",
+                                self.entity_id, new_value, self._state
+                            )
+                        return
+
                     # Spike detection using shared helper
                     new_state, self._pending_state, accepted = _check_spike_and_update(
                         self._state, self._pending_state, new_value,
@@ -2079,6 +2145,8 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                     )
                     if accepted:
                         self._state = new_state
+                        self._last_accepted_ts = time.time()
+                        self._implausible_rejections = 0
                 else:
                     if _log_warnings_enabled(self.coordinator):
                         _LOGGER.debug("Breaker %s not found in update.", self.breaker_data["id"])

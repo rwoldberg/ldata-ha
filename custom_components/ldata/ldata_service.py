@@ -20,6 +20,9 @@ from .const import (
     ENABLE_DECORA_DEFAULT, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
     CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
     PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD,
+    HW_COUNTER_DECREASE_TOLERANCE_KWH, HW_COUNTER_DEFAULT_RATING_A,
+    HW_COUNTER_DEMOTE_EVIDENCE, HW_COUNTER_MIN_PLAUSIBLE_KWH,
+    HW_COUNTER_POWER_MARGIN, HW_COUNTER_TRANSIENT_KWH,
     DEVICE_TYPE_BRIDGE, is_decora_bridge,
 )
 
@@ -169,6 +172,11 @@ class LDATAService:
         # Set True when we see non-None consumption data from a breaker.
         # When False, breaker daily sensors fall back to power×time integration.
         self._panel_has_hw_counters: dict[str, bool] = {}
+        # Last raw lifetime-counter reading per (breaker id, "consumption"/"import")
+        # as (value, time.time()), and the count of readings per panel that did
+        # not behave like a lifetime counter. See _note_hw_counter_reading().
+        self._hw_counter_seen: dict[tuple[str, str], tuple[float, float]] = {}
+        self._hw_counter_evidence: dict[str, int] = {}
         # Track how many IotWhem WS messages we've seen per panel without breaker data
         self._ws_iotwhem_count: dict[str, int] = {}
         # Detection threshold (still used for logging, but no longer triggers breaker REST poll)
@@ -1682,7 +1690,9 @@ class LDATAService:
             # Non-zero values are expected every poll cycle and do not indicate
             # that a lifetime hardware counter is available.
             # _panel_has_hw_counters is set once at startup in parse_panels()
-            # based on the firmware version; it must not be changed dynamically.
+            # and is never promoted to True afterwards. It can be demoted to
+            # False: see _note_hw_counter_reading().
+            self._note_hw_counter_reading(breaker_id, existing, "consumption")
 
         if "energyImport" in raw or "energyImport2" in raw:
             cached_ei1 = existing.get("import1", 0)
@@ -1692,7 +1702,8 @@ class LDATAService:
             if "energyImport2" in raw:
                 existing["import2"] = float(raw["energyImport2"]) if raw["energyImport2"] is not None else cached_ei2
             existing["import"] = existing["import1"] + existing["import2"]
-        
+            self._note_hw_counter_reading(breaker_id, existing, "import")
+
         return power_changed
 
     def _apply_ct_update(self, existing: dict, raw: dict) -> None:
@@ -2442,6 +2453,16 @@ class LDATAService:
                     )
             self._panel_has_hw_counters[panel["id"]] = has_hw
 
+            # A fresh parse re-decides the mode, so restart the trust check
+            # (see _note_hw_counter_reading) from these readings.
+            self._hw_counter_evidence[panel["id"]] = 0
+            seeded_at = time.time()
+            for b_id, b_data in breakers.items():
+                if b_data.get("panel_id") == panel["id"]:
+                    for key in ("consumption", "import"):
+                        if b_data.get(key) is not None:
+                            self._hw_counter_seen[(b_id, key)] = (float(b_data[key]), seeded_at)
+
             # Breaker REST polling (energyConsumption/energyImport via GET /residentialBreakers).
             # On v2+ panels these counters are not used for daily energy (period counters),
             # so skip the REST poll entirely — saves bandwidth-toggle disruptions.
@@ -2706,6 +2727,83 @@ class LDATAService:
     def panel_has_hw_counters(self, panel_id: str) -> bool:
         """Return True if the given panel has hardware energy counters."""
         return self._panel_has_hw_counters.get(panel_id, False)
+
+    def max_plausible_energy_kwh(self, breaker: dict, elapsed_s: float) -> float:
+        """Return the most energy a breaker could physically have passed in elapsed_s.
+
+        Rating × nominal voltage (120 V per pole) × time, with a margin for
+        voltage swell and rating tolerance and a small floor for timing and
+        rounding. A lifetime counter that rises by more than this between two
+        readings is not a real counter reading, however consistent it is
+        across polls. A breaker with no known rating is bounded by
+        HW_COUNTER_DEFAULT_RATING_A.
+        """
+        try:
+            rating = float(breaker.get("rating") or 0.0)
+        except (TypeError, ValueError):
+            rating = 0.0
+        if rating <= 0:
+            rating = HW_COUNTER_DEFAULT_RATING_A
+        try:
+            poles = int(breaker.get("poles") or 1)
+        except (TypeError, ValueError):
+            poles = 1
+        volts = 120.0 * min(max(poles, 1), 2)
+        kw = rating * volts / 1000.0
+        return HW_COUNTER_MIN_PLAUSIBLE_KWH + kw * max(elapsed_s, 0.0) / 3600.0 * HW_COUNTER_POWER_MARGIN
+
+    def _note_hw_counter_reading(self, breaker_id: str, breaker: dict, key: str) -> None:
+        """Track a breaker's raw lifetime-counter reading and demote untrustworthy panels.
+
+        Hardware-counter mode is chosen once at startup from whether any
+        breaker already reports a non-zero energyConsumption. That is a
+        snapshot, not proof: some hubs (seen on a DAU) report small
+        period-like values and only occasionally something lifetime-sized, so
+        the same panel can start in hardware mode on one restart and
+        power×time on the next. A real lifetime counter never decreases and
+        cannot rise faster than the breaker can carry, so each reading that
+        does either is evidence against it. After HW_COUNTER_DEMOTE_EVIDENCE of
+        them the whole panel is switched to power×time. Sensors read
+        panel_has_hw_counters() on every update, so they follow at once.
+
+        Only a hardware-mode panel is ever demoted, and a panel is never
+        promoted. Readings under HW_COUNTER_TRANSIENT_KWH are ignored: a
+        bandwidth toggle returns transient zeros even on a real counter.
+        """
+        value = breaker.get(key)
+        panel_id = breaker.get("panel_id")
+        if value is None or not panel_id:
+            return
+        value = float(value)
+        now = time.time()
+        previous = self._hw_counter_seen.get((breaker_id, key))
+        self._hw_counter_seen[(breaker_id, key)] = (value, now)
+        if previous is None or not self._panel_has_hw_counters.get(panel_id):
+            return
+        previous_value, previous_time = previous
+        if value < HW_COUNTER_TRANSIENT_KWH or previous_value < HW_COUNTER_TRANSIENT_KWH:
+            return
+        if value < previous_value - HW_COUNTER_DECREASE_TOLERANCE_KWH:
+            reason = "decreased"
+        elif value - previous_value > self.max_plausible_energy_kwh(breaker, now - previous_time):
+            reason = "rose faster than the breaker could carry"
+        else:
+            return
+
+        count = self._hw_counter_evidence.get(panel_id, 0) + 1
+        self._hw_counter_evidence[panel_id] = count
+        _LOGGER.debug(
+            f"[v{self.version}] Breaker {breaker.get('name', breaker_id)} {key} counter {reason} "
+            f"({previous_value} -> {value}); evidence {count}/{HW_COUNTER_DEMOTE_EVIDENCE} for panel {panel_id}"
+        )
+        if count >= HW_COUNTER_DEMOTE_EVIDENCE:
+            self._panel_has_hw_counters[panel_id] = False
+            _LOGGER.warning(
+                f"[v{self.version}] Panel {panel_id}: energyConsumption/energyImport is not behaving "
+                f"like a lifetime counter ({count} readings that decreased or rose faster than the "
+                f"breaker could carry) - switching this panel's energy sensors to power×time. "
+                f"Reloading the integration re-checks it."
+            )
 
     def refresh_ct_data(self) -> bool:
         """Re-fetch only CT data from the REST API and merge into status_data.
