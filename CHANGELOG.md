@@ -10,7 +10,7 @@ All notable changes to the Leviton LDATA integration are documented here.
 - **A wired LDATA hub no longer gets a Wi-Fi Signal sensor that can never show a value.** Hubs connected over Ethernet report no Wi-Fi signal, so the sensor sat on "unknown" forever. It is no longer created for them, and an existing one is removed on the next start. Wi-Fi hubs are unaffected, and the sensor now clears its reading instead of holding a stale one if a hub stops reporting a signal. (#105)
 
 ### Fixed
-- **Firmware update entities now show up in Home Assistant's Updates count as intended.** Home Assistant was filing them as diagnostic entities by default, which keeps them out of the Settings > Updates count and the sidebar badge, so a pending panel or Decora firmware update could go unnoticed.
+- **Firmware update entities are no longer filed as diagnostic.** Home Assistant categorized the panel and Decora firmware update entities as diagnostic by default, so they were listed under Diagnostic on the device page instead of with the device's main entities. They are still not counted in the "Updates available" sidebar badge or Settings card, which only count updates Home Assistant can install.
 - **LDATA panel readings no longer freeze after setup.** Voltage, frequency, over/under-voltage alarms, Wi-Fi signal and firmware version on LDATA panels now refresh every couple of minutes instead of staying at their startup values until you reload the integration. Setup also no longer fails if a panel reports no firmware version. (#104)
 - **Breaker details stay current.** The firmware, hardware, rating and model shown on each breaker, and the firmware version on its device page, now update after a breaker firmware change instead of waiting for a reload. (#106)
 - **A panel reporting 0 V is no longer ignored on WHEMS panels.** A real 0 V leg reading now shows as 0 V instead of keeping the previous voltage. (#108)
@@ -20,7 +20,7 @@ All notable changes to the Leviton LDATA integration are documented here.
 ## 2.0.12 - 2026-09-23
 
 ### Added
-- **Firmware update entities for your panel and Decora Smart Wi-Fi devices**, using Home Assistant's native Update platform. When Leviton has a newer firmware version available, it now shows up under Settings > Updates (with the usual sidebar badge), so you can set up a notification automation instead of checking the My Leviton app. Installing an update still happens there — this integration only reports availability.
+- **Firmware update entities for your panel and Decora Smart Wi-Fi devices**, using Home Assistant's native Update platform. When Leviton has a newer firmware version available, the entity turns on, so you can set up a notification automation instead of checking the My Leviton app. Because the integration cannot install firmware, Home Assistant does not count these entities in the "Updates available" sidebar badge or Settings card. Installing an update still happens there — this integration only reports availability.
 
 ### Changed
 - **The breaker "Blink LED" switch is now opt-in**, behind a new **Allow Identify** option (off by default), separate from Allow Breaker Control. Previously it was always created, even on a fully read-only setup — if you use it to physically locate breakers, enable it under Settings > Devices & Services > Leviton LDATA > Configure after upgrading. (#91)
