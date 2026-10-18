@@ -94,6 +94,19 @@ class LDATAService:
     # back, defeating the rate limit.
     _login_rate_limit_lock = threading.Lock()
 
+    # status() lists, under INCOMPLETE_FETCHES, every source whose fetch hit
+    # an error (HTTP failure, exception, invalid JSON, skipped panel). The
+    # fetch helpers log and continue on these errors, so the returned data
+    # may be missing devices that still exist; consumers that infer
+    # "Leviton no longer reports this device" from absence (e.g. manual
+    # device removal) must check this first.
+    INCOMPLETE_FETCHES = "incomplete_fetches"
+    FETCH_PANELS = "panels"
+    FETCH_DECORA = "decora"
+    # Models parse_decora_devices()/parse_bridge_devices() can report. A
+    # device registered with any other model can't be a live Decora device.
+    DECORA_MODELS = frozenset(DECORA_MODELS_ALL)
+
     def __init__(self, username, password, entry) -> None:
         """Init LDATAService."""
         self.username = username
@@ -119,6 +132,17 @@ class LDATAService:
         self._panel_status_poll_warned = False
         # Cache for the latest status data to support WebSocket updates
         self.status_data = None
+        # Sources whose fetch failed during the current status() call.
+        self._incomplete_fetches: set[str] = set()
+        # True when the residence_id_list in use came from a legacy discovery
+        # (no CONF_RESIDENCE_ID) in which a lookup failed, so the list may be
+        # missing residences. Every status() call that uses that list then
+        # marks both sources incomplete: devices of a missing residence are
+        # absent from the data without any fetch error.
+        self._residence_discovery_incomplete = False
+        # Set by _residence_api_get: True unless the last call got a 200
+        # response with a JSON body (an empty body counts as success).
+        self._residence_api_last_failed = False
         # Three-phase voltage calculation mode — cached from options so all
         # update paths (REST, WS direct, WS embedded) use the same formula.
         self._three_phase = THREE_PHASE_DEFAULT
@@ -457,6 +481,7 @@ class LDATAService:
         LDATAAuthError on 401/403/406 so callers can trigger re-auth.
         """
         headers = self._auth_headers()
+        self._residence_api_last_failed = True
         try:
             result = self.session.get(url, headers=headers, timeout=15)
             _LOGGER.debug(f"[v{self.version}] Get {context_str} result {result.status_code}: {result.text}")
@@ -469,7 +494,11 @@ class LDATAService:
 
             result_json = result.json()
             if result.status_code == 200 and len(result_json) > 0:
+                self._residence_api_last_failed = False
                 return result_json
+            if result.status_code == 200:
+                # Valid but empty listing: the lookup worked and found nothing.
+                self._residence_api_last_failed = False
 
             _LOGGER.error(f"[v{self.version}] Unable to get {context_str}!")
             if clear_tokens_on_failure:
@@ -655,12 +684,14 @@ class LDATAService:
                         f"[v{self.version}] Failed to get iotSwitches for residence {residenceId} "
                         f"(HTTP {result.status_code}): {clean_msg}"
                     )
+                    self._incomplete_fetches.add(self.FETCH_DECORA)
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
                 _LOGGER.warning(
                     f"[v{self.version}] Exception getting iotSwitches for residence {residenceId}: {e}"
                 )
+                self._incomplete_fetches.add(self.FETCH_DECORA)
         return all_switches if all_switches else None
 
     def get_iot_bridges(self) -> list:
@@ -680,12 +711,19 @@ class LDATAService:
                     raise LDATAAuthError(
                         f"[v{self.version}] Auth token invalid ({result.status_code}) during get_iot_bridges."
                     )
+                else:
+                    _LOGGER.debug(
+                        f"[v{self.version}] Could not fetch iotBridges for residence {residenceId} "
+                        f"(HTTP {result.status_code})"
+                    )
+                    self._incomplete_fetches.add(self.FETCH_DECORA)
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
                 _LOGGER.debug(
                     f"[v{self.version}] Could not fetch iotBridges for residence {residenceId}: {e}"
                 )
+                self._incomplete_fetches.add(self.FETCH_DECORA)
         return all_bridges
 
     def get_residential_rooms(self) -> dict:
@@ -849,6 +887,7 @@ class LDATAService:
             if isinstance(e, LDATAAuthError):
                 raise
             _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS {label}!")
+        self._incomplete_fetches.add(self.FETCH_PANELS)
         return None
 
     def get_Whems_breakers(self, panel_id: str) -> list[dict] | None:
@@ -888,6 +927,7 @@ class LDATAService:
                         f"[v{self.version}] Access forbidden or not acceptable (HTTP {result.status_code}) when getting {panel_type} panels for residence {residenceId}. "
                         "This may be a permission issue. Skipping."
                     )
+                     self._incomplete_fetches.add(self.FETCH_PANELS)
                      continue 
 
                 if result.status_code == 200:
@@ -901,6 +941,7 @@ class LDATAService:
                         _LOGGER.warning(
                             f"[v{self.version}] API returned invalid JSON for {panel_type} panels despite 200 OK. Response starts with: {result.text[:100]}..."
                         )
+                        self._incomplete_fetches.add(self.FETCH_PANELS)
                         continue # Skip this residence/attempt and try the next one
                         
                     for panel in returnPanels:
@@ -953,6 +994,7 @@ class LDATAService:
                                     f"WHEMS response is missing rmsVoltageA/rmsVoltageB/version "
                                     f"(e.g. a disconnected panel) — skipping this panel for this poll cycle."
                                 )
+                                self._incomplete_fetches.add(self.FETCH_PANELS)
                                 continue
                             panel["rmsVoltage"] = panel["rmsVoltageA"]
                             panel["rmsVoltage2"] = panel["rmsVoltageB"]
@@ -971,6 +1013,7 @@ class LDATAService:
                 else:
                     clean_msg = self._get_clean_error_msg(result.text)
                     _LOGGER.warning(f"[v{self.version}] Failed to get {panel_type} panels (HTTP {result.status_code}): {clean_msg}")
+                    self._incomplete_fetches.add(self.FETCH_PANELS)
 
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
@@ -978,8 +1021,171 @@ class LDATAService:
                 
                 # STOP! Do not clear tokens for generic errors.
                 _LOGGER.exception(f"[v{self.version}] Exception while getting {panel_type} Panels! Ignoring.")
+                self._incomplete_fetches.add(self.FETCH_PANELS)
         
         return allPanels
+
+    def _inventory_get(self, url: str, expect: type = list, **headers) -> typing.Any:
+        """GET a listing for fetch_device_inventory; None on any failure.
+
+        Unlike the status() fetch helpers this never raises, never clears
+        tokens and never marks _incomplete_fetches: it only reports whether
+        the listing could be read. A payload that is not an `expect`
+        instance counts as a failure.
+        """
+        try:
+            result = self.session.get(url, headers=self._auth_headers(**headers), timeout=15)
+            if result.status_code != 200:
+                _LOGGER.debug(f"[v{self.version}] Device inventory: {url} returned HTTP {result.status_code}")
+                return None
+            payload = result.json()
+        except (requests.exceptions.RequestException, ValueError) as e:
+            # ValueError covers invalid JSON (json and requests both raise
+            # a ValueError subclass).
+            _LOGGER.debug(f"[v{self.version}] Device inventory: {url} failed: {e}")
+            return None
+        if not isinstance(payload, expect):
+            _LOGGER.debug(f"[v{self.version}] Device inventory: {url} did not return a {expect.__name__}")
+            return None
+        return payload
+
+    def _inventory_residence_ids(self) -> list[str] | None:
+        """Re-discover every residence for fetch_device_inventory.
+
+        Used when the residence discovery behind residence_id_list failed
+        partway (_residence_discovery_incomplete): re-reading the listings
+        of that short list would miss the same residences again. Reads the
+        same lookups as status() (account residences, the primary residence
+        when the account lists none, and the person's residence
+        permissions), keeps every residence they return, and adds the ones
+        already in residence_id_list. Never raises, clears tokens or changes
+        residence_id_list. Returns None if any lookup could not be read.
+        """
+        if not self.account_id or not self.userid:
+            return None
+        base = "https://my.leviton.com/api"
+        residences = self._inventory_get(f"{base}/ResidentialAccounts/{self.account_id}/residences")
+        permissions = self._inventory_get(f"{base}/Person/{self.userid}/residentialPermissions")
+        if residences is None or permissions is None:
+            return None
+        ids = [r.get("id") for r in residences if isinstance(r, dict)]
+        if not ids:
+            account = self._inventory_get(f"{base}/ResidentialAccounts/{self.account_id}", expect=dict)
+            if account is None or not account.get("primaryResidenceId"):
+                return None
+            ids.append(account["primaryResidenceId"])
+        ids.extend(p.get("residenceId") for p in permissions if isinstance(p, dict))
+        ids.extend(self.residence_id_list)
+        return list(dict.fromkeys(i for i in ids if i))
+
+    def _inventory_panels(self, inventory: dict, residence_ids: list[str]) -> bool:
+        """Add every panel, breaker and CT Leviton reports to inventory.
+
+        Reads the same listings as get_ldata_panels()/get_iotWhemsPanels(),
+        but without the bandwidth toggle (which knocks the panel off the
+        cloud for 10-20 s) and without skipping WHEMS panels that lack
+        voltage fields: a panel the listing returns exists, whatever its
+        live readings. Breakers and CTs are filtered as in parse_panels().
+        Returns False if any listing could not be read.
+        """
+        base = "https://my.leviton.com/api"
+        for residence_id in residence_ids:
+            ldata = self._inventory_get(
+                f"{base}/Residences/{residence_id}/residentialBreakerPanels",
+                filter='{"include":["residentialBreakers"]}',
+            )
+            whems = self._inventory_get(f"{base}/Residences/{residence_id}/iotWhems", filter="{}")
+            if ldata is None or whems is None:
+                return False
+            panels = [(panel, panel.get("residentialBreakers"), None) for panel in ldata]
+            for panel in whems:
+                panel_id = panel.get("id")
+                if not panel_id or panel_id.startswith("LDATA-"):
+                    # Listed by residentialBreakerPanels; see _fetch_panels().
+                    continue
+                breakers = self._inventory_get(f"{base}/IotWhems/{panel_id}/residentialBreakers", filter="{}")
+                cts = self._inventory_get(f"{base}/IotWhems/{panel_id}/iotCts", filter="{}")
+                if breakers is None or cts is None:
+                    return False
+                panels.append((panel, breakers, cts))
+
+            for panel, breakers, cts in panels:
+                panel_id = panel.get("id")
+                if not panel_id:
+                    continue
+                inventory["panels"].append({"id": panel_id})
+                for breaker in breakers or []:
+                    if not breaker.get("id") or breaker.get("model") in (None, "NONE-1", "NONE-2"):
+                        continue
+                    inventory["breakers"][breaker["id"]] = {
+                        "id": breaker["id"],
+                        "stable_id": self._stable_breaker_id(breaker["id"], panel_id),
+                        "panel_id": panel_id,
+                    }
+                for ct in cts or []:
+                    if ct.get("id") is None or ct.get("usageType") == "NOT_USED":
+                        continue
+                    inventory["cts"][f"{panel_id}/{ct['id']}"] = {"id": str(ct["id"]), "panel_id": panel_id}
+        return True
+
+    def _inventory_decora(self, inventory: dict, residence_ids: list[str]) -> bool:
+        """Add every Decora device and bridge Leviton reports to inventory.
+
+        Reads the iotSwitches/iotBridges listings that status() reads and
+        parses them with the same parse_decora_devices()/
+        parse_bridge_devices(). Returns False if any listing could not be read.
+        """
+        for residence_id in residence_ids:
+            switches = self._inventory_get(
+                f"https://my.leviton.com/api/Residences/{residence_id}/iotSwitches",
+                filter=json.dumps({"include": ["iotButtons"]}),
+            )
+            bridges = self._inventory_get(f"https://my.leviton.com/api/Residences/{residence_id}/iotBridges")
+            if switches is None or bridges is None:
+                return False
+            inventory["decora_devices"].update(self.parse_decora_devices(switches))
+            inventory["decora_devices"].update(self.parse_bridge_devices(bridges))
+        return True
+
+    def fetch_device_inventory(self, sources) -> tuple[dict, set[str]]:
+        """Re-read which devices Leviton reports for the given fetch sources.
+
+        Used by manual device removal when the last status() call left a
+        source in INCOMPLETE_FETCHES. status() only runs at setup and while
+        the WebSocket is down, and no periodic poll re-lists panels,
+        breakers or Decora devices, so without this a single failed fetch
+        at startup would block removal until the entry is reloaded.
+
+        Read-only: no bandwidth toggle, and status_data and
+        _incomplete_fetches are left untouched (status_data still lacks
+        whatever the failed fetch missed, so the flag stays accurate).
+
+        If the residence discovery behind residence_id_list failed partway,
+        the residences are re-discovered first (_inventory_residence_ids);
+        if that fails too, every source fails rather than re-reading the
+        same short list.
+
+        Returns (inventory, failed). inventory has the "panels", "breakers",
+        "cts" and "decora_devices" shape of status_data, holding only the
+        fields that decide device identifiers. failed is the subset of
+        sources whose listings could not all be read.
+        """
+        inventory: dict[str, typing.Any] = {"panels": [], "breakers": {}, "cts": {}, "decora_devices": {}}
+        sources = set(sources)
+        if not self.auth_token or not self.residence_id_list:
+            return inventory, sources
+        residence_ids = list(self.residence_id_list)
+        if self._residence_discovery_incomplete:
+            residence_ids = self._inventory_residence_ids()
+            if residence_ids is None:
+                _LOGGER.debug(f"[v{self.version}] Device inventory: residence re-discovery failed")
+                return inventory, sources
+        failed: set[str] = set()
+        if self.FETCH_PANELS in sources and not self._inventory_panels(inventory, residence_ids):
+            failed.add(self.FETCH_PANELS)
+        if self.FETCH_DECORA in sources and not self._inventory_decora(inventory, residence_ids):
+            failed.add(self.FETCH_DECORA)
+        return inventory, failed
 
     def get_iotWhemsPanels(self) -> object:
         """Get the whemns modules for all the residences the user has access to."""
@@ -1648,17 +1854,35 @@ class LDATAService:
                 # flow) and is scoped to exactly one residence — skip
                 # discovering/using every residence the account can see.
                 self.residence_id_list = [configured_residence_id]
+                self._residence_discovery_incomplete = False
             else:
                 # No residence_id configured — entry predates the residence
                 # picker (or discovery found only one residence at setup
                 # time), so fall back to the original behavior of using
                 # every residence the account has access to.
                 _LOGGER.debug(f"[v{self.version}] Get Residence ID!")
-                self.get_residences()
-                if self.residence_id_list is None or len(self.residence_id_list) == 0:
-                    # User does not have multiple residences, lets try just the single residence
-                    self.get_residence()
-                self.get_residencePermissions()
+                # Each lookup that errors (as opposed to returning an empty
+                # listing) may leave residences out of the list. Track that,
+                # so status() and fetch_device_inventory() don't treat the
+                # devices of a missing residence as no longer reported.
+                discovery_failed = False
+                if not self.get_residences() and self._residence_api_last_failed:
+                    discovery_failed = True
+                # User does not have multiple residences, lets try just the single residence
+                if (
+                    not self.residence_id_list
+                    and not self.get_residence()
+                    and self._residence_api_last_failed
+                ):
+                    discovery_failed = True
+                if not self.get_residencePermissions() and self._residence_api_last_failed:
+                    discovery_failed = True
+                self._residence_discovery_incomplete = discovery_failed
+                if discovery_failed:
+                    _LOGGER.warning(
+                        f"[v{self.version}] Residence discovery was incomplete; panel and "
+                        "Decora data may be missing residences until the entry is reloaded."
+                    )
 
         if self.residence_id_list:
             self.residence_id_list = [x for x in self.residence_id_list if x is not None]
@@ -1670,6 +1894,12 @@ class LDATAService:
 
         _LOGGER.info(f"[v{self.version}] Final residence_id_list for this poll: {self.residence_id_list}")
         
+        self._incomplete_fetches = set()
+        if self._residence_discovery_incomplete:
+            # A residence may be missing from residence_id_list, so its
+            # panels and Decora devices are absent without a fetch error.
+            self._incomplete_fetches.update((self.FETCH_PANELS, self.FETCH_DECORA))
+
         # Get the breaker panels.
         panels_json = self.get_ldata_panels()
         whems_panels_json = self.get_iotWhemsPanels()
@@ -1712,6 +1942,7 @@ class LDATAService:
                     result["decora_devices"].update(bridge_devices)
                 except Exception as e:
                     _LOGGER.debug(f"[v{self.version}] Could not fetch bridges: {e}")
+                    self._incomplete_fetches.add(self.FETCH_DECORA)
 
                 decora_count = len(result["decora_devices"])
                 if decora_count > 0:
@@ -1731,12 +1962,14 @@ class LDATAService:
                 raise
             except Exception as e:
                 _LOGGER.warning(f"[v{self.version}] Failed to fetch Decora devices: {e}")
+                self._incomplete_fetches.add(self.FETCH_DECORA)
                 result["decora_devices"] = {}
                 result["rooms"] = {}
         else:
             result["decora_devices"] = {}
             result["rooms"] = {}
 
+        result[self.INCOMPLETE_FETCHES] = sorted(self._incomplete_fetches)
         return result
 
     @staticmethod
