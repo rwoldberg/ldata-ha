@@ -19,6 +19,7 @@ from .const import (
     _LEG1_POSITIONS, CONF_RESIDENCE_ID, DECORA_MODELS_ALL, ENABLE_DECORA,
     ENABLE_DECORA_DEFAULT, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
     CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
+    PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD,
     DEVICE_TYPE_BRIDGE, is_decora_bridge,
 )
 
@@ -112,6 +113,10 @@ class LDATAService:
         # Without serialization the CT toggle (bandwidth:0) can corrupt a
         # concurrent breaker GET, causing the cloud to return stale zeros.
         self._rest_poll_lock = threading.Lock()
+        # Consecutive failed panel status polls, and whether the WARNING for
+        # the current failure streak has been logged (see refresh_panel_status).
+        self._panel_status_poll_failures = 0
+        self._panel_status_poll_warned = False
         # Cache for the latest status data to support WebSocket updates
         self.status_data = None
         # Three-phase voltage calculation mode — cached from options so all
@@ -420,6 +425,29 @@ class LDATAService:
         headers = {**defaultHeaders, "authorization": self.auth_token}
         headers.update(extra)
         return headers
+
+    def _get_retry_dropped_connection(self, url: str, **kwargs):
+        """GET ``url`` on the shared session, retrying once if the connection was dropped.
+
+        The session keeps its connection to my.leviton.com alive between
+        requests, and the server closes a keep-alive connection after 120 s
+        idle. When that close races with the next request, the request fails
+        before any response with ConnectionError ("Connection aborted.",
+        RemoteDisconnected or ConnectionResetError). urllib3 discards the
+        broken connection, so the retry opens a new one. Only GETs go through
+        here, so sending the request twice is safe.
+
+        Timeouts are not retried: a ConnectTimeout or ReadTimeout means the
+        server is slow or unreachable, not that a pooled connection went
+        stale, and a retry would hold _rest_poll_lock for another timeout.
+        """
+        try:
+            return self.session.get(url, **kwargs)
+        except requests.exceptions.ConnectionError as ex:
+            if isinstance(ex, requests.exceptions.Timeout):
+                raise
+            _LOGGER.debug(f"[v{self.version}] REST GET failed on a dropped connection ({ex}); retrying on a new connection")
+            return self.session.get(url, **kwargs)
 
     def _residence_api_get(self, url: str, context_str: str, clear_tokens_on_failure: bool = False):
         """GET a residence/account API endpoint with the shared status/auth-error handling.
@@ -2551,9 +2579,47 @@ class LDATAService:
             _LOGGER.debug(f"[v{self.version}] Panel status poll skipped — another REST poll is running")
             return False
         try:
-            return self._refresh_panel_status_locked()
+            changed = self._refresh_panel_status_locked()
+        except requests.exceptions.RequestException as ex:
+            self._record_panel_status_poll_failure(ex)
+            return False
         finally:
             self._rest_poll_lock.release()
+
+        if self._panel_status_poll_warned:
+            _LOGGER.info(
+                f"[v{self.version}] Panel status poll recovered after "
+                f"{self._panel_status_poll_failures} failed attempts"
+            )
+        self._panel_status_poll_failures = 0
+        self._panel_status_poll_warned = False
+        return changed
+
+    def _record_panel_status_poll_failure(self, ex: Exception) -> None:
+        """Count a failed panel status poll; warn once per failure streak.
+
+        A failed poll only leaves the cached panel state as it was until the
+        next poll, PANEL_STATUS_POLL_INTERVAL later, so a single failure is
+        logged at debug. The WARNING is logged once, when the streak reaches
+        PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD, and recovery is logged once
+        at INFO when a poll succeeds after that.
+        """
+        self._panel_status_poll_failures += 1
+        error = f"{type(ex).__name__}: {ex}"
+        if (
+            self._panel_status_poll_failures >= PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD
+            and not self._panel_status_poll_warned
+        ):
+            self._panel_status_poll_warned = True
+            _LOGGER.warning(
+                f"[v{self.version}] Panel status poll failed {self._panel_status_poll_failures} "
+                f"times in a row; panel connection state is not being refreshed. Last error: {error}"
+            )
+        else:
+            _LOGGER.debug(
+                f"[v{self.version}] Panel status poll failed "
+                f"(#{self._panel_status_poll_failures} in a row): {error}"
+            )
 
     def _refresh_panel_status_locked(self) -> bool:
         """Inner implementation of refresh_panel_status, called under _rest_poll_lock."""
@@ -2568,7 +2634,7 @@ class LDATAService:
             for panel_type in panel_types:
                 if panel_type not in urls:
                     continue
-                result = self.session.get(
+                result = self._get_retry_dropped_connection(
                     urls[panel_type].format(residenceId=residence_id),
                     headers=self._auth_headers(filter="{}"),
                     timeout=15,
@@ -3093,7 +3159,12 @@ class LDATAService:
         Keepalive (based on official Leviton app):
         - PUT bandwidth:1 every 50 seconds (keeps WS alive)
         - GET /apiversion every 10 seconds (keeps server session alive)
-        - Subscribe once at start, re-subscribe if no data for 60 seconds
+        - Subscribe once at start. The server's own {"type":"keepalive"}
+          frames (every 30 s) prove the connection is alive; reconnect only
+          when they stop for KEEPALIVE_TIMEOUT, and re-send the subscriptions
+          on the same socket every KEEPALIVE_RESUBSCRIBE_INTERVAL without
+          data. Re-subscribe if no data for 60 seconds only on a connection
+          that sends no keepalives.
 
         decora_callback: called for Decora IotSwitch WS data specifically —
         immediate, no debounce (unlike update_callback, which the coordinator
@@ -3101,8 +3172,20 @@ class LDATAService:
         provided, so Decora updates still surface even without it wired up.
         """
         uri = "wss://socket.cloud.leviton.com/"
-        reconnect_delay = 10
+        # Wait before every connect attempt after the first. Each attempt
+        # charges the current backoff up front and doubles it (10, 20, 40 ...
+        # 300 s), so every way an attempt can fail, including the early
+        # `continue`s inside a session, waits before the next one. Only a
+        # session that was subscribed for STABLE_SESSION_SECONDS resets it.
+        RECONNECT_BASE_DELAY = 10
         max_delay = 300
+        STABLE_SESSION_SECONDS = 60
+        reconnect_delay = RECONNECT_BASE_DELAY
+        connect_wait = 0
+        # Failed attempts since the last stable session. The first one is
+        # logged at warning, the rest at debug, so a server that keeps
+        # refusing us does not flood the log.
+        failed_attempts = 0
 
         # Keep strong references to fire-and-forget keepalive tasks so they
         # aren't garbage-collected mid-execution (a known asyncio.create_task
@@ -3119,7 +3202,23 @@ class LDATAService:
         # activity. Without the app UI, we need more frequent PUTs to keep
         # the cloud pushing breaker data via WS.
         APIVERSION_HEARTBEAT_INTERVAL = 10  # GET /apiversion every 10 seconds (keeps server session alive)
-        STALE_DATA_THRESHOLD = 60        # Re-subscribe if no data for 60 seconds
+        STALE_DATA_THRESHOLD = 60        # Re-subscribe if no data for 60 seconds (no-keepalive servers only)
+        # The server sends {"type":"keepalive"} every 30 s. 90 s is three
+        # intervals: two late or lost frames plus the 15 s receive timeout
+        # never trip it, while a dead connection is still caught well within
+        # the old 6-minute re-subscribe ladder.
+        KEEPALIVE_TIMEOUT = 90
+        # Keepalives prove the socket is up, not that the server still holds
+        # our subscriptions. If it dropped them, keepalives would continue and
+        # nothing would notice until PROACTIVE_RECONNECT (55 min). So on a
+        # keepalive connection, re-send the subscriptions (same socket, no
+        # reconnect) after this long without a notification, and repeat at
+        # this interval. Idle breakers legitimately send nothing for the whole
+        # hour, so this fires on healthy connections too: 600 s keeps that to
+        # at most 5 extra subscribe rounds per connection (vs. one per minute
+        # under the old ladder) while bounding a silent subscription loss to
+        # 10 minutes instead of 55.
+        KEEPALIVE_RESUBSCRIBE_INTERVAL = 600
         PROACTIVE_RECONNECT = 3300       # Proactively reconnect every 55 minutes (before server timeout)
         
         _LOGGER.debug(f"[v{self.version}] WebSocket task starting...")
@@ -3135,14 +3234,29 @@ class LDATAService:
                 except Exception as e:
                     _LOGGER.error(f"[v{self.version}] Connection callback error: {e}")
         
+        def log_attempt_failure(message: str) -> None:
+            nonlocal failed_attempts
+            failed_attempts += 1
+            log = _LOGGER.warning if failed_attempts == 1 else _LOGGER.debug
+            log(f"[v{self.version}] {message}. Reconnecting in {connect_wait}s (failure #{failed_attempts})")
+
         while not self._shutdown_requested:
+            if connect_wait:
+                await asyncio.sleep(connect_wait)
+                connect_wait = 0
+                if self._shutdown_requested:
+                    break
             try:
                 # Ensure we have a valid token
                 if not self.auth_token:
                     _LOGGER.debug(f"[v{self.version}] No auth token, waiting...")
                     notify_connection(False)
-                    await asyncio.sleep(10)
+                    connect_wait = 10
                     continue
+
+                connect_wait = reconnect_delay
+                reconnect_delay = min(reconnect_delay * 2, max_delay)
+                session_up_at = None
                 
                 # Use a single session for both WebSocket AND HTTP calls
                 async with aiohttp.ClientSession(
@@ -3161,12 +3275,6 @@ class LDATAService:
                             for p in self.status_data["panels"]
                             if p.get("id")
                         ]
-                    
-                    # Initial bandwidth PUT
-                    await self._ws_bandwidth_put(session, panel_info)
-
-                    # Initial apiversion heartbeat
-                    await self._ws_apiversion_heartbeat(session)
                     
                     try:
                         # Compression intentionally disabled: permessage-deflate
@@ -3206,9 +3314,8 @@ class LDATAService:
                                 f"[v{self.version}] WS connect failed — "
                                 f"internet up but Leviton cloud unreachable: {e}"
                             )
+                        failed_attempts += 1
                         notify_connection(False)
-                        await asyncio.sleep(reconnect_delay)
-                        reconnect_delay = min(reconnect_delay * 2, max_delay)
                         continue
                     
                     if initial_connection:
@@ -3221,11 +3328,11 @@ class LDATAService:
                         auth_payload = self._construct_auth_payload()
                         try:
                             if ws.closed:
-                                _LOGGER.debug(f"[v{self.version}] WS closed before auth")
+                                log_attempt_failure(f"WS closed before auth (close code {ws.close_code})")
                                 continue
                             await ws.send_json(auth_payload)
                         except (aiohttp.ClientConnectionResetError, ConnectionResetError):
-                            _LOGGER.warning(f"[v{self.version}] Connection reset during auth")
+                            log_attempt_failure(f"Connection reset during auth (close code {ws.close_code})")
                             continue
                         
                         # 2. Wait for Ready
@@ -3249,10 +3356,24 @@ class LDATAService:
                                         break
                                     elif "error" in data:
                                         _LOGGER.error(f"[v{self.version}] Auth error: {data}")
+                                        failed_attempts += 1
                                         break
-                                elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                elif msg.type in (
+                                    aiohttp.WSMsgType.CLOSE,
+                                    aiohttp.WSMsgType.CLOSING,
+                                    aiohttp.WSMsgType.CLOSED,
+                                    aiohttp.WSMsgType.ERROR,
+                                ):
+                                    # For CLOSE, data is the close code and
+                                    # extra the reason; for ERROR, data is
+                                    # the exception.
+                                    log_attempt_failure(
+                                        f"WS {msg.type.name} before ready: close code "
+                                        f"{ws.close_code}, data {msg.data!r}, extra {msg.extra!r}"
+                                    )
                                     break
                         except asyncio.TimeoutError:
+                            failed_attempts += 1
                             _LOGGER.warning(f"[v{self.version}] WebSocket auth timed out.")
                             try:
                                 await ws.close()
@@ -3266,6 +3387,13 @@ class LDATAService:
                             except aiohttp.ClientConnectionResetError:
                                 pass
                             continue
+
+                        # Keepalive requests only for a session that became
+                        # ready: a socket the server closes right away would
+                        # otherwise cost a bandwidth PUT and a heartbeat
+                        # per attempt.
+                        await self._ws_bandwidth_put(session, panel_info)
+                        await self._ws_apiversion_heartbeat(session)
                         
                         # 3. Build and send subscriptions ONCE
                         retry_count = 0
@@ -3302,6 +3430,7 @@ class LDATAService:
                             _LOGGER.debug(f"[v{self.version}] Connection reset during initial subscribe")
                             continue
                         notify_connection(True)
+                        session_up_at = asyncio.get_event_loop().time()
                         
                         # Mark initial connection complete after successful subscription
                         initial_connection = False
@@ -3315,6 +3444,9 @@ class LDATAService:
                         last_bandwidth_put_time = start_time
                         last_heartbeat_time = start_time
                         last_data_time = start_time
+                        # Set once the server sends its first keepalive on this connection.
+                        last_keepalive_time = None
+                        last_keepalive_resubscribe_time = start_time
                         
                         while True:
                             current_time = asyncio.get_event_loop().time()
@@ -3350,8 +3482,32 @@ class LDATAService:
                                         pass
                                 _track_task(asyncio.create_task(_safe_heartbeat(), name="ldata_heartbeat"))
                             
+                            if last_keepalive_time is not None:
+                                # The server sends keepalives, so a stream without
+                                # notifications is just a quiet house (breakers only
+                                # report on change). Re-subscribing or reconnecting
+                                # then only opens a window that drops updates, such
+                                # as the hourly energy burst. Reconnect only when
+                                # keepalives stop too; a re-subscribe cannot revive
+                                # a connection that sends nothing at all.
+                                silent_for = current_time - max(last_keepalive_time, last_data_time)
+                                if silent_for >= KEEPALIVE_TIMEOUT:
+                                    _LOGGER.debug(f"[v{self.version}] No keepalive for {silent_for:.0f}s, forcing reconnect")
+                                    break
+                                # The socket is alive but nothing arrived for a long
+                                # time: refresh the subscriptions in case the server
+                                # dropped them. No reconnect, no limit.
+                                quiet_for = current_time - max(last_data_time, last_keepalive_resubscribe_time)
+                                if quiet_for >= KEEPALIVE_RESUBSCRIBE_INTERVAL:
+                                    last_keepalive_resubscribe_time = current_time
+                                    _LOGGER.debug(f"[v{self.version}] No data for {quiet_for:.0f}s on a keepalive connection, re-subscribing")
+                                    try:
+                                        await send_subscriptions()
+                                    except aiohttp.ClientConnectionResetError:
+                                        _LOGGER.debug(f"[v{self.version}] Connection reset during re-subscribe")
+                                        break
                             # Re-subscribe if no data for 60 seconds (max 5 per connection)
-                            if current_time - last_data_time >= STALE_DATA_THRESHOLD:
+                            elif current_time - last_data_time >= STALE_DATA_THRESHOLD:
                                 resubscribe_count += 1
                                 last_data_time = current_time
                                 if resubscribe_count <= 5:
@@ -3428,6 +3584,14 @@ class LDATAService:
                                                     update_callback()
                                             except Exception as e:
                                                 _LOGGER.error(f"[v{self.version}] Decora callback error: {e}")
+                                    elif payload.get("type") == "keepalive":
+                                        # Server-level liveness frame. It proves the
+                                        # connection is up, not that subscriptions
+                                        # deliver data, so it only feeds the keepalive
+                                        # check above, not last_data_time. Stamped at
+                                        # receipt: current_time is from before the
+                                        # (up to 15 s) receive wait.
+                                        last_keepalive_time = asyncio.get_event_loop().time()
                                 except (ValueError, json.JSONDecodeError) as e:
                                     _LOGGER.warning(f"[v{self.version}] Invalid JSON: {e}")
                                     
@@ -3456,15 +3620,20 @@ class LDATAService:
                             except aiohttp.ClientConnectionResetError:
                                 pass
                         _LOGGER.debug(f"[v{self.version}] WS session ended")
-                    
-                    reconnect_delay = 10
+                        if (
+                            session_up_at is not None
+                            and asyncio.get_event_loop().time() - session_up_at >= STABLE_SESSION_SECONDS
+                        ):
+                            # The session was subscribed and stayed up, so the
+                            # server accepts us again: reconnect after the base
+                            # delay and restart the backoff from there.
+                            failed_attempts = 0
+                            connect_wait = RECONNECT_BASE_DELAY
+                            reconnect_delay = min(RECONNECT_BASE_DELAY * 2, max_delay)
             
             except (aiohttp.ClientError, ConnectionResetError) as ex:
                 notify_connection(False)
-                _LOGGER.warning(f"[v{self.version}] WS client error: {ex}. Reconnecting in {reconnect_delay}s...")
+                _LOGGER.warning(f"[v{self.version}] WS client error: {ex}. Reconnecting in {connect_wait}s...")
             except Exception as ex:
                 notify_connection(False)
-                _LOGGER.error(f"[v{self.version}] WS error: {type(ex).__name__}: {ex}. Reconnecting in {reconnect_delay}s...")
-            
-            await asyncio.sleep(reconnect_delay)
-            reconnect_delay = min(reconnect_delay * 2, max_delay)
+                _LOGGER.error(f"[v{self.version}] WS error: {type(ex).__name__}: {ex}. Reconnecting in {connect_wait}s...")
