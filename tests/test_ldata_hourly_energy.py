@@ -6,6 +6,7 @@ import json
 import math
 import time
 from types import SimpleNamespace
+from unittest import mock as unittest_mock
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -470,16 +471,19 @@ def test_counter_after_a_gap_fill_adds_the_rest_of_the_claimed_hour() -> None:
     assert _leg(ledger)["last_hour"] == int(_ts(15, 5))
     assert _leg(ledger)["complete_until"] == int(_ts(15, 4))
 
-    # The 05-06h burst is not booked again; 06-07h is.
+    # The 05-06h burst is not booked again; 06-07h is. Only a counter can
+    # add the rest of 05-06h: it is unsettled, complete_until moves on.
     assert not ledger.apply("tech", 10, {"1": 1.0}, _ts(15, 6, 0, 29), "WS")
     assert ledger.apply("tech", 10, {"1": 1.0}, _ts(15, 7, 0, 29), "WS")
     assert ledger.lifetime("tech") == pytest.approx(30.5)
-    assert _leg(ledger)["complete_until"] == int(_ts(15, 4))
+    assert _leg(ledger)["complete_until"] == int(_ts(15, 6))
+    assert _leg(ledger)["unsettled_from"] == int(_ts(15, 5))
 
     # Counter at 07:30: 31.23 kWh up to 07:00 plus 0.5 since. The rest of
     # 05-06h (05:25-06:00) and 07:00-07:30 are added.
     assert ledger.apply("tech", 10, {"1": 1031.7}, _ts(15, 7, 30), "WS")
     assert ledger.lifetime("tech") == pytest.approx(31.6)
+    assert _leg(ledger)["unsettled_from"] is None
 
 
 def test_counter_in_step_completes_the_ledger_over_an_idle_missed_hour() -> None:
@@ -546,7 +550,10 @@ def test_ledger_stored_without_complete_until_is_migrated() -> None:
 
     assert _leg(ledger)["complete_until"] == int(_ts(14, 14))
     assert _leg(ledger, "tech", "2")["complete_until"] is None
-    assert _leg(ledger, "claimed")["complete_until"] == int(_ts(14, 15))
+    # The claimed hour can only be added by a counter: it does not hold
+    # complete_until back, it is unsettled.
+    assert _leg(ledger, "claimed")["complete_until"] == int(_ts(14, 16))
+    assert _leg(ledger, "claimed")["unsettled_from"] == int(_ts(14, 16))
     assert _leg(ledger, "ref")["complete_until"] == int(_ts(14, 15))
 
     # As before: a counter at 15:40 without a gap is left to the burst.
@@ -1105,6 +1112,29 @@ def test_websocket_burst_is_booked_for_ldata_breakers_only(clock) -> None:
     assert service.status_data["breakers"]["w1"]["consumption"] == 1235.0
 
 
+HISTORY_URL = "https://my.leviton.com/api/Residences/getAllEnergyConsumptionForDay"
+
+
+def _route_history(service: LDATAService, history: dict | None = None) -> None:
+    """Answer energy history GETs with ``history``; other GETs keep the mock's return_value."""
+    service.history = {} if history is None else history
+
+    def get(url, **kwargs):
+        if url == HISTORY_URL:
+            return SimpleNamespace(status_code=200, json=lambda: service.history)
+        return unittest_mock.DEFAULT
+
+    service.session.get.side_effect = get
+
+
+def _listing_calls(service: LDATAService) -> list:
+    return [c for c in service.session.get.call_args_list if c.args[0] != HISTORY_URL]
+
+
+def _history_calls(service: LDATAService) -> list:
+    return [c for c in service.session.get.call_args_list if c.args[0] == HISTORY_URL]
+
+
 def _listing_service(clock, listing_value: float) -> LDATAService:
     service = LDATAService("", "", None)
     service.auth_token = "token"
@@ -1115,6 +1145,7 @@ def _listing_service(clock, listing_value: float) -> LDATAService:
         status_code=200,
         json=lambda: [_ldata_panel([_raw_breaker("tech", 15, listing_value)])],
     )
+    _route_history(service)
     return service
 
 
@@ -1129,31 +1160,41 @@ def test_missed_burst_is_recovered_from_the_listing(clock) -> None:
     assert service.refresh_ldata_energy() is True
 
     assert service.energy_ledger.lifetime("tech") == pytest.approx(0.07)
-    headers = service.session.get.call_args.kwargs["headers"]
+    headers = _listing_calls(service)[0].kwargs["headers"]
     assert headers["filter"] == '{"include":["residentialBreakers"]}'
+    # Leg 2's zero repeats the booked zero (stale guard): the history is
+    # read for it, once.
+    assert len(_history_calls(service)) == 1
     # Once per hour.
     clock.value = _ts(14, 18, 30)
     assert not service.needs_ldata_energy_recovery()
     assert service.refresh_ldata_energy() is False
-    assert service.session.get.call_count == 1
+    assert len(_listing_calls(service)) == 1
+    assert len(_history_calls(service)) == 1
 
 
 def test_recovery_retries_the_listing_once_on_a_dropped_connection(clock) -> None:
     # my.leviton.com closes idle keep-alive connections; a GET that races the
     # close fails before any response and is sent again on a new connection.
     service = _listing_service(clock, 0.04)
-    listing = service.session.get.return_value
-    service.session.get.side_effect = [
+    route = service.session.get.side_effect
+    errors = [
         requests.exceptions.ConnectionError(
             ("Connection aborted.", http.client.RemoteDisconnected("Remote end closed connection without response"))
-        ),
-        listing,
+        )
     ]
+
+    def get(url, **kwargs):
+        if url != HISTORY_URL and errors:
+            raise errors.pop()
+        return route(url, **kwargs)
+
+    service.session.get.side_effect = get
     clock.value = _ts(14, 18, 6)
 
     assert service.refresh_ldata_energy() is True
 
-    assert service.session.get.call_count == 2
+    assert len(_listing_calls(service)) == 2
     assert service.energy_ledger.lifetime("tech") == pytest.approx(0.07)
     assert not service.needs_ldata_energy_recovery()
 
@@ -1177,19 +1218,21 @@ def test_recovery_reads_the_listing_once_per_hour_when_it_does_not_fill(clock) -
     clock.value = _ts(14, 18, 6)
 
     service.refresh_ldata_energy()
-    assert service.session.get.call_count == 1
+    assert len(_listing_calls(service)) == 1
+    assert len(_history_calls(service)) == 1  # The history has nothing either.
     assert not service.energy_ledger.has_delta_for("tech", int(_ts(14, 17)))
     assert service.needs_ldata_energy_recovery() is False
     for minute in (8, 10, 30, 59):
         clock.value = _ts(14, 18, minute)
         assert service.refresh_ldata_energy() is False
-    assert service.session.get.call_count == 1
+    assert service.session.get.call_count == 2
 
     # The next hour is checked again.
     clock.value = _ts(14, 19, 6)
     assert service.needs_ldata_energy_recovery() is True
     service.refresh_ldata_energy()
-    assert service.session.get.call_count == 2
+    assert len(_listing_calls(service)) == 2
+    assert len(_history_calls(service)) == 2
 
 
 def test_recovery_does_not_book_a_listing_value_left_from_the_previous_hour(clock) -> None:
@@ -1203,7 +1246,7 @@ def test_recovery_does_not_book_a_listing_value_left_from_the_previous_hour(cloc
 
     assert service.energy_ledger.lifetime("tech") == pytest.approx(0.03)
     assert not service.energy_ledger.has_delta_for("tech", int(_ts(14, 17)))
-    assert service.session.get.call_count == 1
+    assert len(_listing_calls(service)) == 1
     assert not service.needs_ldata_energy_recovery()
 
 
@@ -2522,3 +2565,300 @@ async def test_reset_energy_baseline_forced_value_keeps_following_the_ledger(
     entity._state_update()
 
     assert entity._state == pytest.approx(5.02)
+
+
+# ── Energy history (getAllEnergyConsumptionForDay) ─────────────────────
+
+
+def _history_day(day: str, values: dict[str, dict[int, float]], panel_total: dict[int, float]) -> dict:
+    """A getAllEnergyConsumptionForDay response in the live format (2026-10-18 probe).
+
+    ``values``: breaker position -> {local hour: kWh}; hours not given are 0.
+    ``panel_total``: local hour -> the panel's kWh (0 for hours the cloud
+    has not computed yet).
+    """
+    def series(per_hour):
+        return [
+            {"x": h + 1, "timestamp": f"{day} {h:02d}:00:00" + (".000000000" if h < 3 else ""),
+             "energyConsumption": per_hour.get(h, 0), "energyImport": 0,
+             "total": per_hour.get(h, 0), "totalCost": 0.0}
+            for h in range(24)
+        ]
+    return {
+        "LDATA-1": {
+            "residentialBreakers": {pos: series(v) for pos, v in values.items()},
+            "totals": series(panel_total),
+        },
+        "totals": series(panel_total),
+    }
+
+
+def _ws_power(service: LDATAService, breaker_id: str, p1: float, p2: float) -> None:
+    service._update_from_websocket(
+        {"modelName": "ResidentialBreaker", "modelId": breaker_id, "data": {"power": p1, "power2": p2}}
+    )
+
+
+def _service_1017(clock) -> LDATAService:
+    """Outlets Outside (26), Dryer (22) and Outlets counter 1 (8) as on 2026-10-17."""
+    service = LDATAService("", "", None)
+    service.auth_token = "token"
+    service.residence_id_list = ["717533"]
+    clock.value = _ts(17, 20, 6, 25)
+    service.parse_panels([_ldata_panel([
+        _raw_breaker("outside", 30, 1.46, 0.0, position=26),
+        _raw_breaker("dryer", 30, 0.0, 0.0, position=22),
+        _raw_breaker("counter1", 20, 0.15, 0.0, position=8),
+    ])])
+    service.session = MagicMock()
+    # The listing at 22:06:25 showed the 20-21h deltas again (no 22:00 burst).
+    service.session.get.return_value = SimpleNamespace(status_code=200, json=lambda: [_ldata_panel([
+        _raw_breaker("outside", 30, 1.46, 0.0, position=26),
+        _raw_breaker("dryer", 30, 0.0, 0.0, position=22),
+        _raw_breaker("counter1", 20, 0.15, 0.0, position=8),
+    ])])
+    _route_history(service)
+    # The 21:00:36 burst (20-21h), booked.
+    clock.value = _ts(17, 21, 0, 36) + 0.5
+    _ws_energy(service, "outside", 1.457519, 0.0)
+    _ws_energy(service, "dryer", 0.0, 0.0)
+    _ws_energy(service, "counter1", 0.154175, 0.0)
+    # The dryer ran 21:00-22:00 (power x time 1.458 kWh, more on leg 2).
+    clock.value = _ts(17, 21, 1, 0)
+    _ws_power(service, "dryer", 660.0, 800.0)
+    clock.value = _ts(17, 22, 0, 0)
+    _ws_power(service, "dryer", 0.0, 0.0)
+    return service
+
+
+HISTORY_1017 = {
+    # 2026-10-17 21:00 (21-22h) as the cloud reported it on 2026-10-18 10:07.
+    "26": {20: 1.46, 21: 1.47},
+    "22": {20: 0, 21: 1.41},
+    "8": {20: 0.15, 21: 0.01},
+}
+
+
+def test_hour_without_a_burst_is_booked_from_the_energy_history(clock) -> None:
+    # 2026-10-17: no burst at 22:00 with the WebSocket and the panel up. The
+    # 22:06 listing repeated the 20-21h deltas (1.46, 0.00, 0.15), which the
+    # stale guard skipped; the cloud's history had 21-22h (2.96 kWh panel).
+    service = _service_1017(clock)
+    service.history = _history_day("2026-10-17", HISTORY_1017, {20: 1.84, 21: 2.96})
+    ledger = service.energy_ledger
+    before = {k: ledger.lifetime(k) for k in ("outside", "dryer", "counter1")}
+
+    clock.value = _ts(17, 22, 6, 25)
+    assert service.needs_ldata_energy_recovery()
+    assert service.refresh_ldata_energy() is True
+
+    assert len(_listing_calls(service)) == 1
+    calls = _history_calls(service)
+    assert len(calls) == 1
+    assert calls[0].kwargs["params"] == {
+        "id": "717533", "startDay": "2026-10-17", "timezone": "America/Los_Angeles"
+    }
+    assert ledger.lifetime("outside") - before["outside"] == pytest.approx(1.47)
+    assert ledger.lifetime("dryer") - before["dryer"] == pytest.approx(1.41)
+    assert ledger.lifetime("counter1") - before["counter1"] == pytest.approx(0.01)
+    # The dryer's hour is split by each leg's power x time (660 : 800 W).
+    dryer = ledger.as_dict()["breakers"]["dryer"]["legs"]
+    assert dryer["1"]["lifetime"] == pytest.approx(1.41 * 660 / 1460, abs=1e-6)
+    assert dryer["2"]["lifetime"] == pytest.approx(1.41 * 800 / 1460, abs=1e-6)
+    # The hour is complete, and the stale-listing reference is unchanged.
+    outside = _leg(ledger, "outside")
+    assert outside["last_hour"] == int(_ts(17, 21))
+    assert outside["complete_until"] in (None, int(_ts(17, 21)))
+    assert outside["last_value"] == 1.457519
+    assert ledger.has_delta_for("outside", int(_ts(17, 21)))
+    assert not service.needs_ldata_energy_recovery()
+
+    # The 23:00:36 burst (22-23h) books its own hour; the listing and the
+    # history later in the hour add nothing twice.
+    clock.value = _ts(17, 23, 0, 36) + 0.5
+    _ws_energy(service, "outside", 1.452637, 0.0)
+    _ws_energy(service, "dryer", 0.825501, 0.999802)
+    _ws_energy(service, "counter1", 0.003662, 0.0)
+    total = ledger.lifetime("outside")
+    clock.value = _ts(17, 23, 6, 25)
+    assert not service.needs_ldata_energy_recovery()
+    assert service.refresh_ldata_energy() is False
+    assert ledger.lifetime("outside") == pytest.approx(total)
+    assert len(_history_calls(service)) == 1
+    # 19-20h from the startup listing, then 20-21h, 21-22h and 22-23h.
+    assert _today(ledger, "outside", 17) == pytest.approx(1.46 + 1.457519 + 1.47 + 1.452637)
+
+
+def test_history_hour_and_a_later_counter_do_not_double_count() -> None:
+    ledger = LDATAEnergyLedger()
+    # Outlets Outside with a reference counter, its 20-21h burst, no 22:00
+    # burst, 21-22h from the history, the 22-23h burst.
+    ledger.apply("outside", 30, {"1": 2140.0}, _ts(17, 20, 30), "WS")
+    ledger.apply("outside", 30, {"1": 1.457519}, _ts(17, 21, 0, 36), "WS")
+    assert ledger.apply_history("outside", int(_ts(17, 21)), 1.47)
+    ledger.apply("outside", 30, {"1": 1.452637}, _ts(17, 23, 0, 36), "WS")
+    state = _leg(ledger, "outside")
+    assert state["complete_until"] == int(_ts(17, 22))
+
+    # The next counter (the hub reconnects at 23:40) proves nothing missing:
+    # 2140.0 plus about 0.73 kWh before the burst plus the three hours.
+    lifetime = ledger.lifetime("outside")
+    ledger.apply("outside", 30, {"1": 2144.7}, _ts(17, 23, 40), "WS")
+    assert ledger.lifetime("outside") == pytest.approx(lifetime)
+    # A second history read for 21-22h is a duplicate.
+    assert not ledger.apply_history("outside", int(_ts(17, 21)), 1.47)
+
+
+def test_history_fills_a_gap_behind_a_booked_hour() -> None:
+    # The history had not computed 21-22h at 22:06 (panel total 0); at 23:06
+    # it has, after the 23:00 burst booked 22-23h.
+    ledger = LDATAEnergyLedger()
+    ledger.apply("outside", 30, {"1": 2140.0}, _ts(17, 20, 30), "WS")
+    ledger.apply("outside", 30, {"1": 1.457519}, _ts(17, 21, 0, 36), "WS")
+    ledger.apply("outside", 30, {"1": 1.452637}, _ts(17, 23, 0, 36), "WS")
+    assert _leg(ledger, "outside")["complete_until"] == int(_ts(17, 20))
+    assert ledger.history_hours_needed("outside", int(_ts(17, 12)), int(_ts(17, 22))) == [int(_ts(17, 21))]
+
+    assert ledger.apply_history("outside", int(_ts(17, 21)), 1.47)
+
+    state = _leg(ledger, "outside")
+    assert state["complete_until"] == int(_ts(17, 22))
+    assert state["last_hour"] == int(_ts(17, 22))
+    assert state["last_value"] == 1.452637
+    assert ledger.history_hours_needed("outside", int(_ts(17, 12)), int(_ts(17, 22))) == []
+    assert not ledger.apply_history("outside", int(_ts(17, 22)), 1.45)
+
+
+def test_history_does_not_book_an_hour_claimed_by_a_counter() -> None:
+    # 2026-10-17 04:56:50: the tech cabinet counter 1158.5 claimed 04-05h.
+    ledger = LDATAEnergyLedger()
+    ledger.apply("tech", 15, {"1": 1158.1}, _ts(16, 17, 27, 6), "WS")
+    ledger.apply("tech", 15, {"1": 0.0321}, _ts(16, 18, 0, 36), "WS")
+    ledger.apply("tech", 15, {"1": 1158.5}, _ts(17, 4, 56, 50), "WS")
+    claimed = _leg(ledger, "tech")
+    assert claimed["last_source"] == "counter"
+
+    for hour in (2, 3, 4):  # Covered by the counter.
+        assert not ledger.apply_history("tech", int(_ts(17, hour)), 0.04)
+    # The hour after the claim is not covered.
+    assert ledger.apply_history("tech", int(_ts(17, 5)), 0.04)
+    # Nor is the claimed hour once later hours are booked.
+    ledger.apply("tech", 15, {"1": 0.0329}, _ts(17, 7, 0, 36), "WS")
+    assert not ledger.apply_history("tech", int(_ts(17, 4)), 0.04)
+    assert ledger.history_hours_needed("tech", int(_ts(17, 0)), int(_ts(17, 6))) == []
+
+
+def test_history_does_not_book_before_a_legs_first_delta_or_in_an_old_ledger() -> None:
+    ledger = LDATAEnergyLedger()
+    ledger.apply("new", 15, {"1": 0.03}, _ts(17, 12, 0, 36), "WS")
+    # The ledger starts at 11-12h: earlier hours are not missing.
+    assert ledger.history_hours_needed("new", int(_ts(17, 0)), int(_ts(17, 11))) == []
+    assert not ledger.apply_history("new", int(_ts(17, 10)), 0.03)
+
+    # A ledger stored before booked_hours existed: which hours between
+    # complete_until and last_hour were booked is unknown.
+    stored = LDATAEnergyLedger()
+    stored.apply("outside", 30, {"1": 2140.0}, _ts(17, 20, 30), "WS")
+    stored.apply("outside", 30, {"1": 1.457519}, _ts(17, 21, 0, 36), "WS")
+    stored.apply("outside", 30, {"1": 1.452637}, _ts(17, 23, 0, 36), "WS")
+    data = stored.as_dict()
+    for state in data["breakers"]["outside"]["legs"].values():
+        del state["booked_hours"]
+        del state["history_floor"]
+    loaded = LDATAEnergyLedger()
+    loaded.load(data)
+    assert loaded.history_hours_needed("outside", int(_ts(17, 12)), int(_ts(17, 22))) == []
+    # Hours after the last booked one are filled again.
+    assert loaded.history_hours_needed("outside", int(_ts(17, 12)), int(_ts(17, 23))) == [int(_ts(17, 23))]
+
+
+def test_history_hour_not_computed_yet_is_retried_next_hour(clock) -> None:
+    service = _service_1017(clock)
+    # At 22:06 the history shows 0 for 21-22h on the whole panel.
+    service.history = _history_day("2026-10-17", {"26": {20: 1.46}}, {20: 1.84})
+    clock.value = _ts(17, 22, 6, 25)
+    service.refresh_ldata_energy()
+    assert not service.energy_ledger.has_delta_for("outside", int(_ts(17, 21)))
+    assert len(_history_calls(service)) == 1
+    clock.value = _ts(17, 22, 40)
+    assert not service.needs_ldata_energy_recovery()
+
+    # 23:00:36 burst, then the 23:06 read has 21-22h.
+    clock.value = _ts(17, 23, 0, 36) + 0.5
+    for key, ec in (("outside", 1.452637), ("dryer", 1.825303), ("counter1", 0.003662)):
+        _ws_energy(service, key, ec, 0.0)
+    service.history = _history_day("2026-10-17", HISTORY_1017, {20: 1.84, 21: 2.96, 22: 3.35})
+    before = service.energy_ledger.lifetime("outside")
+    clock.value = _ts(17, 23, 6, 25)
+    assert service.needs_ldata_energy_recovery()
+    assert service.refresh_ldata_energy() is True
+    assert len(_listing_calls(service)) == 1  # The 22-23h burst arrived: no listing read.
+    assert service.energy_ledger.lifetime("outside") - before == pytest.approx(1.47)
+    assert service.energy_ledger.history_hours_needed("outside", int(_ts(17, 12)), int(_ts(17, 22))) == []
+
+
+def test_history_is_not_read_while_the_panel_is_offline_or_settling(clock) -> None:
+    service = _service_1017(clock)
+    service.history = _history_day("2026-10-17", HISTORY_1017, {20: 1.84, 21: 2.96})
+    service.status_data["panels"][0]["connected"] = False
+    clock.value = _ts(17, 22, 6, 25)
+    service.observe_ldata_panels()
+    service.refresh_ldata_energy()
+    assert _history_calls(service) == []
+
+    service.status_data["panels"][0]["connected"] = True
+    clock.value = _ts(17, 22, 7)
+    service.observe_ldata_panels()
+    assert service.refresh_ldata_energy() is False
+    assert _history_calls(service) == []
+    clock.value = _ts(17, 22, 7) + ldata_energy.PANEL_RECONNECT_SETTLE_SECS
+    assert service.refresh_ldata_energy() is True
+    assert len(_history_calls(service)) == 1
+
+
+def test_history_timestamps_around_daylight_saving_changes() -> None:
+    tz = ZoneInfo("America/Los_Angeles")
+    hour = ldata_service._history_hour
+    assert hour({"timestamp": "2026-10-17 21:00:00"}, tz) == int(_ts(17, 21))
+    assert hour({"timestamp": "2026-10-17 00:00:00.000000000"}, tz) == int(_ts(17, 0))
+    # 01:00 happens twice on 2026-11-01 and 02:00 does not exist on 2027-03-14.
+    assert hour({"timestamp": "2026-11-01 01:00:00"}, tz) is None
+    assert hour({"timestamp": "2027-03-14 02:00:00"}, tz) is None
+    assert hour({"timestamp": "bad"}, tz) is None
+    assert ldata_service._history_kwh({"energyConsumption": 1.47}) == 1.47
+    for bad in (None, -1, True, "1.4", float("nan")):
+        assert ldata_service._history_kwh({"energyConsumption": bad}) is None
+
+
+def test_history_split_falls_back_to_the_last_deltas_then_equal() -> None:
+    ledger = LDATAEnergyLedger()
+    ledger.apply("dryer", 30, {"1": 0.825501, "2": 0.999802}, _ts(17, 23, 0, 36), "WS")
+    assert ledger.apply_history("dryer", int(_ts(17, 23)), 1.53)
+    legs = ledger.as_dict()["breakers"]["dryer"]["legs"]
+    assert legs["1"]["lifetime"] - 0.825501 == pytest.approx(1.53 * 0.825501 / 1.825303, abs=1e-6)
+
+    idle = LDATAEnergyLedger()
+    idle.apply("dryer", 30, {"1": 0.0, "2": 0.0}, _ts(17, 21, 0, 36), "WS")
+    assert idle.apply_history("dryer", int(_ts(17, 21)), 1.41)
+    legs = idle.as_dict()["breakers"]["dryer"]["legs"]
+    assert legs["1"]["lifetime"] == pytest.approx(0.705)
+    assert legs["2"]["lifetime"] == pytest.approx(0.705)
+    # A leg that never reported (energyConsumption2 null) gets nothing.
+    single = LDATAEnergyLedger()
+    single.apply("lights", 15, {"1": 0.0012, "2": None}, _ts(17, 21, 0, 36), "WS")
+    assert single.apply_history("lights", int(_ts(17, 21)), 0.01)
+    assert single.as_dict()["breakers"]["lights"]["legs"]["1"]["lifetime"] == pytest.approx(0.0112)
+
+
+def test_history_waits_while_the_listing_of_the_hour_is_unread(clock) -> None:
+    # The listing shows the panel offline: the hour is not marked as read,
+    # and the history is not read before it.
+    service = _service_1017(clock)
+    service.history = _history_day("2026-10-17", HISTORY_1017, {20: 1.84, 21: 2.96})
+    service.session.get.return_value = SimpleNamespace(
+        status_code=200, json=lambda: [_offline(_ldata_panel([_raw_breaker("outside", 30, 1.46, 0.0, position=26)]))]
+    )
+    clock.value = _ts(17, 22, 6, 25)
+    service.refresh_ldata_energy()
+    assert len(_listing_calls(service)) == 1
+    assert _history_calls(service) == []

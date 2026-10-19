@@ -34,7 +34,13 @@ breaker and leg:
 - Each leg tracks ``complete_until``, the last hour up to which the ledger
   has all of the leg's energy. It advances over hours booked one after
   another, and when a lifetime counter matches the ledger or becomes the
-  reference. A missed hour stops it, also when later hours are booked.
+  reference. A missed hour stops it, also when later hours are booked,
+  until the hour is booked from the history or a lifetime counter adds it.
+  An hour that nothing but a lifetime counter can add any more (up to
+  ``history_floor``, see below) does not stop it: such an hour is
+  recorded in ``unsettled_from`` instead, the first hour the ledger may
+  be short of, and the next counter adds all the energy it proves
+  missing, as it would with ``complete_until`` before that hour.
 - A lifetime counter never lowers the ledger. The counter is the cloud's
   lifetime total quantized to 0.1 kWh, so it only says that the true total
   lies in a 0.1 kWh window. The ledger keeps the offset between the cloud
@@ -57,6 +63,15 @@ breaker and leg:
   current hour up to now, so that hour is claimed (its burst is not booked)
   while ``complete_until`` stays at the hour before it: the next counter
   adds the rest of the claimed hour.
+- The cloud's energy history (``getAllEnergyConsumptionForDay``: kWh per
+  breaker and hour, 0.01 kWh resolution) has the hours the burst and the
+  listing missed. ``apply_history`` books such an hour, split over the
+  legs, only if no delta, listing value or lifetime counter covers it: an
+  hour after ``complete_until`` that was not booked (``booked_hours`` keeps
+  the hours booked after a gap, so a filled gap moves ``complete_until``
+  over them), not claimed by a counter and not before ``history_floor``.
+  A history hour does not change ``last_value``, the stale-listing
+  reference.
 - Daily totals are bucketed by the local date of the hour the energy was used
   in, so the burst just after 00:00 counts for the previous day.
 
@@ -173,6 +188,16 @@ REST_AMBIGUOUS_MIN_KWH = 0.1
 # LDATAEnergyLedger._may_be_stale_listing).
 STALE_LISTING_TOLERANCE_KWH = 0.005 + 1e-9
 
+# Hours booked after complete_until (a gap) that each leg remembers, so a
+# gap filled later from the energy history moves complete_until over them.
+# Older ones are dropped, and history_floor moves over them (see
+# LDATAEnergyLedger._advance_complete); the energy history is read only for
+# the last 36 h (LDATA_HISTORY_LOOKBACK_SECS).
+BOOKED_HOURS_KEEP = 72
+
+# last_source of an hour booked from the cloud's energy history.
+HISTORY_SOURCE = "HISTORY"
+
 # Daily totals kept per breaker (today, yesterday and one spare).
 DAILY_KEEP_DAYS = 3
 
@@ -284,6 +309,7 @@ class LDATAEnergyLedger:
     def load(self, data: dict | None) -> None:
         """Load a dict produced by ``as_dict``. Invalid entries are dropped."""
         breakers: dict[str, dict[str, Any]] = {}
+        settled = False
         stored = data.get("breakers") if isinstance(data, dict) else None
         for key, record in (stored if isinstance(stored, dict) else {}).items():
             if not isinstance(record, dict):
@@ -307,7 +333,17 @@ class LDATAEnergyLedger:
                     "last_value": _number(raw.get("last_value")),
                     "last_source": raw.get("last_source") if isinstance(raw.get("last_source"), str) else None,
                     "last_counter": _number(raw.get("last_counter")),
+                    "booked_hours": sorted(
+                        {h for h in raw.get("booked_hours") or [] if _hour(h) is not None}
+                    )[-BOOKED_HOURS_KEEP:] if isinstance(raw.get("booked_hours"), list) else [],
+                    "history_floor": _hour(raw.get("history_floor")),
+                    "unsettled_from": _hour(raw.get("unsettled_from")),
                 }
+                if "history_floor" not in raw:
+                    # Stored before booked_hours existed: which hours after
+                    # complete_until were booked is unknown, so none up to
+                    # the last booked one is filled from the history.
+                    legs[leg]["history_floor"] = legs[leg]["last_hour"]
                 if "complete_until" not in raw:
                     legs[leg]["complete_until"] = _migrated_complete_until(legs[leg])
                 if legs[leg]["offset"] is None:
@@ -319,6 +355,12 @@ class LDATAEnergyLedger:
                     legs[leg]["offset_max"] = legs[leg]["offset"] + (
                         COUNTER_STEP_KWH if last_counter is None else counter_window_kwh(last_counter)
                     )
+                # A ledger stored with complete_until held back by hours
+                # that nothing but a lifetime counter can add any more (see
+                # _settle_unbookable) moves past them now, and is saved.
+                complete = legs[leg]["complete_until"]
+                self._advance_complete(legs[leg])
+                settled |= legs[leg]["complete_until"] != complete
             stored_daily = record.get("daily") if isinstance(record.get("daily"), dict) else {}
             daily = {
                 day: _number(value)
@@ -328,7 +370,7 @@ class LDATAEnergyLedger:
             breakers[str(key)] = {"legs": legs, "daily": daily}
         with self._lock:
             self._breakers = breakers
-            self.dirty = False
+            self.dirty = settled
 
     def as_dict(self) -> dict:
         """Return a JSON-serialisable copy of the ledger."""
@@ -482,6 +524,9 @@ class LDATAEnergyLedger:
                             "last_value": None,
                             "last_source": None,
                             "last_counter": None,
+                            "booked_hours": [],
+                            "history_floor": None,
+                            "unsettled_from": None,
                         }
                         for leg in LEGS
                     },
@@ -533,17 +578,100 @@ class LDATAEnergyLedger:
                         "counter", label, leg, value,
                     )
                     continue
+                if state["last_hour"] is None:
+                    # The ledger starts here for this leg: the hours before
+                    # it are not missing (a lifetime counter takes them in
+                    # as the reference), so none is taken from the history.
+                    state["history_floor"] = max(state["history_floor"] or 0, hour - HOUR_SECS)
                 state["lifetime"] += value
                 state["last_hour"] = hour
-                if state["complete_until"] == hour - HOUR_SECS:
-                    # Contiguous with the complete hours. complete_until is
-                    # set first by the lifetime counter reference.
-                    state["complete_until"] = hour
+                self._mark_booked(state, hour)
                 state["last_value"] = value
                 state["last_source"] = source
                 self._add_daily(record, hour, value)
                 changed = True
 
+            if changed:
+                self.dirty = True
+        return changed
+
+    @staticmethod
+    def _history_fillable(state: dict, hour: int) -> bool:
+        """Return True if ``hour`` of a leg has no energy in the ledger yet and may come from the history."""
+        if state["last_hour"] is None:
+            return False  # The leg never had a delta (energyConsumption2 null).
+        if state["history_floor"] is not None and hour <= state["history_floor"]:
+            return False  # Claimed by a counter, or before booked_hours existed.
+        if state["complete_until"] is not None and hour <= state["complete_until"]:
+            return False
+        return hour != state["last_hour"] and hour not in state["booked_hours"]
+
+    def history_hours_needed(self, key: str, since: int, until: int) -> list[int]:
+        """Return the hours in [since, until] for which a leg of the breaker could use the history."""
+        with self._lock:
+            record = self._breakers.get(key)
+            if record is None:
+                return []
+            return sorted({
+                hour
+                for hour in range(since, until + 1, HOUR_SECS)
+                for state in record["legs"].values()
+                if self._history_fillable(state, hour)
+            })
+
+    def apply_history(
+        self,
+        key: str,
+        hour: int,
+        kwh: float,
+        shares: dict[str, float] | None = None,
+        name: str | None = None,
+    ) -> bool:
+        """Book one hour of the cloud's energy history for a breaker (both legs together).
+
+        ``kwh`` is the breaker's energy for the hour starting at epoch
+        ``hour``; ``shares`` splits it over the legs (e.g. from each leg's
+        power x time in that hour; it is normalised). Without shares, the
+        last booked deltas of the legs give the split, else the legs share
+        it equally. Only legs for which the hour is fillable (see
+        ``_history_fillable``) are booked, each with its share; the others
+        keep what they have. Returns True if the ledger changed.
+        """
+        value = _number(kwh)
+        if value is None:
+            return False
+        label = name or key
+        with self._lock:
+            record = self._breakers.get(key)
+            if record is None:
+                return False
+            legs = {leg: state for leg, state in record["legs"].items() if state["last_hour"] is not None}
+            if not legs:
+                return False
+            weights = {leg: max(_number((shares or {}).get(leg)) or 0.0, 0.0) for leg in legs}
+            if sum(weights.values()) <= 0:
+                weights = {leg: state["last_value"] or 0.0 for leg, state in legs.items()}
+            if sum(weights.values()) <= 0:
+                weights = dict.fromkeys(legs, 1.0)
+            total = sum(weights.values())
+            changed = False
+            for leg, state in legs.items():
+                if not self._history_fillable(state, hour):
+                    continue
+                part = _kwh(value * weights[leg] / total)
+                state["lifetime"] += part
+                if hour > state["last_hour"]:
+                    state["last_hour"] = hour
+                    # last_value stays: the listing keeps showing the last
+                    # burst's delta, which _may_be_stale_listing compares with.
+                    state["last_source"] = HISTORY_SOURCE
+                self._mark_booked(state, hour)
+                self._add_daily(record, hour, part)
+                changed = True
+                _LOGGER.debug(
+                    "Breaker %s leg %s: %.3f kWh for the hour from %s booked from the energy history",
+                    label, leg, part, dt_util.as_local(dt_util.utc_from_timestamp(hour)).strftime("%Y-%m-%d %H:%M"),
+                )
             if changed:
                 self.dirty = True
         return changed
@@ -644,6 +772,11 @@ class LDATAEnergyLedger:
             # lower the offset by energy the counter does not contain yet.
             return False
         state["last_counter"] = value
+        # The hours only a counter could add are this counter's to add (or
+        # to leave to the window); _settle_unbookable records them again if
+        # some remain below complete_until after it.
+        unsettled = state["unsettled_from"]
+        state["unsettled_from"] = None
 
         if state["offset"] is None:
             self._set_reference(state, value, received)
@@ -676,7 +809,7 @@ class LDATAEnergyLedger:
         if missing <= 0:
             # Nothing provably missing: the ledger is complete up to now.
             state["anchor_time"] = received
-            state["complete_until"] = delta_hour(received)
+            self._set_complete(state, delta_hour(received))
             return True
 
         # The most the breaker can have used since the ledger was last known
@@ -684,7 +817,11 @@ class LDATAEnergyLedger:
         # counter, whichever is later.
         known_until = state["anchor_time"] or 0.0
         if state["complete_until"] is not None:
-            known_until = max(known_until, state["complete_until"] + HOUR_SECS)
+            known_until = max(
+                known_until,
+                state["complete_until"] + HOUR_SECS if unsettled is None
+                else min(state["complete_until"] + HOUR_SECS, unsettled),
+            )
         possible = bound * max(received - known_until, 0.0) / HOUR_SECS + bound
         if known_until <= 0 or missing > possible:
             # A counter jump the breaker cannot physically explain (a reset
@@ -699,7 +836,8 @@ class LDATAEnergyLedger:
             return True
 
         if (
-            state["complete_until"] is not None
+            unsettled is None
+            and state["complete_until"] is not None
             and state["complete_until"] >= delta_hour(received)
             and missing <= _kwh(bound * (received - hour_start(received)) / HOUR_SECS)
         ):
@@ -709,7 +847,8 @@ class LDATAEnergyLedger:
             # next counter adds it). More than the breaker can have used
             # since the start of the hour means complete_until is wrong (a
             # gap it did not track, e.g. in a ledger stored before the field
-            # existed): the excess is added below as missed energy.
+            # existed): the excess is added below as missed energy. So is
+            # any excess while hours only a counter can add are unsettled.
             state["anchor_time"] = received
             _LOGGER.debug(
                 "Breaker %s leg %s: lifetime counter %.1f kWh is %.3f kWh above the "
@@ -730,6 +869,10 @@ class LDATAEnergyLedger:
         current_hour = hour_start(received)
         if state["last_hour"] is None or state["last_hour"] < current_hour:
             state["last_hour"] = current_hour
+        # Everything up to now is in the ledger, but the claimed hour is not
+        # complete: no hour up to it may be booked from the history.
+        state["history_floor"] = max(state["history_floor"] or current_hour, current_hour)
+        state["booked_hours"] = [h for h in state["booked_hours"] if h > current_hour]
         state["complete_until"] = delta_hour(received)
         # The hour is claimed by the counter: no delta to correct. The last
         # booked delta stays in last_value: the listing may still show it,
@@ -750,7 +893,67 @@ class LDATAEnergyLedger:
         state["offset"] = value - state["lifetime"]
         state["offset_max"] = value + counter_window_kwh(value) - state["lifetime"]
         state["anchor_time"] = received
-        state["complete_until"] = delta_hour(received)
+        LDATAEnergyLedger._set_complete(state, delta_hour(received))
+
+    @staticmethod
+    def _set_complete(state: dict, hour: int) -> None:
+        """Set complete_until to ``hour`` and move it over the hours booked after it."""
+        state["complete_until"] = hour
+        LDATAEnergyLedger._advance_complete(state)
+
+    @staticmethod
+    def _settle_unbookable(state: dict) -> bool:
+        """Move ``complete_until`` over hours that nothing but a lifetime counter can add.
+
+        Up to ``history_floor`` no hour is taken from the history, and no
+        delta is booked for an hour before ``last_hour``, which is never
+        before ``history_floor``. A missed hour there (one claimed by a
+        counter, or a gap before the first delta after a reference) is
+        added only by a lifetime counter, so holding ``complete_until``
+        before it stops the leg for good when no counter comes. Such hours
+        are recorded in ``unsettled_from`` instead: the next counter adds
+        all the energy it proves missing (see ``_apply_lifetime``), as it
+        would with ``complete_until`` before them. Returns True if
+        ``complete_until`` moved.
+        """
+        complete = state["complete_until"]
+        floor = state["history_floor"]
+        if complete is None or floor is None or complete >= floor:
+            return False
+        first = complete + HOUR_SECS
+        state["unsettled_from"] = min(state["unsettled_from"] or first, first)
+        state["complete_until"] = floor
+        return True
+
+    @staticmethod
+    def _advance_complete(state: dict) -> None:
+        """Move complete_until over the hours booked after it, and over unbookable hours."""
+        while True:
+            complete = state["complete_until"]
+            booked = sorted(set(state["booked_hours"]))
+            if complete is not None:
+                while complete + HOUR_SECS in booked:
+                    complete += HOUR_SECS
+                state["complete_until"] = complete
+                booked = [h for h in booked if h > complete]
+            if len(booked) > BOOKED_HOURS_KEEP:
+                # A booked hour dropped from the list would look missed and
+                # could be booked again from the history: history_floor moves
+                # over it, and the hours still missed below it are unsettled.
+                state["history_floor"] = max(state["history_floor"] or 0, booked[-BOOKED_HOURS_KEEP - 1])
+                booked = booked[-BOOKED_HOURS_KEEP:]
+            state["booked_hours"] = booked
+            if not LDATAEnergyLedger._settle_unbookable(state):
+                return
+
+    @staticmethod
+    def _mark_booked(state: dict, hour: int) -> None:
+        """Record that ``hour`` was booked: contiguous hours extend complete_until."""
+        complete = state["complete_until"]
+        if complete is not None and hour <= complete:
+            return
+        state["booked_hours"] = [*state["booked_hours"], hour]
+        LDATAEnergyLedger._advance_complete(state)
 
     @staticmethod
     def _add_daily(record: dict, hour: int, value: float) -> None:
