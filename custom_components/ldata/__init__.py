@@ -16,9 +16,10 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
+from homeassistant.helpers.storage import Store
 
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER, PANEL_SUBENTRY_TYPE
-from .coordinator import LDATAUpdateCoordinator
+from .coordinator import ENERGY_STORE_VERSION, LDATAUpdateCoordinator, energy_store_key
 from .ldata_service import (
     LDATAAuthError,
     LDATAConnectionError,
@@ -82,13 +83,95 @@ def _get_sensor_entity(hass: HomeAssistant, entity_id: str):
     return None
 
 
+async def _async_reset_energy_baseline(hass: HomeAssistant, data) -> None:
+    """Apply the reset_energy_baseline service to one LDATA energy sensor."""
+    entity_id = data[ATTR_ENTITY_ID]
+    new_value = data.get(ATTR_VALUE)
+    new_baseline = data.get(ATTR_BASELINE)
+
+    # Find the entity object through the entity platform, but only if
+    # it belongs to one of our config entries.
+    target_entity = None
+    ent_reg = er.async_get(hass)
+    ent_entry = ent_reg.async_get(entity_id)
+    if ent_entry is not None and ent_entry.config_entry_id in hass.data[DOMAIN]:
+        target_entity = _get_sensor_entity(hass, entity_id)
+
+    if target_entity is None:
+        _LOGGER.error(
+            "Could not find entity %s — ensure it is an LDATA energy sensor",
+            entity_id
+        )
+        return
+
+    if not hasattr(target_entity, "_accept_next_value"):
+        _LOGGER.error(
+            "Entity %s does not support reset_energy_baseline",
+            entity_id
+        )
+        return
+
+    current = target_entity._state
+    _LOGGER.warning(
+        "reset_energy_baseline called for %s — current value: %s kWh",
+        entity_id, current
+    )
+
+    is_daily = hasattr(target_entity, "_midnight_baseline")
+
+    # 1. Forced baseline (daily sensors only)
+    if new_baseline is not None:
+        hourly_ledger = getattr(target_entity, "_hourly_ledger", None)
+        if hourly_ledger is not None and hourly_ledger() is not None:
+            _LOGGER.warning(
+                "Cannot set baseline on %s — it follows the energy ledger "
+                "and has no midnight baseline",
+                entity_id,
+            )
+        elif is_daily:
+            target_entity._midnight_baseline = new_baseline
+            if hasattr(target_entity, "_monotonic_reject_since"):
+                target_entity._monotonic_reject_since = None
+            target_entity.async_write_ha_state()
+            _LOGGER.warning(
+                "Reset %s: forced midnight_baseline to %.3f kWh", entity_id, new_baseline
+            )
+        else:
+            _LOGGER.warning("Cannot set baseline on %s — not a daily sensor", entity_id)
+
+    # 2. Forced state value
+    if new_value is not None:
+        target_entity._state = new_value
+        target_entity._accept_next_value = False
+        if hasattr(target_entity, "_consecutive_decrease"):
+            target_entity._consecutive_decrease = 0
+        if hasattr(target_entity, "_monotonic_reject_since"):
+            target_entity._monotonic_reject_since = None
+        target_entity.async_write_ha_state()
+        _LOGGER.warning(
+            "Reset %s: %.2f -> %.2f kWh (forced value)", entity_id, current or 0, new_value
+        )
+
+    # 3. Full auto-reset (no parameters)
+    elif new_baseline is None and new_value is None:
+        summary = _reset_energy_entity(target_entity, entity_id)
+        _LOGGER.warning("reset_energy_baseline: %s", summary)
+
+
 def _reset_energy_entity(entity, entity_id: str) -> str:
     """Apply a full auto-reset to one energy entity. Returns a summary log line.
 
     Clears all guard state so the entity re-establishes cleanly from the next
     API reading — the right behaviour after a factory reset where all hardware
     counters drop to zero simultaneously.
+
+    Sensors that follow the LDATA energy ledger handle the reset themselves
+    (see ledger_reset in sensor.py).
     """
+    ledger_reset = getattr(entity, "ledger_reset", None)
+    if ledger_reset is not None and (summary := ledger_reset()) is not None:
+        return f"{entity_id}: {summary}"
+
     current = getattr(entity, "_state", None)
     is_daily = hasattr(entity, "_midnight_baseline")
 
@@ -1170,7 +1253,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # refresh fails, instead of relying solely on HA's own config-entry
         # background-task bookkeeping for a coordinator that never made it
         # into hass.data.
-        await coordinator.async_shutdown()
+        try:
+            await coordinator.async_shutdown()
+        except Exception:
+            # Keep the refresh error: Home Assistant retries the setup after
+            # ConfigEntryNotReady, but not after an error raised here. The
+            # on-unload callback of the failed setup runs async_shutdown again.
+            _LOGGER.warning(
+                "Shutting down the LDATA coordinator after the failed first "
+                "refresh failed; retrying once the setup is cleaned up",
+                exc_info=True,
+            )
         raise
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
@@ -1231,70 +1324,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not hass.services.has_service(DOMAIN, SERVICE_RESET_ENERGY):
         async def handle_reset_energy(call: ServiceCall) -> None:
             """Handle the reset_energy_baseline service call."""
-            entity_id = call.data[ATTR_ENTITY_ID]
-            new_value = call.data.get(ATTR_VALUE)
-            new_baseline = call.data.get(ATTR_BASELINE)
-
-            # Find the entity object through the entity platform, but only if
-            # it belongs to one of our config entries.
-            target_entity = None
-            ent_reg = er.async_get(hass)
-            ent_entry = ent_reg.async_get(entity_id)
-            if ent_entry is not None and ent_entry.config_entry_id in hass.data[DOMAIN]:
-                target_entity = _get_sensor_entity(hass, entity_id)
-
-            if target_entity is None:
-                _LOGGER.error(
-                    "Could not find entity %s — ensure it is an LDATA energy sensor",
-                    entity_id
-                )
-                return
-
-            if not hasattr(target_entity, "_accept_next_value"):
-                _LOGGER.error(
-                    "Entity %s does not support reset_energy_baseline",
-                    entity_id
-                )
-                return
-
-            current = target_entity._state
-            _LOGGER.warning(
-                "reset_energy_baseline called for %s — current value: %s kWh",
-                entity_id, current
-            )
-
-            is_daily = hasattr(target_entity, "_midnight_baseline")
-
-            # 1. Forced baseline (daily sensors only)
-            if new_baseline is not None:
-                if is_daily:
-                    target_entity._midnight_baseline = new_baseline
-                    if hasattr(target_entity, "_monotonic_reject_since"):
-                        target_entity._monotonic_reject_since = None
-                    target_entity.async_write_ha_state()
-                    _LOGGER.warning(
-                        "Reset %s: forced midnight_baseline to %.3f kWh", entity_id, new_baseline
-                    )
-                else:
-                    _LOGGER.warning("Cannot set baseline on %s — not a daily sensor", entity_id)
-
-            # 2. Forced state value
-            if new_value is not None:
-                target_entity._state = new_value
-                target_entity._accept_next_value = False
-                if hasattr(target_entity, "_consecutive_decrease"):
-                    target_entity._consecutive_decrease = 0
-                if hasattr(target_entity, "_monotonic_reject_since"):
-                    target_entity._monotonic_reject_since = None
-                target_entity.async_write_ha_state()
-                _LOGGER.warning(
-                    "Reset %s: %.2f -> %.2f kWh (forced value)", entity_id, current or 0, new_value
-                )
-
-            # 3. Full auto-reset (no parameters)
-            elif new_baseline is None and new_value is None:
-                summary = _reset_energy_entity(target_entity, entity_id)
-                _LOGGER.warning("reset_energy_baseline: %s", summary)
+            await _async_reset_energy_baseline(hass, call.data)
 
         hass.services.async_register(
             DOMAIN,
@@ -1328,7 +1358,18 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok:
         coordinator = hass.data[DOMAIN].pop(entry.entry_id, None)
         if coordinator:
-            await coordinator.async_shutdown()
+            try:
+                await coordinator.async_shutdown()
+            except Exception:
+                # The unload itself succeeded. Raising here would make Home
+                # Assistant mark it failed and skip the on-unload callbacks,
+                # including the one that runs async_shutdown again (and
+                # retries the ledger write).
+                _LOGGER.warning(
+                    "Shutting down the LDATA coordinator failed; retrying "
+                    "after the unload",
+                    exc_info=True,
+                )
 
         # The services are registered by whichever entry sets up first and
         # serve every entry; remove them once no LDATA entry is loaded. The
@@ -1341,6 +1382,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.services.async_remove(DOMAIN, service)
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the LDATA energy ledger of a removed config entry."""
+    await Store(hass, ENERGY_STORE_VERSION, energy_store_key(entry.entry_id)).async_remove()
 
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
