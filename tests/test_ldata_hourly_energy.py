@@ -471,8 +471,9 @@ def test_counter_after_a_gap_fill_adds_the_rest_of_the_claimed_hour() -> None:
     assert _leg(ledger)["last_hour"] == int(_ts(15, 5))
     assert _leg(ledger)["complete_until"] == int(_ts(15, 4))
 
-    # The 05-06h burst is not booked again; 06-07h is. Only a counter can
-    # add the rest of 05-06h: it is unsettled, complete_until moves on.
+    # The 05-06h burst books nothing (the counter added more than 1 kWh,
+    # no power x time to split the hour) but completes the hour; 06-07h is
+    # booked. 05-06h stays unsettled for the next counter.
     assert not ledger.apply("tech", 10, {"1": 1.0}, _ts(15, 6, 0, 29), "WS")
     assert ledger.apply("tech", 10, {"1": 1.0}, _ts(15, 7, 0, 29), "WS")
     assert ledger.lifetime("tech") == pytest.approx(30.5)
@@ -2862,3 +2863,325 @@ def test_history_waits_while_the_listing_of_the_hour_is_unread(clock) -> None:
     service.refresh_ldata_energy()
     assert len(_listing_calls(service)) == 1
     assert _history_calls(service) == []
+
+
+# ── Hour claimed by a lifetime counter mid-hour (2026-10-18 22:38) ─────
+
+# Outlets Outside (20 A, position 26), leg 1, just before the counter at
+# 2026-10-18 22:38:33.842: the ledger had every hour since 10:00 (the 21-22h
+# burst booked at 22:00:36) but missed 2026-10-17 21-22h (1.47 kWh in the
+# energy history), before the dev10 history floor. The offset window came
+# from the 2026-10-16 counters.
+OUTSIDE_COUNTER_AT = _ts(18, 22, 38, 33) + 0.842
+OUTSIDE_COUNTER = 2177.2
+# Power x time of leg 1 (a steady ~1.46 kW, from the recorder): 22:00 to the
+# counter, and the whole 22-23h hour.
+OUTSIDE_WH_TO_COUNTER = 939.177777
+OUTSIDE_WH_HOUR = 1460.898641
+# The energy history (getAllEnergyConsumptionForDay, 2026-10-19 13:31).
+OUTSIDE_API_1017 = 11.80
+OUTSIDE_API_1018 = 32.90
+OUTSIDE_API_1019 = [1.45, 1.45, 1.47, 1.46, 1.45, 1.46, 1.45, 1.45, 1.46, 1.45, 1.44, 1.45, 1.44]
+
+
+def _outside_1018() -> LDATAEnergyLedger:
+    hours = [int(_ts(18, h)) for h in range(10, 22)]
+
+    def leg(lifetime, offset, last_value, complete_until):
+        return {
+            "lifetime": lifetime, "last_hour": int(_ts(18, 21)), "complete_until": complete_until,
+            "offset": offset, "offset_max": None if offset is None else offset + 0.1,
+            "anchor_time": 1792160477.440468 if offset is not None else None,
+            "last_value": last_value, "last_source": "WS",
+            "last_counter": 2134.5 if offset is not None else None,
+            "booked_hours": hours, "history_floor": int(_ts(18, 9)),
+        }
+
+    ledger = LDATAEnergyLedger()
+    ledger.load({"breakers": {"outside": {
+        "legs": {
+            "1": leg(40.304443, 2134.5, 1.449219, int(_ts(16, 6))),
+            "2": leg(0.0, None, 0.0, int(_ts(16, 0))),
+        },
+        "daily": {"2026-10-17": 10.32788, "2026-10-18": 29.976563},
+    }}})
+    return ledger
+
+
+def _outside_wh(phase: dict):
+    def hour_wh(hour):
+        if hour != int(_ts(18, 22)):
+            return None
+        return {"1": phase["wh"], "2": 0.0}
+    return hour_wh
+
+
+def _outside_days(ledger: LDATAEnergyLedger) -> float:
+    return _today(ledger, "outside", 17) + _today(ledger, "outside", 18)
+
+
+def test_counter_mid_hour_then_burst_books_the_rest_of_the_hour() -> None:
+    ledger = _outside_1018()
+    phase = {"wh": OUTSIDE_WH_TO_COUNTER}
+    assert ledger.apply("outside", 20, {"1": OUTSIDE_COUNTER}, OUTSIDE_COUNTER_AT, "WS", hour_wh=_outside_wh(phase))
+    # As live: 2177.2 - 40.304443 - 2134.6 = 2.295557 kWh added.
+    assert ledger.lifetime("outside") == pytest.approx(42.6)
+    claim = _leg(ledger, "outside")["claim"]
+    assert claim == {"hour": int(_ts(18, 22)), "kwh": pytest.approx(2.295557), "wh": OUTSIDE_WH_TO_COUNTER}
+    # A restart between the counter and the burst keeps the claim.
+    reloaded = LDATAEnergyLedger()
+    reloaded.load(ledger.as_dict())
+    assert _leg(reloaded, "outside")["claim"] == claim
+
+    # The 23:00:36 burst: 1.45 kWh for 22-23h. 64.3% of the hour's power x
+    # time came before the counter, which added it; the rest is booked.
+    phase["wh"] = OUTSIDE_WH_HOUR
+    assert ledger.apply("outside", 20, {"1": 1.45, "2": 0.0}, _ts(18, 23, 0, 36), "WS", hour_wh=_outside_wh(phase))
+    rest = 1.45 - 1.45 * OUTSIDE_WH_TO_COUNTER / OUTSIDE_WH_HOUR
+    assert rest == pytest.approx(0.517829, abs=1e-6)
+    assert ledger.lifetime("outside") == pytest.approx(42.6 + rest)
+    state = _leg(ledger, "outside")
+    assert state["claim"] is None
+    assert state["complete_until"] == int(_ts(18, 22))
+    assert state["last_value"] == 1.45
+    # Booked once: the listing and a second burst frame add nothing.
+    assert not ledger.apply("outside", 20, {"1": 1.45}, _ts(18, 23, 0, 37), "WS", hour_wh=_outside_wh(phase))
+    assert not ledger.apply("outside", 20, {"1": 1.45}, _ts(18, 23, 6), "REST", hour_wh=_outside_wh(phase))
+    assert not ledger.apply_history("outside", int(_ts(18, 22)), 1.45, hour_wh={"1": OUTSIDE_WH_HOUR})
+    ledger.apply("outside", 20, {"1": 1.469971, "2": 0.0}, _ts(19, 0, 0, 39), "WS")
+
+    # Against the energy history: 2026-10-17 + 2026-10-18 = 44.70 kWh. The
+    # ledger's hours match it within 0.005 kWh except 2026-10-17 21-22h and
+    # 2026-10-18 22-23h (2.92 kWh), which the counter and the burst cover:
+    # short only by what the counter cannot prove (its 0.1 kWh step and the
+    # 0.1 kWh offset window). dev10 was 0.63 kWh short.
+    short = OUTSIDE_API_1017 + OUTSIDE_API_1018 - _outside_days(ledger)
+    assert 0 <= short <= 0.2
+    assert short == pytest.approx(0.112, abs=0.001)
+
+
+def test_counter_mid_hour_then_a_later_counter_does_not_double_count() -> None:
+    """The bursts after 22-23h follow the energy history; the cloud total is the true ledger + offset."""
+    ledger = _outside_1018()
+    phase = {"wh": OUTSIDE_WH_TO_COUNTER}
+    ledger.apply("outside", 20, {"1": OUTSIDE_COUNTER}, OUTSIDE_COUNTER_AT, "WS", hour_wh=_outside_wh(phase))
+    phase["wh"] = OUTSIDE_WH_HOUR
+    ledger.apply("outside", 20, {"1": 1.45, "2": 0.0}, _ts(18, 23, 0, 36), "WS", hour_wh=_outside_wh(phase))
+    ledger.apply("outside", 20, {"1": 1.469971, "2": 0.0}, _ts(19, 0, 0, 39), "WS")
+    for hour, kwh in enumerate(OUTSIDE_API_1019[:12]):
+        ledger.apply("outside", 20, {"1": kwh, "2": 0.0}, _ts(19, hour + 1, 0, 36), "WS")
+
+    # What the ledger would hold with every hour: the start, 2026-10-17
+    # 21-22h, 22-23h, 23-24h and the 2026-10-19 hours so far.
+    true = 40.304443 + 1.47 + 1.45 + 1.469971 + sum(OUTSIDE_API_1019[:12])
+    offset = 2134.55  # In the ledger's window 2134.5 .. 2134.6.
+    assert true - ledger.lifetime("outside") == pytest.approx(0.106614, abs=1e-6)
+
+    # A counter at 13:00:10, before the 12-13h burst: it covers 12-13h and
+    # 10 s of 13-14h (claimed), and adds what it proves of the shortfall.
+    at = _ts(19, 13, 0, 10)
+    true_now = true + OUTSIDE_API_1019[12] + 1.45 * 10 / 3600
+    counter = math.floor((true_now + offset) * 10) / 10
+
+    def wh(hour):
+        return {"1": 1450 * 10 / 3600, "2": 0.0} if hour == int(_ts(19, 13)) else None
+
+    assert ledger.apply("outside", 20, {"1": counter}, at, "WS", hour_wh=wh)
+    assert ledger.lifetime("outside") <= true_now + 1e-6
+    # The 13:00:36 burst (12-13h) is covered by the counter.
+    covered = ledger.lifetime("outside")
+    assert not ledger.apply("outside", 20, {"1": OUTSIDE_API_1019[12]}, _ts(19, 13, 0, 36), "WS")
+    assert ledger.lifetime("outside") == covered
+    # The 14:00:36 burst books 13-14h after 13:00:10.
+    assert ledger.apply(
+        "outside", 20, {"1": 1.45, "2": 0.0}, _ts(19, 14, 0, 36), "WS",
+        hour_wh=lambda hour: {"1": 1450.0, "2": 0.0} if hour == int(_ts(19, 13)) else None,
+    )
+    true_14 = true + OUTSIDE_API_1019[12] + 1.45
+    assert 0 <= true_14 - ledger.lifetime("outside") <= 0.2
+
+    # Later counters (the cloud total moves with the ledger) never add more
+    # than is missing.
+    for hour in range(15, 18):
+        ledger.apply("outside", 20, {"1": 1.45, "2": 0.0}, _ts(19, hour, 0, 36), "WS")
+        true_14 += 1.45
+        for minute in (0, 20, 40):
+            now = _ts(19, hour, minute, 10)
+            cloud = true_14 + 1.45 * (minute * 60 + 10) / 3600 + offset
+            ledger.apply("outside", 20, {"1": math.floor(cloud * 10) / 10}, now, "WS")
+            assert ledger.lifetime("outside") <= cloud - offset + 1e-6
+
+
+def test_counter_mid_hour_then_missed_burst_books_the_rest_from_the_history() -> None:
+    ledger = _outside_1018()
+    phase = {"wh": OUTSIDE_WH_TO_COUNTER}
+    ledger.apply("outside", 20, {"1": OUTSIDE_COUNTER}, OUTSIDE_COUNTER_AT, "WS", hour_wh=_outside_wh(phase))
+
+    # No 23:00 burst. The claimed hour is the one the history can fill.
+    assert ledger.history_hours_needed("outside", int(_ts(18, 12)), int(_ts(18, 22))) == [int(_ts(18, 22))]
+    # The listing at 23:06 shows the 21-22h delta again: not booked.
+    assert not ledger.apply("outside", 20, {"1": 1.45, "2": 0.0}, _ts(18, 23, 6), "REST")
+    assert _leg(ledger, "outside")["claim"] is not None
+    assert ledger.apply_history(
+        "outside", int(_ts(18, 22)), 1.45, shares={"1": OUTSIDE_WH_HOUR, "2": 0.0},
+        hour_wh={"1": OUTSIDE_WH_HOUR, "2": 0.0},
+    )
+    rest = 1.45 - 1.45 * OUTSIDE_WH_TO_COUNTER / OUTSIDE_WH_HOUR
+    assert ledger.lifetime("outside") == pytest.approx(42.6 + rest)
+    state = _leg(ledger, "outside")
+    assert state["claim"] is None
+    assert state["last_source"] == ldata_energy.HISTORY_SOURCE
+    assert state["complete_until"] == int(_ts(18, 22))
+    assert state["last_value"] == 1.45  # The listing value, not the history's.
+    assert ledger.history_hours_needed("outside", int(_ts(18, 12)), int(_ts(18, 22))) == []
+    assert not ledger.apply_history("outside", int(_ts(18, 22)), 1.45, hour_wh={"1": OUTSIDE_WH_HOUR})
+
+    # The next burst books its own hour.
+    assert ledger.apply("outside", 20, {"1": 1.469971, "2": 0.0}, _ts(19, 0, 0, 39), "WS")
+    short = OUTSIDE_API_1017 + OUTSIDE_API_1018 - _outside_days(ledger)
+    assert short == pytest.approx(0.112, abs=0.001)
+
+
+def test_counter_mid_hour_without_power_books_only_the_certain_part() -> None:
+    ledger = _outside_1018()
+    # No power x time (e.g. Home Assistant restarted during 22-23h).
+    ledger.apply("outside", 20, {"1": OUTSIDE_COUNTER}, OUTSIDE_COUNTER_AT, "WS")
+    assert _leg(ledger, "outside")["claim"]["wh"] is None
+    # 1.45 kWh is less than the 2.296 kWh the counter added: none of it is
+    # certainly after the counter, so nothing is booked (as before). The
+    # hour is complete as far as the burst goes, and unsettled: the rest of
+    # it is left to the next counter.
+    phase = {"wh": OUTSIDE_WH_HOUR}
+    assert not ledger.apply("outside", 20, {"1": 1.45}, _ts(18, 23, 0, 36), "WS", hour_wh=_outside_wh(phase))
+    assert ledger.lifetime("outside") == pytest.approx(42.6)
+    state = _leg(ledger, "outside")
+    assert state["claim"] is None
+    assert state["last_source"] == ldata_energy.COUNTER_CLAIM_SOURCE
+    assert state["complete_until"] == int(_ts(18, 22))
+    assert state["unsettled_from"] == int(_ts(18, 22))
+
+    # A burst larger than what the counter added books the excess.
+    ledger = LDATAEnergyLedger()
+    ledger.apply("tech", 15, {"1": 1156.3}, _ts(14, 12, 5), "WS")
+    ledger.apply("tech", 15, {"1": 0.5}, _ts(14, 13, 0, 29), "WS")
+    # 13-14h missed; the counter at 14:20 adds 1157.0 - 0.5 - 1156.4 = 0.1.
+    ledger.apply("tech", 15, {"1": 1157.0}, _ts(14, 14, 20), "WS")
+    assert ledger.lifetime("tech") == pytest.approx(0.6)
+    assert ledger.apply("tech", 15, {"1": 0.9}, _ts(14, 15, 0, 29), "WS")
+    assert ledger.lifetime("tech") == pytest.approx(1.4)
+    assert _leg(ledger)["complete_until"] == int(_ts(14, 14))
+    assert _leg(ledger)["unsettled_from"] == int(_ts(14, 14))
+
+
+def test_counter_at_the_top_of_the_hour_before_the_burst() -> None:
+    """Steady 1 kW; the cloud total is 1000 + kWh since 10:00 (reference at 10:00:05)."""
+    ledger = LDATAEnergyLedger()
+    ledger.apply("tech", 15, {"1": 1000.0}, _ts(14, 10, 0, 5), "WS")
+    ledger.apply("tech", 15, {"1": 1.0}, _ts(14, 11, 0, 36), "WS")
+    # 11-12h and 12-13h are missed.
+    ledger.apply("tech", 15, {"1": 1.0}, _ts(14, 14, 0, 36), "WS")
+    assert ledger.lifetime("tech") == pytest.approx(2.0)
+
+    def wh(hour):
+        return {"1": 1000 * 10 / 3600} if hour == int(_ts(14, 15)) else None
+
+    # 15:00:10, before the 14-15h burst: the cloud total is 1005.0028, the
+    # counter 1005.0. It proves 1005.0 - 2.0 - 1000.1 = 2.9 kWh missing:
+    # 11-12h, 12-13h and most of 14-15h, which its burst then cannot book.
+    assert ledger.apply("tech", 15, {"1": 1005.0}, _ts(14, 15, 0, 10), "WS", hour_wh=wh)
+    assert ledger.lifetime("tech") == pytest.approx(4.9)
+    assert _leg(ledger)["claim"]["hour"] == int(_ts(14, 15))
+    assert not ledger.apply("tech", 15, {"1": 1.0}, _ts(14, 15, 0, 36), "WS", hour_wh=wh)
+    assert ledger.lifetime("tech") == pytest.approx(4.9)
+
+    # The 15-16h burst: 10 s of it came before the counter.
+    assert ledger.apply(
+        "tech", 15, {"1": 1.0}, _ts(14, 16, 0, 36), "WS",
+        hour_wh=lambda hour: {"1": 1000.0} if hour == int(_ts(14, 15)) else None,
+    )
+    assert ledger.lifetime("tech") == pytest.approx(4.9 + 1.0 - 10 / 3600)
+    # 6 kWh used since the reference; the ledger is short by the window.
+    assert 0 <= 6.0 - ledger.lifetime("tech") <= 0.2
+    # A later counter adds no more than is missing.
+    ledger.apply("tech", 15, {"1": 1.0}, _ts(14, 17, 0, 36), "WS")
+    ledger.apply("tech", 15, {"1": 1007.0}, _ts(14, 17, 0, 50), "WS")
+    assert ledger.lifetime("tech") <= 7.0 + 1e-6
+
+
+def test_second_counter_in_a_claimed_hour_extends_the_claim() -> None:
+    ledger = _outside_1018()
+    ledger.apply("outside", 20, {"1": OUTSIDE_COUNTER}, OUTSIDE_COUNTER_AT, "WS",
+                 hour_wh=lambda hour: {"1": OUTSIDE_WH_TO_COUNTER})
+    # 22:50: 0.29 kWh more, all of it this hour: left to the burst.
+    assert ledger.apply("outside", 20, {"1": 2177.5}, _ts(18, 22, 50), "WS",
+                        hour_wh=lambda hour: {"1": 1217.0})
+    assert ledger.lifetime("outside") == pytest.approx(42.6)
+    assert _leg(ledger, "outside")["claim"]["wh"] == OUTSIDE_WH_TO_COUNTER
+    ledger.apply("outside", 20, {"1": 1.45, "2": 0.0}, _ts(18, 23, 0, 36), "WS",
+                 hour_wh=lambda hour: {"1": OUTSIDE_WH_HOUR})
+    assert ledger.lifetime("outside") == pytest.approx(42.6 + 1.45 - 1.45 * OUTSIDE_WH_TO_COUNTER / OUTSIDE_WH_HOUR)
+
+
+def test_claimed_hour_is_split_by_power_tracked_by_the_service(clock) -> None:
+    service = LDATAService("", "", None)
+    clock.value = _ts(18, 21, 59, 0)
+    service.parse_panels([_ldata_panel([_raw_breaker("outside", 20, 1.449219, 0.0, position=26)])])
+    ledger = service.energy_ledger
+    ledger.load(_outside_1018().as_dict())
+    clock.value = _ts(18, 21, 59, 30)
+    _ws_power(service, "outside", 1460.0, 0.0)
+
+    clock.value = OUTSIDE_COUNTER_AT
+    _ws_energy(service, "outside", OUTSIDE_COUNTER, 0.0)
+    assert ledger.lifetime("outside") == pytest.approx(42.6)
+    before = (OUTSIDE_COUNTER_AT - _ts(18, 22)) / 3600
+    assert _leg(ledger, "outside")["claim"]["wh"] == pytest.approx(1460.0 * before)
+
+    clock.value = _ts(18, 23, 0, 36) + 0.6
+    _ws_energy(service, "outside", 1.45, 0.0)
+    assert ledger.lifetime("outside") == pytest.approx(42.6 + 1.45 * (1 - before))
+
+
+def test_claimed_hour_power_from_a_tracker_started_late_is_not_used(clock) -> None:
+    service = LDATAService("", "", None)
+    clock.value = _ts(18, 21, 59, 0)
+    service.parse_panels([_ldata_panel([_raw_breaker("outside", 20, 1.449219, 0.0, position=26)])])
+    ledger = service.energy_ledger
+    ledger.load(_outside_1018().as_dict())
+    # Power known only from 22:30 (Home Assistant restarted at 22:29).
+    clock.value = _ts(18, 22, 30)
+    _ws_power(service, "outside", 1460.0, 0.0)
+    clock.value = OUTSIDE_COUNTER_AT
+    _ws_energy(service, "outside", OUTSIDE_COUNTER, 0.0)
+    assert _leg(ledger, "outside")["claim"]["wh"] is None
+    clock.value = _ts(18, 23, 0, 36) + 0.6
+    _ws_energy(service, "outside", 1.45, 0.0)
+    assert ledger.lifetime("outside") == pytest.approx(42.6)
+
+
+def test_claimed_hour_with_a_missed_burst_is_filled_from_the_history(clock) -> None:
+    service = LDATAService("", "", None)
+    service.auth_token = "token"
+    service.residence_id_list = ["717533"]
+    clock.value = _ts(18, 21, 59, 0)
+    service.parse_panels([_ldata_panel([_raw_breaker("outside", 20, 1.449219, 0.0, position=26)])])
+    service.session = MagicMock()
+    service.session.get.return_value = SimpleNamespace(
+        status_code=200, json=lambda: [_ldata_panel([_raw_breaker("outside", 20, 1.449219, 0.0, position=26)])]
+    )
+    _route_history(service, _history_day("2026-10-18", {"26": {22: 1.45}}, {22: 1.59}))
+    ledger = service.energy_ledger
+    ledger.load(_outside_1018().as_dict())
+    clock.value = _ts(18, 21, 59, 30)
+    _ws_power(service, "outside", 1460.0, 0.0)
+    clock.value = OUTSIDE_COUNTER_AT
+    _ws_energy(service, "outside", OUTSIDE_COUNTER, 0.0)
+
+    # No 23:00 burst.
+    clock.value = _ts(18, 23, 6, 25)
+    assert service.needs_ldata_energy_recovery()
+    assert service.refresh_ldata_energy() is True
+    assert len(_history_calls(service)) == 1
+    before = (OUTSIDE_COUNTER_AT - _ts(18, 22)) / 3600
+    assert ledger.lifetime("outside") == pytest.approx(42.6 + 1.45 * (1 - before))
+    assert not service.needs_ldata_energy_recovery()

@@ -219,3 +219,159 @@ def test_stored_leg_whose_first_booked_hour_was_dropped_recovers_at_the_next_bur
     assert state["unsettled_from"] == int(_ts(16, 1))
     assert state["booked_hours"] == []
 
+
+# ── Claimed hours with a rest of 0 ─────────────────────────────────────
+#
+# A steady 0.1 kWh/h on a 15 A breaker; the cloud total is 1000.05 kWh at
+# the 12:05 reference, so a complete ledger is the cloud total less
+# 1000.0417 kWh.
+CLOUD_AT_REFERENCE = 1000.05
+COMPLETE_OFFSET = CLOUD_AT_REFERENCE - 0.1 * 5 / 60
+
+
+def _cloud(ts: float) -> float:
+    return CLOUD_AT_REFERENCE + 0.1 * (ts - _ts(14, 12, 5)) / H
+
+
+def _claimed_without_power() -> LDATAEnergyLedger:
+    """The 13-14h and 14-15h bursts are missed; the counter at 15:30 claims 15-16h."""
+    ledger = LDATAEnergyLedger()
+    ledger.apply("tech", 15, {"1": 1000.0}, _ts(14, 12, 5), "WS")
+    ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 13, 0, 29), "WS")
+    assert ledger.apply("tech", 15, {"1": 1000.3}, _ts(14, 15, 30), "WS")
+    assert ledger.lifetime("tech") == pytest.approx(0.2)
+    claim = _leg(ledger)["claim"]
+    assert (claim["hour"], claim["wh"]) == (int(_ts(14, 15)), None)
+    return ledger
+
+
+def test_claimed_hour_with_a_zero_rest_is_booked() -> None:
+    """Outlets counter 1 leg 1, 10-19 20:00: 0.002685 kWh, all of it covered by the counter."""
+    ledger = _claimed_without_power()
+
+    # The 15-16h burst (0.1 kWh) is no more than the counter added: the
+    # rest is 0, but the hour is booked.
+    assert not ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 16, 0, 29), "WS")
+    assert ledger.lifetime("tech") == pytest.approx(0.2)
+    state = _leg(ledger)
+    assert state["claim"] is None
+    assert state["complete_until"] == int(_ts(14, 15))
+    # The split was unknown: the next counter adds what is still missing.
+    assert state["unsettled_from"] == int(_ts(14, 15))
+    assert ledger.dirty
+
+    # Nothing books the hour again: a later burst-window value, the listing, the history.
+    assert not ledger.apply("tech", 15, {"1": 0.12}, _ts(14, 16, 0, 40), "WS")
+    assert not ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 16, 10), "REST")
+    assert ledger.history_hours_needed("tech", int(_ts(14, 12)), int(_ts(14, 15))) == []
+    assert not ledger.apply_history("tech", int(_ts(14, 15)), 0.1)
+    assert ledger.lifetime("tech") == pytest.approx(0.2)
+
+    ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 17, 0, 29), "WS")
+    assert _leg(ledger)["complete_until"] == int(_ts(14, 16))
+
+
+def test_claimed_hour_with_a_zero_rest_then_a_later_counter() -> None:
+    ledger = _claimed_without_power()
+    ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 16, 0, 29), "WS")
+    ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 17, 0, 29), "WS")
+    assert ledger.lifetime("tech") == pytest.approx(0.3)
+
+    # 17:30, 50 Wh into the hour: the counter proves 1000.5 - 0.3 - 1000.1 =
+    # 0.1 kWh missing. That is less than the breaker can use in half an
+    # hour, but the leg is unsettled: it is added, and 17-18h is claimed.
+    wh = {int(_ts(14, 17)): 50.0}
+    assert ledger.apply(
+        "tech", 15, {"1": 1000.5}, _ts(14, 17, 30), "WS", hour_wh=lambda hour: {"1": wh[hour]}
+    )
+    assert ledger.lifetime("tech") == pytest.approx(0.4)
+    state = _leg(ledger)
+    assert state["unsettled_from"] is None
+    assert state["claim"]["hour"] == int(_ts(14, 17))
+
+    # The 17-18h burst is split by power x time: half of it is after the counter.
+    wh[int(_ts(14, 17))] = 100.0
+    assert ledger.apply(
+        "tech", 15, {"1": 0.1}, _ts(14, 18, 0, 29), "WS", hour_wh=lambda hour: {"1": wh[hour]}
+    )
+    assert ledger.lifetime("tech") == pytest.approx(0.45)
+    state = _leg(ledger)
+    assert (state["complete_until"], state["unsettled_from"]) == (int(_ts(14, 17)), None)
+    # Never more than the cloud counted.
+    assert ledger.lifetime("tech") <= _cloud(_ts(14, 18)) - COMPLETE_OFFSET
+
+
+def test_claimed_hour_with_a_zero_rest_and_no_later_counter() -> None:
+    ledger = _claimed_without_power()
+    ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 16, 0, 29), "WS")
+
+    # Two days of bursts and no counter: complete_until follows every hour.
+    start = _ts(14, 17, 0, 29)
+    for n in range(48):
+        assert ledger.apply("tech", 15, {"1": 0.1}, start + n * H, "WS")
+        state = _leg(ledger)
+        assert state["complete_until"] == int(_ts(14, 16)) + n * H
+        assert state["booked_hours"] == []
+    assert ledger.lifetime("tech") == pytest.approx(0.2 + 4.8)
+    assert _leg(ledger)["unsettled_from"] == int(_ts(14, 15))
+    assert ledger.history_hours_needed("tech", int(_ts(15, 0)), int(_ts(16, 15))) == []
+
+
+def test_claimed_hour_from_the_history_with_a_zero_rest_is_booked() -> None:
+    ledger = _claimed_without_power()
+
+    # The 16:00 burst is missed; the history has the hour.
+    assert ledger.history_hours_needed("tech", int(_ts(14, 15)), int(_ts(14, 15))) == [int(_ts(14, 15))]
+    assert not ledger.apply_history("tech", int(_ts(14, 15)), 0.1)
+    state = _leg(ledger)
+    assert (state["claim"], state["complete_until"]) == (None, int(_ts(14, 15)))
+    assert state["unsettled_from"] == int(_ts(14, 15))
+    assert ledger.lifetime("tech") == pytest.approx(0.2)
+
+    ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 17, 0, 29), "WS")
+    assert _leg(ledger)["complete_until"] == int(_ts(14, 16))
+
+
+def test_claimed_hour_split_to_a_zero_rest_is_settled() -> None:
+    """Unsettled only when power x time cannot split the hour."""
+    ledger = LDATAEnergyLedger()
+    ledger.apply("tech", 15, {"1": 1000.0}, _ts(14, 12, 5), "WS")
+    ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 13, 0, 29), "WS")
+
+    def hour_wh(hour):
+        return {"1": 0.0}  # The load stopped before 15:00.
+
+    ledger.apply("tech", 15, {"1": 1000.3}, _ts(14, 15, 30), "WS", hour_wh=hour_wh)
+
+    assert not ledger.apply("tech", 15, {"1": 0.0}, _ts(14, 16, 0, 29), "WS", hour_wh=hour_wh)
+    state = _leg(ledger)
+    # 0 Wh over the hour: no split, the certain part (0) is booked.
+    assert state["complete_until"] == int(_ts(14, 15))
+    assert state["unsettled_from"] == int(_ts(14, 15))
+
+    ledger = LDATAEnergyLedger()
+    ledger.apply("tech", 15, {"1": 1000.0}, _ts(14, 12, 5), "WS")
+    ledger.apply("tech", 15, {"1": 0.1}, _ts(14, 13, 0, 29), "WS")
+    wh = {"1": 60.0}
+    ledger.apply("tech", 15, {"1": 1000.3}, _ts(14, 15, 30), "WS", hour_wh=lambda hour: wh)
+    # All of the hour's power x time came before the counter.
+    assert not ledger.apply("tech", 15, {"1": 0.05}, _ts(14, 16, 0, 29), "WS", hour_wh=lambda hour: wh)
+    state = _leg(ledger)
+    assert (state["complete_until"], state["unsettled_from"]) == (int(_ts(14, 15)), None)
+
+
+def test_pending_claim_is_not_settled_on_load() -> None:
+    """A claim stored before its hour's burst came keeps waiting for it."""
+    ledger = _claimed_without_power()
+    stored = json.loads(json.dumps(ledger.as_dict()))
+    loaded = LDATAEnergyLedger()
+    loaded.load(stored)
+    assert not loaded.dirty
+    state = _leg(loaded)
+    assert state["complete_until"] == int(_ts(14, 14))
+    assert state["unsettled_from"] is None
+    assert state["claim"] == _leg(ledger)["claim"]
+
+    # The burst of the claimed hour still books its rest.
+    assert loaded.apply("tech", 15, {"1": 0.15}, _ts(14, 16, 0, 29), "WS")
+    assert loaded.lifetime("tech") == pytest.approx(0.25)

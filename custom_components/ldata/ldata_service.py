@@ -243,7 +243,8 @@ class LDATAService:
         # Hour (delta_hour) for which the energy history was last read.
         self._energy_history_hour: int | None = None
         # Per LDATA breaker (stable id): each leg's power x time per hour
-        # (Wh), to split an hour of the energy history over the legs.
+        # (Wh), to split an hour of the energy history over the legs and an
+        # hour claimed by a lifetime counter at the counter.
         self._ldata_leg_energy: dict[str, dict] = {}
         # Track how many IotWhem WS messages we've seen per panel without breaker data
         self._ws_iotwhem_count: dict[str, int] = {}
@@ -1813,14 +1814,17 @@ class LDATAService:
             rating = breaker.get("rating")
         if connected is None:
             connected = self._ldata_panel_connected(breaker.get("panel_id"), received)
+        key = breaker.get("stable_id") or breaker["id"]
+        received = time.time() if received is None else received
         return self.energy_ledger.apply(
-            breaker.get("stable_id") or breaker["id"],
+            key,
             rating,
             values,
-            time.time() if received is None else received,
+            received,
             source,
             name=breaker.get("name"),
             connected=connected,
+            hour_wh=lambda hour: self._ldata_leg_hour_wh(key, hour, received),
         )
 
     def _ldata_panel_connected(self, panel_id: str | None, now: float | None = None) -> bool:
@@ -1867,10 +1871,11 @@ class LDATAService:
 
     def _track_ldata_leg_power(self, breaker: dict, raw: dict, now: float | None = None) -> None:
         """Integrate an LDATA breaker's per-leg power (raw power/power2) into Wh per hour."""
+        now = time.time() if now is None else now
         tracker = self._ldata_leg_energy.setdefault(
-            breaker.get("stable_id") or breaker["id"], {"t": None, "p": {}, "hours": {}}
+            breaker.get("stable_id") or breaker["id"], {"t": None, "p": {}, "hours": {}, "since": now}
         )
-        self._advance_leg_energy(tracker, time.time() if now is None else now)
+        self._advance_leg_energy(tracker, now)
         for leg, field in (("1", "power"), ("2", "power2")):
             try:
                 if raw.get(field) is not None:
@@ -1897,6 +1902,20 @@ class LDATAService:
         """Return each leg's power x time (Wh) in ``hour``, or None if not tracked."""
         tracker = self._ldata_leg_energy.get(key)
         if tracker is None:
+            return None
+        self._advance_leg_energy(tracker, now)
+        return tracker["hours"].get(hour)
+
+    def _ldata_leg_hour_wh(self, key: str, hour: int, now: float) -> dict[str, float] | None:
+        """Return each leg's power x time (Wh) in ``hour`` up to ``now``, or None unless tracked over all of it.
+
+        Splits an hour claimed by a lifetime counter at the counter (see
+        LDATAEnergyLedger._claimed_rest), so a partly tracked hour (the
+        tracker starts at the first power reading after startup) is not
+        used: its share before the counter would be too small.
+        """
+        tracker = self._ldata_leg_energy.get(key)
+        if tracker is None or tracker.get("since", hour + 1) > hour:
             return None
         self._advance_leg_energy(tracker, now)
         return tracker["hours"].get(hour)
@@ -3218,7 +3237,8 @@ class LDATAService:
                     if hour is None or kwh is None or hour not in computed or hour not in needed[key]:
                         continue
                     if self.energy_ledger.apply_history(
-                        key, hour, kwh, self._ldata_leg_shares(key, hour, now), name=breaker.get("name")
+                        key, hour, kwh, self._ldata_leg_shares(key, hour, now), name=breaker.get("name"),
+                        hour_wh=self._ldata_leg_hour_wh(key, hour, now),
                     ):
                         changed = True
         return changed
