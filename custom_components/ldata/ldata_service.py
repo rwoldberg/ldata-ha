@@ -21,7 +21,8 @@ from .const import (
     CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
     PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD,
     HW_COUNTER_DECREASE_TOLERANCE_KWH, HW_COUNTER_DEFAULT_RATING_A,
-    HW_COUNTER_DEMOTE_EVIDENCE, HW_COUNTER_MIN_PLAUSIBLE_KWH,
+    HW_COUNTER_DEMOTE_EVIDENCE, HW_COUNTER_EVIDENCE_SPACING_S,
+    HW_COUNTER_MIN_PLAUSIBLE_KWH,
     HW_COUNTER_POWER_MARGIN, HW_COUNTER_TRANSIENT_KWH,
     DEVICE_TYPE_BRIDGE, is_decora_bridge,
 )
@@ -177,6 +178,7 @@ class LDATAService:
         # not behave like a lifetime counter. See _note_hw_counter_reading().
         self._hw_counter_seen: dict[tuple[str, str], tuple[float, float]] = {}
         self._hw_counter_evidence: dict[str, int] = {}
+        self._hw_counter_evidence_at: dict[str, float] = {}
         # Track how many IotWhem WS messages we've seen per panel without breaker data
         self._ws_iotwhem_count: dict[str, int] = {}
         # Detection threshold (still used for logging, but no longer triggers breaker REST poll)
@@ -2456,6 +2458,7 @@ class LDATAService:
             # A fresh parse re-decides the mode, so restart the trust check
             # (see _note_hw_counter_reading) from these readings.
             self._hw_counter_evidence[panel["id"]] = 0
+            self._hw_counter_evidence_at.pop(panel["id"], None)
             seeded_at = time.time()
             for b_id, b_data in breakers.items():
                 if b_data.get("panel_id") == panel["id"]:
@@ -2790,11 +2793,39 @@ class LDATAService:
         else:
             return
 
+        self._add_hw_counter_evidence(
+            panel_id,
+            f"Breaker {breaker.get('name', breaker_id)} {key} counter {reason} "
+            f"({previous_value} -> {value})",
+        )
+
+    def report_hw_counter_untrusted(self, panel_id: str, detail: str) -> None:
+        """Count a lifetime sensor's rejected decrease as evidence against the panel's counters.
+
+        A sensor knows something the raw-to-raw comparison in
+        _note_hw_counter_reading cannot: what it already accepted. A hub that
+        reports small period-like values (A/C at 1.3 kWh against an accepted
+        314.1) never shows a decrease between two raw readings, but every one
+        of those readings is a decrease against the lifetime total.
+        """
+        if panel_id and self._panel_has_hw_counters.get(panel_id):
+            self._add_hw_counter_evidence(panel_id, detail)
+
+    def _add_hw_counter_evidence(self, panel_id: str, detail: str) -> None:
+        """Record one piece of evidence and demote the panel at the threshold.
+
+        Counted at most once per HW_COUNTER_EVIDENCE_SPACING_S, so one poll
+        that returns odd values for several breakers is one piece of evidence.
+        """
+        now = time.time()
+        last = self._hw_counter_evidence_at.get(panel_id)
+        if last is not None and now - last < HW_COUNTER_EVIDENCE_SPACING_S:
+            return
+        self._hw_counter_evidence_at[panel_id] = now
         count = self._hw_counter_evidence.get(panel_id, 0) + 1
         self._hw_counter_evidence[panel_id] = count
         _LOGGER.debug(
-            f"[v{self.version}] Breaker {breaker.get('name', breaker_id)} {key} counter {reason} "
-            f"({previous_value} -> {value}); evidence {count}/{HW_COUNTER_DEMOTE_EVIDENCE} for panel {panel_id}"
+            f"[v{self.version}] {detail}; evidence {count}/{HW_COUNTER_DEMOTE_EVIDENCE} for panel {panel_id}"
         )
         if count >= HW_COUNTER_DEMOTE_EVIDENCE:
             self._panel_has_hw_counters[panel_id] = False

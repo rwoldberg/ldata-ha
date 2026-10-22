@@ -115,6 +115,9 @@ MAX_DAILY_ENERGY_KWH = 500.0
 # faster than the breaker's rating allows, counts as evidence; after
 # HW_COUNTER_DEMOTE_EVIDENCE of them the panel is switched to power×time.
 HW_COUNTER_DEMOTE_EVIDENCE = 3
+# Evidence is counted at most once per this many seconds, so one poll that
+# returns odd values for several breakers counts once, not several times.
+HW_COUNTER_EVIDENCE_SPACING_S = 30.0
 # A drop smaller than this is rounding, not evidence (matches the lifetime
 # sensors' ROUNDING_TOLERANCE).
 HW_COUNTER_DECREASE_TOLERANCE_KWH = 0.05

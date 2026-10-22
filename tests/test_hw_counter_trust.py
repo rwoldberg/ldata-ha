@@ -291,3 +291,65 @@ def test_ct_daily_sensor_follows_a_demotion(clock, monkeypatch) -> None:
     service._panel_has_hw_counters[PANEL] = False
     entity._state_update()
     assert entity._use_hw_counters is False
+
+
+# ── Period-like hub (the #115 follow-up) ───────────────────────────────
+
+
+def test_period_like_readings_against_an_accepted_total_demote_the_panel(clock) -> None:
+    """Raw 0-1.3 kWh readings never decrease raw-to-raw but sit far below the sensor's 314.1."""
+    service = _service()
+    existing = _breaker(consumption=0.01)
+    entity = _lifetime(service, existing)
+    entity._state = 314.1
+    entity._last_accepted_ts = START
+    for raw in (0.0, 1.3157, 0.0, 1.3157, 0.0, 1.3157):
+        clock.value += 60
+        _publish(entity, raw)
+    assert entity._state == 314.1  # frozen until the demotion lands, never corrupted
+    assert service.panel_has_hw_counters(PANEL) is False
+
+
+def test_demoted_sensor_resumes_counting_from_its_accepted_total(clock) -> None:
+    service = _service()
+    existing = _breaker(consumption=0.0, power=1500.0)
+    entity = _lifetime(service, existing)
+    entity._state = 314.1
+    entity._last_accepted_ts = START
+    for _ in range(6):
+        clock.value += 60
+        _publish(entity, 1.3157)
+    assert service.panel_has_hw_counters(PANEL) is False
+    for _ in range(10):
+        clock.value += 60
+        entity._state_update()
+    assert entity._state > 314.1
+
+
+def test_one_poll_with_many_odd_breakers_is_one_piece_of_evidence(clock) -> None:
+    service = _service()
+    for index in range(5):
+        service.report_hw_counter_untrusted(PANEL, f"breaker {index}")
+    assert service.panel_has_hw_counters(PANEL) is True
+    assert service._hw_counter_evidence[PANEL] == 1
+
+
+def test_a_sub_kwh_dip_is_not_evidence(clock) -> None:
+    service = _service()
+    entity = _lifetime(service, _breaker())
+    entity._state = 0.9
+    entity._last_accepted_ts = START
+    for _ in range(6):
+        clock.value += 60
+        _publish(entity, 0.5)
+    assert service.panel_has_hw_counters(PANEL) is True
+
+
+def test_a_healthy_lifetime_counter_is_never_reported(clock) -> None:
+    service = _service()
+    entity = _lifetime(service, _breaker(consumption=500.0))
+    _publish(entity, 500.0)
+    for step in range(1, 20):
+        clock.value += 60
+        _publish(entity, 500.0 + step * 0.05)
+    assert service._hw_counter_evidence.get(PANEL, 0) == 0

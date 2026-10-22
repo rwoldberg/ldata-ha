@@ -46,6 +46,7 @@ from .const import (
     GAP_THRESHOLD,
     GAP_THRESHOLD_DEFAULT,
     HW_COUNTER_NONE_TOLERANCE,
+    HW_COUNTER_TRANSIENT_KWH,
     MAX_DAILY_ENERGY_KWH,
 )
 from .coordinator import LDATAUpdateCoordinator
@@ -2109,6 +2110,16 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                     # Decrease guard — TOTAL_INCREASING must never go backward
                     if (float(self._state) - new_value) > ROUNDING_TOLERANCE:
                         self._consecutive_decrease += 1
+                        # A reading of at least a kWh that is still below the
+                        # accepted lifetime total is evidence the hub's counter
+                        # is not a lifetime counter (near-zero readings are
+                        # bandwidth-toggle transients and prove nothing).
+                        service = getattr(self.coordinator, "_service", None)
+                        if service is not None and new_value >= HW_COUNTER_TRANSIENT_KWH:
+                            service.report_hw_counter_untrusted(
+                                self.breaker_data.get("panel_id"),
+                                f"{self.entity_id} read {new_value} against an accepted {self._state}",
+                            )
                         if _log_data_warnings_enabled(self.coordinator):
                             log_fn = _LOGGER.warning if self._consecutive_decrease <= 1 else _LOGGER.debug
                             log_fn(
