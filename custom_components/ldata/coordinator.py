@@ -3,8 +3,10 @@
 import asyncio
 import logging
 import requests
+import time
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
@@ -19,9 +21,22 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 # REST polling stays disabled.
 WS_DETECTION_GRACE_PERIOD = 45
 
+# LDATA energy ledger persistence (see ldata_energy.py).
+ENERGY_STORE_VERSION = 1
+# How often to check whether an LDATA hourly burst was missed.
+ENERGY_RECOVERY_INTERVAL = 120.0
+
+
+def energy_store_key(entry_id: str) -> str:
+    """Return the storage key of the LDATA energy ledger for a config entry."""
+    return f"{DOMAIN}.energy_ledger.{entry_id}"
+
 
 class LDATAUpdateCoordinator(DataUpdateCoordinator):
     """LDATAUpdateCoordinator to handle fetching new data about the LDATA module."""
+
+    # True once _async_shutdown has run to the end (see async_shutdown).
+    _shutdown_done = False
 
     def __init__(
         self, hass: HomeAssistant, user, password, entry
@@ -38,6 +53,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._debounce_timer = None
         self._websocket_connected = False
         self._websocket_ever_connected = False
+        self._energy_store = Store(hass, ENERGY_STORE_VERSION, energy_store_key(entry.entry_id))
+        self._energy_loaded = False
+        self._energy_task = None
+        self._energy_save_task = None
 
         super().__init__(
             hass,
@@ -85,12 +104,23 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             "ldata_panel_status_poll"
         )
 
+        # Book LDATA hourly energy bursts missed while the WebSocket was down
+        # from the panel listing.
+        self._energy_task = self.config_entry.async_create_background_task(
+            self._hass,
+            self._energy_recovery_loop(),
+            "ldata_energy_recovery"
+        )
+
     def _handle_connection_change(self, connected: bool):
         """Handle WebSocket connection state changes."""
         was_connected = self._websocket_connected
         self._websocket_connected = connected
         
         if connected and not was_connected:
+            # The subscriptions are sent: a cached delta the cloud re-sends
+            # now must not pass for the hourly burst.
+            self._service.energy_ledger.note_ws_connected(time.time())
             if self._websocket_ever_connected:
                 _LOGGER.debug(f"[v{self._service.version}] WebSocket reconnected")
             else:
@@ -108,6 +138,22 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 self._debounce_timer = None
 
     async def async_shutdown(self):
+        """Shut the coordinator down, once.
+
+        Each unload calls this twice: async_unload_entry calls it, and
+        DataUpdateCoordinator registers it with config_entry.async_on_unload,
+        which Home Assistant runs right after async_unload_entry returns. A
+        failed first refresh also calls it from async_setup_entry, followed by
+        the same on-unload callback. Only the first call does the work. A call
+        that raised or was cancelled leaves it undone: the next call runs it
+        again (and retries the ledger write).
+        """
+        if self._shutdown_done:
+            return
+        await self._async_shutdown()
+        self._shutdown_done = True
+
+    async def _async_shutdown(self):
         """Gracefully shutdown the WebSocket connection and REST polling."""
         _LOGGER.debug("Shutting down LDATA coordinator")
 
@@ -146,6 +192,14 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             except asyncio.CancelledError:
                 pass
 
+        # Cancel the LDATA energy recovery task
+        if self._energy_task:
+            self._energy_task.cancel()
+            try:
+                await self._energy_task
+            except asyncio.CancelledError:
+                pass
+
         # Cancel the WebSocket task if it exists
         if self._websocket_task:
             self._websocket_task.cancel()
@@ -158,6 +212,31 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         if self._debounce_timer:
             self._debounce_timer.cancel()
             self._debounce_timer = None
+
+        # Let a running ledger write finish, so no write of this entry runs
+        # after the unload (a reload would load the file before it lands,
+        # and the late write would then replace newer bookings).
+        if self._energy_save_task is not None:
+            task, self._energy_save_task = self._energy_save_task, None
+            try:
+                await task
+            except asyncio.CancelledError:
+                if asyncio.current_task().cancelling():
+                    raise
+            except Exception as ex:  # noqa: BLE001 - the final save below retries
+                _LOGGER.warning("Writing the LDATA energy ledger failed: %s", ex)
+
+        # Write what is left now that nothing updates the ledger anymore: a
+        # reload loads it again right away.
+        if self._energy_loaded:
+            ledger = self._service.energy_ledger
+            if (data := ledger.take_unsaved()) is not None:
+                try:
+                    await self._energy_store.async_save(data)
+                except BaseException:
+                    ledger.dirty = True  # A second shutdown call retries.
+                    raise
+                ledger.mark_saved(data)
 
     def _inform_rate(self) -> float:
         """Return the configured HA update cadence, clamped to the allowed minimum."""
@@ -230,8 +309,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             )
         else:
             _LOGGER.debug(
-                f"[v{self._service.version}] REST poll loop: no panels with breakers found — "
-                f"REST polling not needed"
+                f"[v{self._service.version}] REST poll loop: no panel needs breaker energy "
+                f"polling — REST polling not needed"
             )
 
         await self._fallback_poll_loop(
@@ -282,6 +361,64 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             refresh=self._service.refresh_panel_status,
         )
 
+    async def _energy_recovery_loop(self):
+        """Book missed LDATA hourly energy bursts from the REST panel listing."""
+        while not self._service.status_data and not self._service._shutdown_requested:
+            await asyncio.sleep(5)
+
+        await self._fallback_poll_loop(
+            loop_name="LDATA energy recovery",
+            get_interval=lambda: ENERGY_RECOVERY_INTERVAL,
+            needs_poll=self._service.needs_ldata_energy_recovery,
+            refresh=self._service.refresh_ldata_energy,
+        )
+
+    async def _async_load_energy_ledger(self) -> None:
+        """Load the persisted LDATA energy ledger once, before the first listing is parsed."""
+        if self._energy_loaded:
+            return
+        # Store moves an unreadable file aside and returns None; the ledger
+        # drops entries it does not understand.
+        ledger = self._service.energy_ledger
+        ledger.load(await self._energy_store.async_load())
+        # Sensors read the ledger as stored from here on.
+        ledger.mark_saved(ledger.as_dict())
+        self._energy_loaded = True
+
+    def _save_energy_ledger(self) -> None:
+        """Start writing the LDATA energy ledger if it changed.
+
+        The sensors see a booking only once it is stored (see
+        LDATAEnergyLedger.mark_saved): a sensor state saved by Home
+        Assistant can then never include energy that a crash takes out of
+        the ledger again, which the ledger would book a second time.
+        """
+        if not self._energy_loaded or not self._service.energy_ledger.dirty:
+            return
+        if self._service._shutdown_requested:
+            return  # async_shutdown writes the ledger.
+        if self._energy_save_task is not None and not self._energy_save_task.done():
+            return  # The running save loop picks up the change.
+        self._energy_save_task = self._hass.async_create_task(
+            self._async_save_energy_ledger(), "ldata_energy_save"
+        )
+
+    async def _async_save_energy_ledger(self) -> None:
+        """Write the LDATA energy ledger until it is stored unchanged, then update the sensors."""
+        ledger = self._service.energy_ledger
+        saved = False
+        # The REST polls book from executor threads, also while a write runs.
+        while (data := ledger.take_unsaved()) is not None:
+            try:
+                await self._energy_store.async_save(data)
+            except BaseException:
+                ledger.dirty = True  # Not written: the next save writes it.
+                raise
+            ledger.mark_saved(data)
+            saved = True
+        if saved:
+            self.async_update_listeners()
+
     def _handle_websocket_update(self):
         """Callback for when WebSocket receives new data.
         
@@ -321,8 +458,13 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 f"[v{self._service.version}] Pushing ({inform_rate}s) update to HA: {breaker_count} breakers, {ct_count} CTs"
             )
 
+            # Notice an LDATA panel coming back online even when no energy
+            # value arrives (see LDATAService._ldata_panel_connected).
+            self._service.observe_ldata_panels()
+
             # This notifies all sensors to refresh from the cache
             self.async_set_updated_data(data)
+            self._save_energy_ledger()
 
         except Exception as e:
             _LOGGER.error(f"[v{self._service.version}] Error in debounced update: {e}")
@@ -425,7 +567,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         # Initial fetch or WebSocket not yet connected
         _LOGGER.debug("Fetching initial LDATA data")
-        
+        await self._async_load_energy_ledger()
+
         try:
             async with asyncio.timeout(30):
                 # This will now either return data or raise an Exception
@@ -437,6 +580,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._log_data_if_enabled(returnData, "API")
 
             self._persist_refreshed_tokens()
+            self._save_energy_ledger()
 
             return returnData
 

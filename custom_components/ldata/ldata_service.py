@@ -14,6 +14,10 @@ import threading
 import requests
 import asyncio
 import aiohttp
+import datetime
+import math
+
+from homeassistant.util import dt as dt_util
 
 from .const import (
     _LEG1_POSITIONS, CONF_RESIDENCE_ID, DECORA_MODELS_ALL, ENABLE_DECORA,
@@ -26,6 +30,50 @@ from .const import (
     HW_COUNTER_POWER_MARGIN, HW_COUNTER_TRANSIENT_KWH,
     DEVICE_TYPE_BRIDGE, is_decora_bridge,
 )
+from .ldata_energy import (
+    HOUR_SECS,
+    PANEL_RECONNECT_SETTLE_SECS,
+    REST_SETTLE_SECS,
+    LDATAEnergyLedger,
+    delta_hour,
+    hour_start,
+    local_date,
+)
+
+# How far back missed LDATA hours are read from the energy history (today
+# and, after midnight, yesterday).
+LDATA_HISTORY_LOOKBACK_SECS = 36 * 3600
+
+
+def _history_hour(entry, tz) -> int | None:
+    """Return the epoch hour of an energy history entry ("2026-10-17 21:00:00" local), or None.
+
+    None also for a local time that is ambiguous or does not exist (the
+    daylight saving changes), which cannot be placed in one epoch hour.
+    """
+    if not isinstance(entry, dict) or not isinstance(entry.get("timestamp"), str):
+        return None
+    try:
+        naive = datetime.datetime.strptime(entry["timestamp"][:19], "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return None
+    first, second = naive.replace(tzinfo=tz), naive.replace(tzinfo=tz, fold=1)
+    if first.utcoffset() != second.utcoffset():
+        return None
+    epoch = first.timestamp()
+    if datetime.datetime.fromtimestamp(epoch, tz).replace(tzinfo=None) != naive or epoch % HOUR_SECS:
+        return None
+    return int(epoch)
+
+
+def _history_kwh(entry) -> float | None:
+    value = entry.get("energyConsumption") if isinstance(entry, dict) else None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not math.isfinite(value) or value < 0:
+        return None
+    return float(value)
+
 
 try:
     # Read manifest.json dynamically to get the version
@@ -179,6 +227,25 @@ class LDATAService:
         self._hw_counter_seen: dict[tuple[str, str], tuple[float, float]] = {}
         self._hw_counter_evidence: dict[str, int] = {}
         self._hw_counter_evidence_at: dict[str, float] = {}
+        # Ids of LDATA (ResidentialBreakerPanel) panels. Their breaker
+        # energyConsumption values are hourly deltas, booked in energy_ledger.
+        self._ldata_panel_ids: set[str] = set()
+        # Lifetime/daily energy for LDATA breakers. Loaded and saved by the
+        # coordinator.
+        self.energy_ledger = LDATAEnergyLedger()
+        # Hour (delta_hour) for which the listing was last read to recover
+        # missed hourly bursts — at most one read per hour.
+        self._energy_recovery_hour: int | None = None
+        # Per LDATA panel: the cached connected state last seen by
+        # _ldata_panel_connected, and when it was seen to change to connected.
+        self._ldata_panel_seen_connected: dict[str, bool] = {}
+        self._ldata_panel_online_since: dict[str, float] = {}
+        # Hour (delta_hour) for which the energy history was last read.
+        self._energy_history_hour: int | None = None
+        # Per LDATA breaker (stable id): each leg's power x time per hour
+        # (Wh), to split an hour of the energy history over the legs and an
+        # hour claimed by a lifetime counter at the counter.
+        self._ldata_leg_energy: dict[str, dict] = {}
         # Track how many IotWhem WS messages we've seen per panel without breaker data
         self._ws_iotwhem_count: dict[str, int] = {}
         # Detection threshold (still used for logging, but no longer triggers breaker REST poll)
@@ -1686,6 +1753,9 @@ class LDATAService:
                 existing["consumption2"] = float(raw["energyConsumption2"]) if raw["energyConsumption2"] is not None else cached_ec2
             existing["consumption"] = existing["consumption1"] + existing["consumption2"]
 
+            if existing.get("panel_id") in self._ldata_panel_ids:
+                self._apply_ldata_energy(existing, raw, source)
+
             # NOTE: Do NOT use energyConsumption > 0 to promote a panel to
             # hw-counter mode.  In firmware 2.1.0, energyConsumption is a
             # PERIOD counter that resets with every bandwidth toggle (1→0→1).
@@ -1695,6 +1765,9 @@ class LDATAService:
             # and is never promoted to True afterwards. It can be demoted to
             # False: see _note_hw_counter_reading().
             self._note_hw_counter_reading(breaker_id, existing, "consumption")
+
+        if ("power" in raw or "power2" in raw) and existing.get("panel_id") in self._ldata_panel_ids:
+            self._track_ldata_leg_power(existing, raw)
 
         if "energyImport" in raw or "energyImport2" in raw:
             cached_ei1 = existing.get("import1", 0)
@@ -1707,6 +1780,150 @@ class LDATAService:
             self._note_hw_counter_reading(breaker_id, existing, "import")
 
         return power_changed
+
+    def _apply_ldata_energy(
+        self,
+        breaker: dict,
+        raw: dict,
+        source: str,
+        received: float | None = None,
+        connected: bool | None = None,
+    ) -> bool:
+        """Book an LDATA breaker's energyConsumption values in the energy ledger.
+
+        On LDATA panels these are the kWh used in the hour that just ended
+        (WebSocket burst at the start of the hour, REST listing), or
+        occasionally the lifetime counter; the ledger tells them apart. While
+        the panel is offline (``connected``; by default the cached panel
+        state, see _ldata_panel_connected) only lifetime counters are
+        applied: the listing then shows the last delta again. Returns True if
+        the ledger changed.
+        """
+        values = {}
+        if "energyConsumption" in raw:
+            values["1"] = raw["energyConsumption"]
+        if "energyConsumption2" in raw:
+            values["2"] = raw["energyConsumption2"]
+        if not values:
+            return False
+        # Bound the value by the payload's own currentRating when it carries
+        # one: the listing recovery path books from a raw listing entry without
+        # refreshing the cached breaker metadata first.
+        rating = raw.get("currentRating")
+        if rating is None:
+            rating = breaker.get("rating")
+        if connected is None:
+            connected = self._ldata_panel_connected(breaker.get("panel_id"), received)
+        key = breaker.get("stable_id") or breaker["id"]
+        received = time.time() if received is None else received
+        return self.energy_ledger.apply(
+            key,
+            rating,
+            values,
+            received,
+            source,
+            name=breaker.get("name"),
+            connected=connected,
+            hour_wh=lambda hour: self._ldata_leg_hour_wh(key, hour, received),
+        )
+
+    def _ldata_panel_connected(self, panel_id: str | None, now: float | None = None) -> bool:
+        """Return whether hourly deltas of a panel can be booked (True if unknown).
+
+        False while the cached panel state is offline, and until
+        PANEL_RECONNECT_SETTLE_SECS after the panel is first seen connected
+        again: a few minutes after a hub outage the hub uploads the hourly
+        values it missed, as several energyConsumption messages per breaker
+        that do not say which hour they cover. Meanwhile no hourly delta is
+        booked from the panel (lifetime counters still are), and the energy
+        of the outage is left to the next lifetime counter. The state is
+        tracked on every booking and on every coordinator push
+        (observe_ldata_panels), so the change is seen within one push
+        interval.
+        """
+        connected = None
+        for panel in (self.status_data or {}).get("panels") or []:
+            if panel.get("id") == panel_id:
+                connected = bool(panel.get("connected", True))
+                break
+        if connected is None:
+            return True
+        now = time.time() if now is None else now
+        was = self._ldata_panel_seen_connected.get(panel_id)
+        self._ldata_panel_seen_connected[panel_id] = connected
+        if not connected:
+            self._ldata_panel_online_since.pop(panel_id, None)
+            return False
+        if was is False:
+            self._ldata_panel_online_since[panel_id] = now
+            _LOGGER.debug(
+                f"[v{self.version}] LDATA panel {panel_id} is back online — not booking "
+                f"its hourly deltas for {PANEL_RECONNECT_SETTLE_SECS} s (the hub uploads "
+                f"the hours it missed without saying which)"
+            )
+        since = self._ldata_panel_online_since.get(panel_id)
+        if since is None:
+            return True
+        if now - since < PANEL_RECONNECT_SETTLE_SECS:
+            return False
+        self._ldata_panel_online_since.pop(panel_id, None)
+        return True
+
+    def _track_ldata_leg_power(self, breaker: dict, raw: dict, now: float | None = None) -> None:
+        """Integrate an LDATA breaker's per-leg power (raw power/power2) into Wh per hour."""
+        now = time.time() if now is None else now
+        tracker = self._ldata_leg_energy.setdefault(
+            breaker.get("stable_id") or breaker["id"], {"t": None, "p": {}, "hours": {}, "since": now}
+        )
+        self._advance_leg_energy(tracker, now)
+        for leg, field in (("1", "power"), ("2", "power2")):
+            try:
+                if raw.get(field) is not None:
+                    tracker["p"][leg] = abs(float(raw[field]))
+            except (TypeError, ValueError):
+                pass
+
+    @staticmethod
+    def _advance_leg_energy(tracker: dict, now: float) -> None:
+        start = tracker["t"]
+        tracker["t"] = now if start is None else max(start, now)
+        if start is None or now <= start:
+            return
+        while start < now:
+            end = min(hour_start(start) + HOUR_SECS, now)
+            hour = tracker["hours"].setdefault(hour_start(start), {})
+            for leg, watts in tracker["p"].items():
+                hour[leg] = hour.get(leg, 0.0) + watts * (end - start) / HOUR_SECS
+            start = end
+        for old in [h for h in tracker["hours"] if h < hour_start(now) - LDATA_HISTORY_LOOKBACK_SECS]:
+            del tracker["hours"][old]
+
+    def _ldata_leg_shares(self, key: str, hour: int, now: float) -> dict[str, float] | None:
+        """Return each leg's power x time (Wh) in ``hour``, or None if not tracked."""
+        tracker = self._ldata_leg_energy.get(key)
+        if tracker is None:
+            return None
+        self._advance_leg_energy(tracker, now)
+        return tracker["hours"].get(hour)
+
+    def _ldata_leg_hour_wh(self, key: str, hour: int, now: float) -> dict[str, float] | None:
+        """Return each leg's power x time (Wh) in ``hour`` up to ``now``, or None unless tracked over all of it.
+
+        Splits an hour claimed by a lifetime counter at the counter (see
+        LDATAEnergyLedger._claimed_rest), so a partly tracked hour (the
+        tracker starts at the first power reading after startup) is not
+        used: its share before the counter would be too small.
+        """
+        tracker = self._ldata_leg_energy.get(key)
+        if tracker is None or tracker.get("since", hour + 1) > hour:
+            return None
+        self._advance_leg_energy(tracker, now)
+        return tracker["hours"].get(hour)
+
+    def observe_ldata_panels(self, now: float | None = None) -> None:
+        """Track the connected state of every LDATA panel (see _ldata_panel_connected)."""
+        for panel_id in self._ldata_panel_ids:
+            self._ldata_panel_connected(panel_id, now)
 
     def _apply_ct_update(self, existing: dict, raw: dict) -> None:
         """Apply a CT update from any source (REST, WS direct, WS embedded).
@@ -2126,6 +2343,8 @@ class LDATAService:
                 continue
             panel_data["panel_type"] = panel.get("ModuleType", "WHEMS")
             panel_data["connected"] = self._is_panel_connected(panel)
+            if panel_data["panel_type"] == "LDATA":
+                self._ldata_panel_ids.add(panel_data["id"])
 
             # Physical mounting orientation (0 or 180) and total breaker slot
             # count — WHEMS panels report these directly; not present on the
@@ -2394,6 +2613,11 @@ class LDATAService:
                                     f"(e.g. 'Solar', 'Oven', 'Lights')."
                                 )
 
+                        if panel_data["panel_type"] == "LDATA":
+                            self._apply_ldata_energy(
+                                breaker_data, breaker, "REST", connected=panel_data["connected"]
+                            )
+
                         # Add the breaker to the list.
                         breakers[breaker["id"]] = breaker_data
                         try:
@@ -2429,7 +2653,17 @@ class LDATAService:
             # For v2+ panels we always use power×time integration for daily energy.
             # For v1 panels we check whether any breaker already has a non-zero
             # energyConsumption at startup (pre-toggle null → 0 means no counters).
-            if fw_major >= 2:
+            if panel_data["panel_type"] == "LDATA":
+                # energyConsumption is the kWh used in the last hour (now and
+                # then the lifetime counter), so whether it is > 0 at startup
+                # says nothing about hardware counters. Consumption energy
+                # comes from energy_ledger; import uses power×time.
+                has_hw = False
+                _LOGGER.info(
+                    f"[v{self.version}] Panel '{panel.get('name', panel['id'])}': "
+                    f"LDATA panel — consumption energy from hourly breaker deltas"
+                )
+            elif fw_major >= 2:
                 has_hw = False
                 _LOGGER.info(
                     f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' "
@@ -2470,7 +2704,10 @@ class LDATAService:
             # On v2+ panels these counters are not used for daily energy (period counters),
             # so skip the REST poll entirely — saves bandwidth-toggle disruptions.
             # On v1 panels, WebSocket does not deliver energyConsumption, so REST poll is needed.
-            if fw_major >= 2:
+            # LDATA panels: the hourly energy arrives over the WebSocket (missed
+            # hours are read from the listing by refresh_ldata_energy), and the
+            # breaker poll has no LDATA endpoint (see _refresh_breaker_data_locked).
+            if fw_major >= 2 or panel_data["panel_type"] == "LDATA":
                 self._panel_needs_breaker_poll[panel["id"]] = False
             else:
                 panel_breaker_count = sum(
@@ -2835,6 +3072,229 @@ class LDATAService:
                 f"breaker could carry) - switching this panel's energy sensors to power×time. "
                 f"Reloading the integration re-checks it."
             )
+
+    def panel_uses_hourly_energy(self, panel_id: str) -> bool:
+        """Return True if consumption energy for this panel comes from energy_ledger."""
+        return panel_id in self._ldata_panel_ids
+
+    def needs_ldata_energy_recovery(self, now: float | None = None) -> bool:
+        """Return True if the listing or the energy history should be read for missed hours."""
+        now = time.time() if now is None else now
+        return self._needs_ldata_listing(now) or bool(self._ldata_history_needed(now))
+
+    def _needs_ldata_listing(self, now: float) -> bool:
+        """Return True if an LDATA breaker is missing the last hourly burst.
+
+        Checked from REST_SETTLE_SECS into the hour (the burst arrives in
+        the first minute), at most once per hour. A breaker on a panel that
+        is offline (or just back online) is skipped: the listing has no new
+        delta for it, and the check runs again once the panel is back.
+        """
+        if not self._ldata_panel_ids or not self.status_data:
+            return False
+        if now - hour_start(now) < REST_SETTLE_SECS:
+            return False
+        hour = delta_hour(now)
+        if self._energy_recovery_hour == hour:
+            return False
+        return any(
+            not self.energy_ledger.has_delta_for(b.get("stable_id") or b_id, hour)
+            for b_id, b in self.status_data.get("breakers", {}).items()
+            if b.get("panel_id") in self._ldata_panel_ids
+            and self._ldata_panel_connected(b.get("panel_id"), now)
+        )
+
+    def refresh_ldata_energy(self) -> bool:
+        """Book missed hourly deltas from the LDATA panel listing, then from the energy history.
+
+        The listing carries each breaker's last hourly delta, so a burst lost
+        to a WebSocket reconnect can still be booked within the hour. One
+        GET per residence, no bandwidth toggle. When the cloud sent no burst
+        at all, the listing shows the previous hour's delta again; the hours
+        still missing after it are read from the energy history (see
+        _refresh_ldata_history_locked). Returns True if the ledger changed.
+        """
+        if not self.needs_ldata_energy_recovery() or not self.auth_token:
+            return False
+        if not self._rest_poll_lock.acquire(timeout=5):
+            _LOGGER.debug(f"[v{self.version}] LDATA energy recovery skipped — another REST poll is running")
+            return False
+        try:
+            changed = False
+            if self._needs_ldata_listing(time.time()):
+                changed = self._refresh_ldata_energy_locked()
+            if self._ldata_history_needed(time.time()):
+                changed = self._refresh_ldata_history_locked() or changed
+            return changed
+        finally:
+            self._rest_poll_lock.release()
+
+    def _ldata_history_needed(self, now: float) -> dict[str, list[int]]:
+        """Return, per LDATA breaker, the hours of the last LDATA_HISTORY_LOOKBACK_SECS it is missing.
+
+        Only from REST_SETTLE_SECS into the hour, once the listing recovery
+        of the hour has run (or was not needed), and at most once per hour.
+        Breakers of a panel that is offline or just back online are skipped.
+        """
+        if not self._ldata_panel_ids or not self.status_data:
+            return {}
+        if now - hour_start(now) < REST_SETTLE_SECS:
+            return {}
+        until = delta_hour(now)
+        if self._energy_history_hour == until or self._needs_ldata_listing(now):
+            return {}
+        since = hour_start(now - LDATA_HISTORY_LOOKBACK_SECS)
+        needed = {}
+        for b_id, b in self.status_data.get("breakers", {}).items():
+            if b.get("panel_id") not in self._ldata_panel_ids:
+                continue
+            if not self._ldata_panel_connected(b.get("panel_id"), now):
+                continue
+            key = b.get("stable_id") or b_id
+            hours = self.energy_ledger.history_hours_needed(key, since, until)
+            if hours:
+                needed[key] = hours
+        return needed
+
+    def _refresh_ldata_history_locked(self) -> bool:
+        """Book missed hours from the cloud's energy history (kWh per breaker and hour).
+
+        ``Residences/getAllEnergyConsumptionForDay`` (the Leviton app's
+        energy view) returns, per panel and breaker position, the kWh of
+        every hour of a local day at 0.01 kWh, also for hours the cloud sent
+        no burst for (2026-10-17 21-22h: 2.96 kWh, while the listing showed
+        the 20-21h deltas again). One GET per residence and local day with a
+        missing hour, at most once per hour. An hour is taken only when the
+        panel's total for it is above 0: the cloud reports hours it has not
+        computed yet (e.g. while the hub is offline) as 0. The ledger books
+        an hour only for legs that have nothing for it (see
+        LDATAEnergyLedger.apply_history), split by each leg's power x time.
+        """
+        now = time.time()
+        needed = self._ldata_history_needed(now)
+        if not needed:
+            return False
+        self._energy_history_hour = delta_hour(now)
+        tz = dt_util.get_default_time_zone()
+        days = sorted({local_date(hour) for hours in needed.values() for hour in hours})
+        by_position = {}
+        for b_id, b in self.status_data.get("breakers", {}).items():
+            key = b.get("stable_id") or b_id
+            if key in needed and b.get("position") is not None:
+                by_position[(b.get("panel_id"), str(b.get("position")))] = (key, b)
+        changed = False
+        for residence_id in self.residence_id_list:
+            for day in days:
+                try:
+                    result = self._get_retry_dropped_connection(
+                        "https://my.leviton.com/api/Residences/getAllEnergyConsumptionForDay",
+                        headers=self._auth_headers(),
+                        params={"id": str(residence_id), "startDay": day.isoformat(), "timezone": str(tz)},
+                        timeout=30,
+                    )
+                except requests.exceptions.RequestException as ex:
+                    _LOGGER.debug(f"[v{self.version}] LDATA energy history for {day} failed: {ex}")
+                    continue
+                if result.status_code == 401:
+                    raise LDATAAuthError(f"[v{self.version}] Auth token invalid (401) during LDATA energy history.")
+                if result.status_code != 200:
+                    _LOGGER.debug(f"[v{self.version}] LDATA energy history for {day} returned HTTP {result.status_code}")
+                    continue
+                try:
+                    data = result.json()
+                except ValueError:
+                    _LOGGER.debug(f"[v{self.version}] LDATA energy history for {day}: no JSON")
+                    continue
+                changed = self._apply_ldata_history(data, needed, by_position, tz, now) or changed
+        _LOGGER.debug(
+            f"[v{self.version}] LDATA energy history for {', '.join(d.isoformat() for d in days)}: "
+            f"ledger {'updated' if changed else 'unchanged'}"
+        )
+        return changed
+
+    def _apply_ldata_history(self, data, needed, by_position, tz, now) -> bool:
+        """Book the needed hours found in one getAllEnergyConsumptionForDay response."""
+        changed = False
+        if not isinstance(data, dict):
+            return False
+        for panel_id, panel in data.items():
+            if panel_id not in self._ldata_panel_ids or not isinstance(panel, dict):
+                continue
+            computed = {
+                hour
+                for entry in panel.get("totals") or []
+                if (hour := _history_hour(entry, tz)) is not None
+                and (_history_kwh(entry) or 0) > 0
+            }
+            breakers = panel.get("residentialBreakers")
+            for position, entries in (breakers.items() if isinstance(breakers, dict) else ()):
+                key, breaker = by_position.get((panel_id, str(position)), (None, None))
+                if key is None or not isinstance(entries, list):
+                    continue
+                for entry in entries:
+                    hour = _history_hour(entry, tz)
+                    kwh = _history_kwh(entry)
+                    if hour is None or kwh is None or hour not in computed or hour not in needed[key]:
+                        continue
+                    if self.energy_ledger.apply_history(
+                        key, hour, kwh, self._ldata_leg_shares(key, hour, now), name=breaker.get("name"),
+                        hour_wh=self._ldata_leg_hour_wh(key, hour, now),
+                    ):
+                        changed = True
+        return changed
+
+    def _refresh_ldata_energy_locked(self) -> bool:
+        """Inner implementation of refresh_ldata_energy, called under _rest_poll_lock."""
+        now = time.time()
+        breakers = self.status_data.get("breakers", {})
+        changed = False
+        read_ok = False
+        all_connected = True
+        for residence_id in self.residence_id_list:
+            result = self._get_retry_dropped_connection(
+                f"https://my.leviton.com/api/Residences/{residence_id}/residentialBreakerPanels",
+                headers=self._auth_headers(filter='{"include":["residentialBreakers"]}'),
+                timeout=15,
+            )
+            if result.status_code == 401:
+                raise LDATAAuthError(f"[v{self.version}] Auth token invalid (401) during LDATA energy recovery.")
+            if result.status_code != 200:
+                _LOGGER.debug(f"[v{self.version}] LDATA energy recovery returned HTTP {result.status_code}")
+                continue
+            read_ok = True
+            for panel in result.json():
+                if panel.get("id") not in self._ldata_panel_ids:
+                    continue
+                # An offline panel's listing shows the last delta again (no
+                # burst reached the cloud), so only lifetime counters are
+                # taken from it, and the hour is checked again later.
+                connected = self._is_panel_connected(panel)
+                if not connected:
+                    all_connected = False
+                    _LOGGER.debug(
+                        f"[v{self.version}] LDATA energy recovery: panel {panel.get('id')} is "
+                        f"offline — not booking its listing values"
+                    )
+                elif not self._ldata_panel_connected(panel.get("id"), now):
+                    # Back online a moment ago: the listing may show an
+                    # hour the hub uploaded late, not the last one.
+                    connected = False
+                    all_connected = False
+                    _LOGGER.debug(
+                        f"[v{self.version}] LDATA energy recovery: panel {panel.get('id')} came "
+                        f"back online less than {PANEL_RECONNECT_SETTLE_SECS} s ago — not booking "
+                        f"its listing values yet"
+                    )
+                for raw in panel.get("residentialBreakers") or []:
+                    breaker = breakers.get(raw.get("id"))
+                    if breaker and self._apply_ldata_energy(
+                        breaker, raw, "REST", received=now, connected=connected
+                    ):
+                        changed = True
+        if read_ok and all_connected:
+            self._energy_recovery_hour = delta_hour(now)
+            _LOGGER.debug(f"[v{self.version}] LDATA energy recovery from listing: ledger {'updated' if changed else 'unchanged'}")
+        return changed
 
     def refresh_ct_data(self) -> bool:
         """Re-fetch only CT data from the REST API and merge into status_data.

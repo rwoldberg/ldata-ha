@@ -24,11 +24,12 @@ from homeassistant.const import (
     UnitOfFrequency,
     UnitOfPower,
 )
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity, RestoredExtraData
 from homeassistant.helpers.typing import StateType
 from homeassistant.util import dt as dt_util
 
@@ -53,6 +54,7 @@ from .coordinator import LDATAUpdateCoordinator
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 from .ldata_base_entity import add_entities_grouped_by_panel, find_panel
 from .ldata_ct_entity import LDATACTEntity
+from .ldata_energy import current_daily_date
 from .ldata_entity import LDATAEntity
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -65,6 +67,14 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 # corrections aren't always near-zero. The clamp only applies within one day:
 # the day's reset always passes, however small yesterday's total was.
 _DAILY_JITTER_EPSILON_KWH = 0.05
+
+# A difference between a ledger-backed sensor's state and its ledger total
+# below this is float rounding of the increments added, not an offset.
+_LEDGER_OFFSET_EPSILON_KWH = 1e-9
+
+# Seconds after a ledger-backed daily sensor's day reset to 0 before it
+# writes the new day's ledger total (see LDATADailyUsageSensor._update_hourly).
+_DAILY_RESET_FOLLOW_UP_S = 1.0
 
 
 def _check_spike_and_update(
@@ -122,6 +132,65 @@ def _log_data_warnings_enabled(coordinator) -> bool:
 def _log_warnings_enabled(coordinator) -> bool:
     """Check if general warning logging is enabled."""
     return coordinator.config_entry.options.get("log_warnings", True)
+
+
+def _hourly_energy_ledger(coordinator, panel_id):
+    """Return the energy ledger if this panel's consumption comes from hourly deltas (LDATA)."""
+    service = getattr(coordinator, "_service", None)
+    if service is not None and panel_id and service.panel_uses_hourly_energy(panel_id) is True:
+        return service.energy_ledger
+    return None
+
+
+def _import_power(coordinator, breaker: dict, raw_power: float) -> float:
+    """Return the watts a breaker feeds into the panel bus, for import energy.
+
+    Import is energy flowing back into the panel through a breaker (solar
+    generation). A solar breaker reports generation as positive watts. On
+    LDATA panels a load breaker's watts are always its consumption: it has
+    no import, and its Import sensors stay where they are. The panel Daily
+    Import total already counts only solar breakers, so the breaker sensors
+    now agree with it. Other panels keep max(power, 0): their import sensors
+    exist only for breakers detected as exporters.
+    """
+    if (
+        breaker.get("branch_type") != "Solar"
+        and _hourly_energy_ledger(coordinator, breaker.get("panel_id")) is not None
+    ):
+        return 0.0
+    return max(raw_power, 0.0)
+
+
+def _ledger_extra_data(state: float | None, ledger_ref: float | None) -> ExtraStoredData | None:
+    """Return the unrounded state of a ledger-backed energy sensor, for restore."""
+    if state is None or ledger_ref is None:
+        return None
+    return RestoredExtraData({"ledger_state": state, "ledger_ref": ledger_ref})
+
+
+async def _restored_ledger_state(entity: RestoreEntity, ledger_ref: float) -> float | None:
+    """Return the unrounded state a ledger-backed energy sensor saved with ``ledger_ref``, or None.
+
+    The recorded state is rounded to 0.01 kWh, while the sensor adds exact
+    ledger increments to its state: restoring the rounded value shifted the
+    state against the ledger by up to 0.005 kWh at every restart, and the
+    shift went into the long-term statistics.
+    """
+    extra = await entity.async_get_last_extra_data()
+    data = extra.as_dict() if extra is not None else {}
+    state, ref = data.get("ledger_state"), data.get("ledger_ref")
+    if (
+        isinstance(state, (int, float)) and not isinstance(state, bool)
+        and isinstance(ref, (int, float)) and not isinstance(ref, bool)
+        and ref == ledger_ref
+    ):
+        return float(state)
+    return None
+
+
+def _ledger_key(breaker: dict) -> str:
+    """Return the energy-ledger key of a breaker."""
+    return breaker.get("stable_id") or breaker["id"]
 
 
 # ── Spike-detection threshold ─────────────────────────────────────────────────
@@ -316,6 +385,12 @@ async def async_setup_entry(
         """
         panel_id = b_data.get("panel_id")
         if panel_id and hasattr(coordinator, '_service') and coordinator._service:
+            if coordinator._service.panel_uses_hourly_energy(panel_id) is True:
+                # LDATA: consumption comes from the hourly-delta ledger, but the
+                # import-sensor gates keep their v1 behaviour (registry fallback,
+                # no period-counter heuristics). energyImport is null on LDATA,
+                # so the v2 ratio heuristics would only misfire on it.
+                return True
             return coordinator._service.panel_has_hw_counters(panel_id)
         return True  # unknown firmware — assume v1 to be conservative
 
@@ -683,7 +758,10 @@ class _DailyEnergySensorMixin:
         lets the day's reset through.
         """
         if self._state is not None:
-            self._last_reported = round(self._state, 2)
+            # The recorded state, if the subclass restored a more precise
+            # one: that is what Home Assistant last reported.
+            recorded = getattr(self, "_restored_reported", None)
+            self._last_reported = round(self._state if recorded is None else recorded, 2)
             self._last_reported_date = self._last_date
         await super().async_added_to_hass()
 
@@ -825,6 +903,14 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         self._consecutive_decrease: int = 0
         # Monotonic-guard timeout: set when a backwards-jump is first detected
         self._monotonic_reject_since: float | None = None
+        # LDATA consumption: the energy-ledger daily total this state last
+        # caught up to (see _update_hourly).
+        self._ledger_ref: float | None = None
+        # The recorded state when an unrounded one was restored (see
+        # _restore_ledger_state), for the jitter clamp.
+        self._restored_reported: float | None = None
+        # Cancels the update scheduled after a day reset (see _update_hourly).
+        self._reset_follow_up: CALLBACK_TYPE | None = None
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass to restore state on startup."""
@@ -872,13 +958,76 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
             # an HA restart without stale cached mode overriding the detection.
             if "energy_key" in attrs:
                 self._energy_key = attrs["energy_key"]
+            try:
+                self._ledger_ref = float(attrs["ledger_ref"])
+            except (KeyError, ValueError, TypeError):
+                self._ledger_ref = None
+            if self._ledger_ref is not None and self._state is not None:
+                await self._restore_ledger_state()
 
         await super().async_added_to_hass()
+
+    async def _restore_ledger_state(self) -> None:
+        """Restore the unrounded state of a ledger-backed daily sensor.
+
+        The state follows the ledger's daily total exactly (it is set to it
+        at each day's reset and then grows by the ledger's increments), so
+        it must come back exactly, not as the recorded value rounded to
+        0.01 kWh. Since this version the unrounded state is saved with the
+        restore data. A state saved before (no restore data) that is within
+        _DAILY_JITTER_EPSILON_KWH of its ledger_ref is taken as that ledger
+        total: the difference is rounding, of this restart and earlier ones
+        on the same day. A larger difference (the first day under the
+        ledger keeps the state it had before it) is kept.
+        The recorded value is still what the jitter clamp compares the next
+        state with, so a state restored just below it is not reported as
+        a decrease.
+        """
+        recorded = self._state
+        exact = await _restored_ledger_state(self, self._ledger_ref)
+        if exact is not None:
+            self._state = max(0.0, min(exact, MAX_DAILY_ENERGY_KWH))
+        elif abs(recorded - self._ledger_ref) <= _DAILY_JITTER_EPSILON_KWH:
+            self._state = self._ledger_ref
+        self._restored_reported = recorded
+
+    @property
+    def extra_restore_state_data(self) -> ExtraStoredData | None:
+        """Return the unrounded state of a ledger-backed daily sensor (see _restore_ledger_state)."""
+        return _ledger_extra_data(self._state, self._ledger_ref)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cancel a pending day-reset follow-up."""
+        if self._reset_follow_up is not None:
+            self._reset_follow_up()
+            self._reset_follow_up = None
+        await super().async_will_remove_from_hass()
 
     @callback
     def _handle_coordinator_update(self) -> None:
         """Route coordinator updates through our custom state-update logic."""
         self._state_update()
+
+    def _schedule_reset_follow_up(self) -> None:
+        """Run an update shortly after a day reset to 0 has been written.
+
+        It adds the new day's ledger total without waiting for a coordinator
+        update, which can be up to HA_INFORM_RATE_MAX away and stops while
+        the WebSocket is down. A scheduled call runs only after the current
+        update returned, so also after the state Home Assistant writes once
+        it added the entity.
+        """
+        if self.hass is None or self._reset_follow_up is not None:
+            return
+
+        @callback
+        def _follow_up(_now: datetime.datetime) -> None:
+            self._reset_follow_up = None
+            self._state_update()
+
+        self._reset_follow_up = async_call_later(
+            self.hass, _DAILY_RESET_FOLLOW_UP_S, _follow_up
+        )
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -889,6 +1038,8 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         attributes["use_hw_counters"] = self._use_hw_counters
         attributes["energy_key"] = self._energy_key
         attributes["panel_energy_key"] = self._panel_energy_key
+        if self._ledger_ref is not None:
+            attributes["ledger_ref"] = self._ledger_ref
         return attributes
 
     @property
@@ -973,6 +1124,116 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         # which would incorrectly trigger hw-counter mode.
         return False
 
+    def _hourly_ledger(self):
+        """Return the energy ledger if this sensor follows LDATA hourly deltas."""
+        if self._is_forced_import or (self.panel_total and self._panel_energy_key != "consumption"):
+            return None
+        panel_id = self.panel_id if self.panel_total else self.breaker_data.get("panel_id")
+        return _hourly_energy_ledger(self.coordinator, panel_id)
+
+    def _ledger_daily(self, ledger, day) -> float | None:
+        """Return this sensor's ledger kWh for ``day``, or None without ledger data."""
+        if self.panel_total:
+            values = [
+                ledger.daily(_ledger_key(b), day)
+                for b in self.coordinator.data.get("breakers", {}).values()
+                if b.get("panel_id") == self.panel_id
+            ]
+            values = [v for v in values if v is not None]
+            return sum(values) if values else None
+        return ledger.daily(_ledger_key(self.breaker_data), day)
+
+    def ledger_reset(self) -> str | None:
+        """Reset a ledger-backed daily sensor; return None if not ledger-backed.
+
+        The ledger is built from hourly deltas and is not affected by a
+        panel factory reset, so there are no counters or guards to clear.
+        The state is set to the ledger's total for the current ledger day,
+        and _ledger_ref to the same value, so the sensor keeps following
+        the ledger from there. Zeroing the state instead would drop the
+        energy already used today until the next 01:00 rollover.
+        """
+        ledger = self._hourly_ledger()
+        if ledger is None:
+            return None
+        was = f"{self._state:.2f}" if self._state is not None else "?"
+        day = current_daily_date(time.time())
+        value = self._ledger_daily(ledger, day)
+        if value is None:
+            return f"daily follows the energy ledger, no ledger data yet (left at {was} kWh)"
+        self._state = value
+        self._ledger_ref = value
+        self._last_date = day
+        # A deliberate value: the jitter clamp in native_value must not hold
+        # back a ledger total up to 0.05 kWh below the current state.
+        self._last_reported = None
+        self.async_write_ha_state()
+        return f"daily set to the energy ledger total for {day} ({value:.2f} kWh, was {was} kWh)"
+
+    def _update_hourly(self, ledger) -> None:
+        """Daily consumption from the LDATA energy ledger.
+
+        Energy is booked on the local date of the hour it was used in, and
+        the last hour of a day arrives just after 00:00, so the sensor moves to
+        the new date at 01:00. Within a day the state only grows by ledger
+        increments, so the restored value of the first day after an upgrade
+        never drops.
+
+        A new day always reaches Home Assistant as a reset to 0. Normally
+        the new day has no stored energy yet at the first update after
+        01:00 (the 01:00 burst is stored after that update), so the
+        state is 0 anyway. When it already has energy (Home Assistant was
+        down across 01:00, or a lifetime counter added energy to the 00:00
+        hour), the state is still 0 for this update and the next update
+        (scheduled a second later, or a coordinator update before it)
+        adds the day's ledger total: the recorder only takes a drop to
+        below 90 % of the previous state as a new cycle, so going straight
+        from yesterday's total to a value at or above 90 % of it would lose
+        the new day's energy from the long-term statistics. The 0 is not
+        written from here as a separate state: after a restart this update
+        runs inside async_added_to_hass, where Home Assistant drops state
+        writes, and only the state left after it is written.
+        """
+        day = current_daily_date(time.time())
+        value = self._ledger_daily(ledger, day)
+        if value is None:
+            return
+
+        if (
+            self._last_date is not None
+            and self._last_date < day
+            and self._state is not None
+            and self._state > 0
+            and value > 0
+        ):
+            self._state = 0.0
+            self._ledger_ref = 0.0
+            self._last_date = day
+            self._schedule_reset_follow_up()
+            return
+
+        if (
+            self._ledger_ref is None
+            and self._state is not None
+            and self._last_date is not None
+            and self._last_date > day
+        ):
+            # First update after an upgrade between 00:00 and 01:00: the old
+            # code already reset at midnight and counted the 23:00 hour, which
+            # is still yesterday's here. Keep the restored state.
+            pass
+        elif self._last_date != day or self._state is None:
+            self._state = value
+        elif self._ledger_ref is not None and value >= self._ledger_ref:
+            # The state keeps its difference to the ledger total (0 except
+            # on the first day under the ledger), without float drift.
+            offset = self._state - self._ledger_ref
+            self._state = value if abs(offset) < _LEDGER_OFFSET_EPSILON_KWH else value + offset
+        # else: first reading under the ledger on this day, or a lower ledger
+        # total (a breaker left the panel) — keep the current state.
+        self._ledger_ref = value
+        self._last_date = day
+
     @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
@@ -980,6 +1241,11 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
             return
 
         try:
+            if (ledger := self._hourly_ledger()) is not None:
+                self._update_hourly(ledger)
+                self.async_write_ha_state()
+                return
+
             # Auto-detect mode on first update
             if self._use_hw_counters is None:
                 self._use_hw_counters = self._detect_mode()
@@ -1260,7 +1526,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
             if self._is_forced_import:
                 # Daily Import sensor: solar generation flows into the panel bus
                 # as positive watts.  Ignore the negative (consumption) direction.
-                current_power = max(raw_power, 0.0)
+                current_power = _import_power(self.coordinator, new_data, raw_power)
             elif self._is_solar_breaker or self._energy_key == "import":
                 # Daily Consumption sensor on a solar breaker.
                 # Inverter standby draw flows FROM the panel (negative watts).
@@ -1955,11 +2221,23 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         # Power×time tracking for v2 panels (hw counters unavailable)
         self._last_power: float | None = None
         self._last_update_time: float | None = None  # time.time() epoch seconds
+        # LDATA consumption: the energy-ledger lifetime this state last
+        # caught up to. The state only grows by ledger increments, so a
+        # restored state (also one from before the ledger existed) never drops.
+        self._ledger_ref: float | None = None
 
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
         return self.coordinator.last_update_success or self._state is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes, including the energy-ledger reference for restore."""
+        attributes = super().extra_state_attributes
+        if self._ledger_ref is not None:
+            attributes["ledger_ref"] = self._ledger_ref
+        return attributes
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass to restore state on startup."""
@@ -1970,6 +2248,58 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 self._last_accepted_ts = last_state.last_updated.timestamp()
             except (ValueError, TypeError, AttributeError):
                 pass
+            # The first update above ran before the restore (its state is not
+            # written yet). Without a stored reference (first start with the
+            # ledger), the next update continues from the restored state.
+            try:
+                self._ledger_ref = float((last_state.attributes or {})["ledger_ref"])
+            except (KeyError, ValueError, TypeError):
+                self._ledger_ref = None
+            # The state follows the ledger by exact increments: restore it
+            # unrounded (see _restored_ledger_state). A state saved before
+            # this version keeps the recorded value.
+            if self._ledger_ref is not None and self._state is not None:
+                exact = await _restored_ledger_state(self, self._ledger_ref)
+                if exact is not None:
+                    self._state = exact
+
+    @property
+    def extra_restore_state_data(self) -> ExtraStoredData | None:
+        """Return the unrounded state of a ledger-backed lifetime sensor (see _restored_ledger_state)."""
+        return _ledger_extra_data(self._state, self._ledger_ref)
+
+    def _hourly_ledger(self):
+        """Return the energy ledger if this sensor follows LDATA hourly deltas."""
+        if self.entity_description.key != "consumption":
+            return None
+        return _hourly_energy_ledger(self.coordinator, self.breaker_data.get("panel_id"))
+
+    def ledger_reset(self) -> str | None:
+        """Reset a ledger-backed lifetime sensor; return None if not ledger-backed.
+
+        A no-op: the state only grows by ledger increments, and the ledger
+        is built from hourly deltas that a panel factory reset does not
+        affect, so there is nothing to clear.
+        """
+        if self._hourly_ledger() is None:
+            return None
+        return f"lifetime follows the energy ledger, nothing to reset ({self._state} kWh)"
+
+    def _update_hourly(self, ledger) -> None:
+        """Follow the LDATA energy ledger (hourly deltas) for the consumption total."""
+        total = ledger.lifetime(_ledger_key(self.breaker_data))
+        if total is None:
+            return  # No energy data for this breaker yet — keep the restored state.
+        if self._ledger_ref is None or total < self._ledger_ref:
+            # First reading under the ledger (an upgrade keeps its restored,
+            # possibly inflated or frozen, value) or a reset ledger: continue
+            # from the current state without a jump in either direction.
+            if self._state is None:
+                self._state = total
+        else:
+            self._state = (self._state or 0.0) + (total - self._ledger_ref)
+        self._ledger_ref = total
+        self.async_write_ha_state()
 
     def _use_pxt_mode(self) -> bool:
         """Return True if this panel has no hw counters and we should integrate power×time."""
@@ -2024,7 +2354,7 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             return
 
         if self.entity_description.key == "import":
-            current_power = max(raw_power, 0.0)
+            current_power = _import_power(self.coordinator, new_data, raw_power)
         else:
             current_power = abs(raw_power)
 
@@ -2065,6 +2395,11 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         try:
             if breakers := self.coordinator.data.get("breakers"):
                 if new_data := breakers.get(self.breaker_data["id"]):
+                    # LDATA consumption comes from the hourly-delta ledger.
+                    if (ledger := self._hourly_ledger()) is not None:
+                        self._update_hourly(ledger)
+                        return
+
                     # On v2 panels the hw counters are period counters — integrate
                     # power×time to build a monotonically-increasing lifetime total.
                     if self._use_pxt_mode():
