@@ -68,6 +68,34 @@ def find_panel(coordinator: LDATAUpdateCoordinator, panel_id: str) -> dict | Non
     return None
 
 
+def is_panel_offline(coordinator: LDATAUpdateCoordinator, panel_id: str) -> bool:
+    """Return whether the Leviton cloud reports the panel as not connected.
+
+    A panel missing from coordinator.data, or without a connected flag, is
+    not reported offline.
+    """
+    panel = find_panel(coordinator, panel_id)
+    return panel is not None and not panel.get("connected", True)
+
+
+class PanelOnlineMixin:
+    """Make an entity unavailable while its panel is offline.
+
+    For entities that show state read from the panel (readings, breaker
+    state, alarms) or control it. An offline panel sends nothing and takes no
+    commands, so the cached state would otherwise stay on screen as if it
+    were current. Energy counters do not use this: they keep their value.
+    Breaker and CT entities carry panel_id; a panel entity's own id is the
+    panel id.
+    """
+
+    @property
+    def available(self) -> bool:
+        """Return False while the panel is offline."""
+        panel_id = self.entity_data.get("panel_id") or self.entity_data.get("id")
+        return super().available and not is_panel_offline(self.coordinator, panel_id)
+
+
 class LDATABaseEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     """Common __init__/name/unique_id/device_id scaffolding.
 

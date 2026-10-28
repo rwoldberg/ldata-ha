@@ -51,7 +51,11 @@ from .const import (
 )
 from .coordinator import LDATAUpdateCoordinator
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
-from .ldata_base_entity import add_entities_grouped_by_panel, find_panel
+from .ldata_base_entity import (
+    PanelOnlineMixin,
+    add_entities_grouped_by_panel,
+    find_panel,
+)
 from .ldata_ct_entity import LDATACTEntity
 from .ldata_entity import LDATAEntity
 
@@ -1731,7 +1735,7 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
         self._last_power = current_power
         self._last_date = today
 
-class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
+class LDATATotalUsageSensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
     """Sensor that reads all outputs from all LDATA devices based on the passed in description."""
 
     entity_description: SensorDescription
@@ -1858,7 +1862,7 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         return 0.0
 
 
-class LDATAOutputSensor(LDATAEntity, SensorEntity):
+class LDATAOutputSensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
     """Sensor that reads an output based on the passed in description from an LDATA device."""
 
     entity_description: SensorDescription
@@ -2190,7 +2194,7 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         return self._state
 
 
-class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
+class LDATAPanelOutputSensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
     """Sensor that reads an output based on the passed in description from an LDATA device."""
 
     entity_description: SensorDescription
@@ -2250,7 +2254,7 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
         return self._state
 
 
-class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
+class LDATACTOutputSensor(PanelOnlineMixin, LDATACTEntity, SensorEntity):
     """Sensor that reads an output based on the passed in description from an LDATA device."""
 
     entity_description: SensorDescription
@@ -2572,7 +2576,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 # ── Breaker diagnostic sensors ───────────────────────────────────────
 
 
-class LDATABreakerStateSensor(LDATAEntity, SensorEntity):
+class LDATABreakerStateSensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
     """Expose raw breaker state and trip context."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -2626,7 +2630,7 @@ class LDATABreakerStateSensor(LDATAEntity, SensorEntity):
         return "breaker_state"
 
 
-class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
+class LDATABreakerOperationalStateSensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
     """Breaker operational state diagnostic sensor.
 
     Reports the operationalState field from the Leviton API.
@@ -2672,7 +2676,7 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
         return "mdi:check-circle-outline"
 
 
-class LDATABreakerBleRSSISensor(LDATAEntity, SensorEntity):
+class LDATABreakerBleRSSISensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
     """Breaker BLE signal strength diagnostic sensor.
 
     Reports the bleRSSI field — the Bluetooth Low Energy signal strength
@@ -2766,7 +2770,7 @@ class LDATABreakerPositionSensor(LDATAEntity, SensorEntity):
 # ── Panel diagnostic sensors ────────────────────────────────────────
 
 
-class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
+class LDATAPanelWifiRSSISensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
     """Panel WiFi signal strength diagnostic sensor.
 
     Reports the rssi field from the IotWhem device — the WiFi signal

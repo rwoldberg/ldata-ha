@@ -13,7 +13,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DECORA_MODELS_GFCI, DOMAIN, ENABLE_DECORA, ENABLE_DECORA_DEFAULT, LOGGER_NAME
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
-from .ldata_base_entity import add_entities_grouped_by_panel, find_panel, is_breaker_on
+from .ldata_base_entity import (
+    PanelOnlineMixin,
+    add_entities_grouped_by_panel,
+    find_panel,
+    is_breaker_on,
+)
 from .ldata_entity import LDATAEntity
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -60,7 +65,7 @@ async def async_setup_entry(
         add_entities_grouped_by_decora_room(config_entry, async_add_entities, decora_entities)
 
 
-class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
+class LDATABinarySensor(PanelOnlineMixin, LDATAEntity, BinarySensorEntity):
     """LDATA binary sensor class."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -208,7 +213,7 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
 # ── Panel alarm sensors ──────────────────────────────────────────────
 
 
-class _PanelAlarmSensor(LDATAEntity, BinarySensorEntity):
+class _PanelAlarmSensor(PanelOnlineMixin, LDATAEntity, BinarySensorEntity):
     """Base for panel-level alarm binary sensors (over/under voltage).
 
     Subclasses set _data_key/_threshold_key/_name_suffix/_unique_id_suffix.
@@ -287,7 +292,7 @@ class LDATAPanelUnderVoltageSensor(_PanelAlarmSensor):
 # ── Breaker alarm sensors ────────────────────────────────────────────
 
 
-class _BreakerAlarmSensor(LDATAEntity, BinarySensorEntity):
+class _BreakerAlarmSensor(PanelOnlineMixin, LDATAEntity, BinarySensorEntity):
     """Base for breaker-level current and voltage alarm binary sensors.
 
     Subclasses set _data_key/_name_suffix/_unique_id_suffix/_icon_off.

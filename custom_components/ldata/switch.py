@@ -28,7 +28,11 @@ from .const import (
     POWER_ON,
 )
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
-from .ldata_base_entity import add_entities_grouped_by_panel, is_breaker_on
+from .ldata_base_entity import (
+    PanelOnlineMixin,
+    add_entities_grouped_by_panel,
+    is_breaker_on,
+)
 from .ldata_entity import LDATAEntity
 from .ldata_service import LDATAAuthError
 
@@ -100,7 +104,7 @@ async def async_setup_entry(
         add_entities_grouped_by_decora_room(config_entry, async_add_entities, decora_entities)
 
 
-class LDATASwitch(LDATAEntity, SwitchEntity):
+class LDATASwitch(PanelOnlineMixin, LDATAEntity, SwitchEntity):
     """Define the switch for the breaker."""
 
     def __init__(self, coordinator, data) -> None:
@@ -209,7 +213,7 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         return "Breaker"
 
 
-class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
+class LDATABlinkLEDSwitch(PanelOnlineMixin, LDATAEntity, SwitchEntity):
     """Toggle the blink-LED indicator on a breaker."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
