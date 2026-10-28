@@ -92,6 +92,23 @@ GAP_HANDLING_LABELS = {
 }
 GAP_HANDLING_OPTIONS = list(GAP_HANDLING_LABELS)
 
+# How breaker consumption energy is tracked on LDATA (ResidentialBreakerPanel)
+# panels. Some hubs (seen on a DAU) report the kWh of the last hour in
+# energyConsumption, others a lifetime counter. Auto starts every panel on
+# the lifetime-counter path and moves a panel to the hourly ledger (see
+# ldata_energy.py) only once its values behave like hourly deltas.
+ENERGY_TRACKING_MODE = "energy_tracking_mode"
+ENERGY_TRACKING_AUTO = "auto"
+ENERGY_TRACKING_HOURLY = "hourly"
+ENERGY_TRACKING_COUNTER = "counter"
+ENERGY_TRACKING_DEFAULT = ENERGY_TRACKING_AUTO
+ENERGY_TRACKING_LABELS = {
+    ENERGY_TRACKING_AUTO: "Auto — detect per panel",
+    ENERGY_TRACKING_HOURLY: "Hourly deltas — energy ledger",
+    ENERGY_TRACKING_COUNTER: "Lifetime counter",
+}
+ENERGY_TRACKING_OPTIONS = list(ENERGY_TRACKING_LABELS)
+
 GAP_THRESHOLD = "gap_threshold"      # Gap threshold in minutes
 GAP_THRESHOLD_DEFAULT = 5.0          # 5 minutes — well above normal update intervals
 GAP_THRESHOLD_MIN = 1.0

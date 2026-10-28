@@ -319,6 +319,12 @@ Addon is auto reloading on submit.
 - Enable Decora Smart Wi-Fi devices (default off)
   - Discovers and creates entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account (a separate Leviton product line from the LDATA/WHEM breaker panels). Leave off if you don't have any � it avoids extra API calls on every update. Can be set at initial setup or toggled later here.
 
+- Energy Tracking Mode (LDATA panels only, default Auto)
+  - LDATA hubs report breaker energy in one of two ways: some (seen on a DAU) send the kWh used in the last hour, with now and then the lifetime total; others send a lifetime counter.
+  - Auto: a panel uses its lifetime counters until its values show they are hourly deltas (they drop again and again, which a lifetime counter never does, in 3 different hours; usually within the first few hours). From then on its consumption energy comes from an hourly ledger that also fills missed hours from the Leviton energy history. The Lifetime and Daily sensors continue from where they were. The result is remembered across restarts and shown in the diagnostics (`energy_tracking`).
+  - Hourly deltas: always use the hourly ledger. Lifetime counter: never use it (the behaviour before the ledger existed).
+  - WHEM panels ignore this setting.
+
 - Log General Integration Errors
   - Integration crashes or web errors
 

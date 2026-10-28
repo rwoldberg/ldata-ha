@@ -35,6 +35,9 @@ from .const import (
     GAP_THRESHOLD_DEFAULT,
     GAP_THRESHOLD_MIN,
     GAP_THRESHOLD_MAX,
+    ENERGY_TRACKING_DEFAULT,
+    ENERGY_TRACKING_LABELS,
+    ENERGY_TRACKING_MODE,
     CONF_RESIDENCE_ID,
     RESIDENCE_IMPORT_SOURCE,
 )
@@ -390,12 +393,17 @@ class OptionsFlow(config_entries.OptionsFlow):
         # Check if any panel uses power×time fallback (no hw counters).
         # If ALL panels have hw counters, gap handling options are irrelevant.
         show_gap_options = True
+        # Energy tracking mode only applies to LDATA panels: shown when the
+        # entry has one, or the option was changed before.
+        show_energy_tracking = ENERGY_TRACKING_MODE in current_options
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         if coordinator and hasattr(coordinator, '_service') and coordinator._service:
             service = coordinator._service
             if hasattr(service, '_panel_has_hw_counters') and service._panel_has_hw_counters:
                 # If every panel has hw counters, hide gap options
                 show_gap_options = not all(service._panel_has_hw_counters.values())
+            if getattr(service, '_ldata_panel_ids', None):
+                show_energy_tracking = True
 
         options_schema = {
             vol.Optional(
@@ -443,6 +451,20 @@ class OptionsFlow(config_entries.OptionsFlow):
             )] = vol.All(
                 vol.Coerce(float),
                 vol.Range(min=GAP_THRESHOLD_MIN, max=GAP_THRESHOLD_MAX)
+            )
+
+        if show_energy_tracking:
+            options_schema[vol.Optional(
+                ENERGY_TRACKING_MODE,
+                default=current_options.get(ENERGY_TRACKING_MODE, ENERGY_TRACKING_DEFAULT),
+            )] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[
+                        selector.SelectOptionDict(value=value, label=label)
+                        for value, label in ENERGY_TRACKING_LABELS.items()
+                    ],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
             )
 
         options_schema.update({

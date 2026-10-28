@@ -349,7 +349,9 @@ def test_refresh_panel_status_skips_cycle_while_another_poll_holds_the_lock() ->
 def _coordinator() -> LDATAUpdateCoordinator:
     coordinator = LDATAUpdateCoordinator.__new__(LDATAUpdateCoordinator)
     coordinator._hass = SimpleNamespace(loop=MagicMock())
-    coordinator._service = SimpleNamespace(version="test", _shutdown_requested=False)
+    coordinator._service = SimpleNamespace(
+        version="test", _shutdown_requested=False, energy_ledger=MagicMock()
+    )
     coordinator.config_entry = SimpleNamespace(options={})
     coordinator._debounce_timer = None
     coordinator._websocket_connected = False
@@ -371,3 +373,5 @@ def test_reconnect_rearms_update_timer_cancelled_by_disconnect() -> None:
     coordinator._handle_connection_change(True)
     assert coordinator._debounce_timer is not None
     assert coordinator._hass.loop.call_later.call_count == 2
+    # Each connect starts the ledger's guard against a re-sent cached delta.
+    assert coordinator._service.energy_ledger.note_ws_connected.call_count == 2

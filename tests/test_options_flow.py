@@ -10,6 +10,7 @@ from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from custom_components.ldata.config_flow import OptionsFlow
 from custom_components.ldata.const import (
     DOMAIN,
+    ENERGY_TRACKING_MODE,
     GAP_HANDLING,
     GAP_HANDLING_AVERAGE,
     GAP_THRESHOLD,
@@ -149,3 +150,35 @@ async def test_options_save_keeps_hidden_gap_options() -> None:
     assert result["data"][GAP_THRESHOLD] == 12.0
     assert result["data"][THREE_PHASE] is True
     assert result["data"]["suppressed_import_uids"] == SUPPRESSED
+
+
+async def test_energy_tracking_mode_is_offered_for_ldata_panels() -> None:
+    """The option is shown when the entry has an LDATA panel, defaulting to auto."""
+    entry = _entry(_stored_options())
+    service = SimpleNamespace(_panel_has_hw_counters={"LDATA-1": False}, _ldata_panel_ids={"LDATA-1"})
+    flow = _flow(entry, coordinator=SimpleNamespace(_service=service))
+
+    form = await flow.async_step_init()
+    assert ENERGY_TRACKING_MODE in {str(key) for key in form["data_schema"].schema}
+    assert form["data_schema"]({})[ENERGY_TRACKING_MODE] == "auto"
+
+    result = await flow.async_step_init(form["data_schema"]({ENERGY_TRACKING_MODE: "counter"}))
+    assert result["data"][ENERGY_TRACKING_MODE] == "counter"
+    assert result["data"]["suppressed_import_uids"] == SUPPRESSED
+
+
+async def test_energy_tracking_mode_is_hidden_without_ldata_panels() -> None:
+    entry = _entry(_stored_options())
+    service = SimpleNamespace(_panel_has_hw_counters={"1000_ABCD": True}, _ldata_panel_ids=set())
+    flow = _flow(entry, coordinator=SimpleNamespace(_service=service))
+
+    form = await flow.async_step_init()
+    assert ENERGY_TRACKING_MODE not in {str(key) for key in form["data_schema"].schema}
+
+
+async def test_energy_tracking_mode_stays_offered_once_set() -> None:
+    """A set mode stays visible (and changeable) while the integration is not loaded."""
+    entry = _entry({**_stored_options(), ENERGY_TRACKING_MODE: "hourly"})
+
+    form = await _flow(entry).async_step_init()
+    assert form["data_schema"]({})[ENERGY_TRACKING_MODE] == "hourly"
