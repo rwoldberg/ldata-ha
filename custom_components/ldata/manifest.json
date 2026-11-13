@@ -8,6 +8,6 @@
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/rwoldberg/ldata-ha/issues",
   "loggers": ["ldata"],
-  "requirements": ["aiohttp"],
+  "requirements": [],
   "version": "2.0.14"
 }

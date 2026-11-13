@@ -47,6 +47,11 @@ PLATFORMS: list[Platform] = [
 ]
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
+# The integration is set up from config entries only; async_setup below takes
+# nothing from configuration.yaml. Home Assistant's validation (hassfest)
+# expects an integration that has async_setup to say so.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
 SERVICE_RESET_ENERGY = "reset_energy_baseline"
 SERVICE_RESET_PANEL = "reset_panel_energy"
 ATTR_DEVICE_ID = "device_id"
