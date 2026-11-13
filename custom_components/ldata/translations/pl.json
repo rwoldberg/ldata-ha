@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Konto jest już skonfigurowane",
+            "reauth_successful": "Ponowne uwierzytelnienie się powiodło"
+        },
+        "error": {
+            "cannot_connect": "Nie można nawiązać połączenia",
+            "invalid_auth": "Niepoprawne uwierzytelnienie",
+            "invalid_2fa": "Niepoprawny kod uwierzytelniania dwuskładnikowego, spróbuj ponownie",
+            "no_residence_selected": "Wybierz co najmniej jeden dom, aby kontynuować",
+            "unknown": "Nieoczekiwany błąd"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Nazwa użytkownika my.leviton.com",
+                    "password": "Hasło my.leviton.com",
+                    "three_phase": "Zasilanie 120/208V z sieci trójfazowej (mieszkanie/apartament)",
+                    "allow_breaker_control": "Zezwól na sterowanie wyłącznikami",
+                    "allow_led_blink": "Zezwól na identyfikację",
+                    "enable_decora": "Włącz obsługę urządzeń Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Pokaż rozdzielnicę na pasku bocznym"
+                },
+                "title": "Konfiguracja LDATA"
+            },
+            "2fa": {
+                "title": "Uwierzytelnianie dwuskładnikowe",
+                "description": "Konto {username} wymaga kodu uwierzytelniania dwuskładnikowego. Sprawdź aplikację uwierzytelniającą lub pocztę e-mail i wpisz kod poniżej.",
+                "data": {
+                    "2fa_code": "Kod uwierzytelniający"
+                }
+            },
+            "residence": {
+                "title": "Wybierz domy",
+                "description": "Twoje konto ma dostęp do więcej niż jednego domu. Wybierz te, które chcesz skonfigurować – każdy wybrany dom stanie się osobnym wpisem integracji LDATA, dzięki czemu ich rozdzielnice i wyłączniki nie będą się mieszać.",
+                "data": {
+                    "residences": "Domy"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opcje Leviton LDATA",
+                "data": {
+                    "three_phase": "Zasilanie 120/208V z sieci trójfazowej (mieszkanie/apartament)",
+                    "allow_breaker_control": "Zezwól na sterowanie wyłącznikami",
+                    "allow_led_blink": "Zezwól na identyfikację",
+                    "enable_decora": "Włącz obsługę urządzeń Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Pokaż rozdzielnicę na pasku bocznym",
+                    "gap_handling": "Obsługa przerw w danych (tylko starsze oprogramowanie układowe)",
+                    "gap_threshold": "Próg przerwy (min)",
+                    "ha_inform_rate": "Interwał aktualizacji HA (sekundy)",
+                    "log_warnings": "Zapisuj w logach ogólne błędy integracji",
+                    "log_data_warnings": "Zapisuj w logach ostrzeżenia o wartościach danych (skoki/zerowania)",
+                    "log_all_raw": "Zapisuj w logach surowy ciąg WebSocket",
+                    "log_parsed_data": "Zapisuj w logach wszystkie przetworzone dane",
+                    "enable_specific_logging": "Włącz zapisywanie wybranych pól w logach",
+                    "log_fields": "Pola zapisywane w logach"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Jak często aktualizować sensory w Home Assistant (2-600 sekund). Niższe wartości = szybsza reakcja, ale większe obciążenie systemu i więcej zapisów do bazy danych.",
+                    "three_phase": "Włącz tylko wtedy, gdy masz zasilanie trójfazowe 120/208V (częste w mieszkaniach i apartamentowcach ze wspólnym transformatorem). W tym trybie napięcia wyłączników dwubiegunowych są mnożone przez √3/2 (~0.866), aby pokazywać prawidłowe napięcie międzyfazowe 208V zamiast błędnego 240V. NIE włączaj przy standardowym jednofazowym zasilaniu domowym 120/240V.",
+                    "allow_breaker_control": "Gdy opcja jest włączona, HA tworzy encje przełączników, którymi można wyłączać i ponownie włączać wyłączniki. Gdy jest wyłączona, wyłączniki są traktowane tylko jako sensory.",
+                    "allow_led_blink": "Gdy opcja jest włączona, HA tworzy dla każdego wyłącznika przełącznik, który miga jego diodą LED, co pozwala odnaleźć go w rozdzielnicy. Gdy jest wyłączona, encje sterowania diodami LED nie są tworzone. Działa niezależnie od opcji „Zezwól na sterowanie wyłącznikami”.",
+                    "enable_decora": "Gdy opcja jest włączona, LDATA wykrywa także przypisane do twojego konta przełączniki, ściemniacze, wentylatory, gniazda i urządzenia GFCI z serii Decora Smart Wi-Fi oraz tworzy dla nich encje. Jeśli nie masz takich urządzeń, pozostaw ją wyłączoną – pozwala to uniknąć dodatkowych wywołań API przy każdej aktualizacji.",
+                    "show_sidebar_panel": "Dodaje do paska bocznego Home Assistant pozycję, która otwiera interaktywny widok twojej rozdzielnicy na całą stronę. Jeśli masz więcej niż jeden wpis LDATA, ta sama strona pokazuje rozdzielnice wszystkich wpisów, w których ta opcja jest włączona.",
+                    "gap_handling": "Rozwiązanie zastępcze dla starszego oprogramowania układowego bez sprzętowych liczników energii. Określa, jak sensory dziennej energii wyłączników traktują przerwy, w których nie docierają żadne dane. Pomiń: najbezpieczniejsza opcja. Ekstrapoluj: przyjmuje ostatnią znaną moc. Uśrednij: kompromis. Rozdzielnice z oprogramowaniem 2.0+ korzystają z liczników sprzętowych i ignorują to ustawienie.",
+                    "gap_threshold": "Czas bez danych, po którym uruchamia się obsługa przerw (1-30 minut). Dotyczy tylko zastępczego obliczenia moc×czas na starszym oprogramowaniu układowym.",
+                    "log_warnings": "Zapisuje w logach awarie integracji i błędy sieciowe.",
+                    "log_data_warnings": "Zapisuje w logach ostrzeżenia o niespójnościach w danych z chmury Leviton (skoki/zerowania).",
+                    "log_all_raw": "Zapisuje w logach surowy ciąg WebSocket w postaci otrzymanej z chmury Leviton. Uwaga: dane nie są zanonimizowane i zawierają tokeny uwierzytelniające oraz identyfikatory urządzeń. Wyłącz, gdy nie debugujesz.",
+                    "log_parsed_data": "Zapisuje w logach wszystkie pola wyłączników i rozdzielnicy po przetworzeniu każdej aktualizacji WebSocket lub REST. Przydaje się do sprawdzania wartości bez włączania zapisu surowych danych WebSocket.",
+                    "enable_specific_logging": "Zapisuje w logach wskazane pola. Nazwy pól znajdziesz, włączając na chwilę opcję „Zapisuj w logach wszystkie przetworzone dane”.",
+                    "log_fields": "Aby poznać nazwy pól, włącz opcję „Zapisuj w logach wszystkie przetworzone dane” i sprawdź logi Home Assistant. Wpisz je powyżej, oddzielając przecinkami."
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Pomiń – nie zliczaj energii podczas przerw",
+                "extrapolate": "Ekstrapoluj – przyjmij, że utrzymywała się ostatnia znana moc",
+                "average": "Uśrednij – użyj średniej z ostatniej mocy i mocy po wznowieniu"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Zresetuj wartość bazową sensora energii",
+            "description": "Resetuje zawieszony sensor energii LDATA. Bieżącą wartość przed resetem i po nim znajdziesz w logach Home Assistant. Sensory łącznej energii (zużycie/import) przyjmą następny odczyt z API. W przypadku sensorów dziennych wartości bazowe są czyszczone, a sensor ustala je na nowo na podstawie bieżących wartości z API.",
+            "fields": {
+                "entity_id": {
+                    "name": "Encja",
+                    "description": "Sensor energii LDATA do zresetowania."
+                },
+                "value": {
+                    "name": "Nowa wartość w kWh (opcjonalnie)",
+                    "description": "Wymusza konkretną wartość w kWh zamiast bieżącego odczytu z API. Pozostaw puste, aby przyjąć to, co API zgłosi przy następnej aktualizacji."
+                },
+                "baseline": {
+                    "name": "Sprzętowa wartość bazowa w kWh (opcjonalnie)",
+                    "description": "Ręcznie ustawia wartość bazową surowego licznika sprzętowego, używaną do obliczania przyrostów w sensorach dziennych."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Zresetuj wszystkie sensory energii rozdzielnicy",
+            "description": "Resetuje w jednej operacji wszystkie dzienne i łączne sensory energii rozdzielnicy WHEM. Użyj po przywróceniu ustawień fabrycznych rozdzielnicy, gdy wszystkie sprzętowe liczniki energii jednocześnie spadają do zera. Wartości bazowe wszystkich sensorów dziennych są czyszczone (sumy dzienne zaczynają się od 0), a zabezpieczenia wszystkich sensorów łącznych są zdejmowane (każdy bezwarunkowo przyjmie następny odczyt z API). Wybierz dowolne urządzenie należące do rozdzielnicy – samą rozdzielnicę, wyłącznik lub przekładnik prądowy (CT). Podsumowanie resetu poszczególnych sensorów znajdziesz w logach Home Assistant.",
+            "fields": {
+                "device_id": {
+                    "name": "Urządzenie rozdzielnicy",
+                    "description": "Dowolne urządzenie należące do rozdzielnicy WHEM – rozdzielnica, wyłącznik lub przekładnik prądowy (CT). Zresetowane zostaną wszystkie sensory energii rozdzielnicy, do której ono należy."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Rozdzielnica",
+            "empty_title": "Brak rozdzielnic do wyświetlenia",
+            "empty_body": "Integracja nie znalazła jeszcze rozdzielnicy LDATA ani LWHEM. Być może wciąż się uruchamia albo nie może połączyć się z serwerami Leviton."
+        },
+        "card": {
+            "name": {
+                "panel": "Rozdzielnica",
+                "breaker": "Wyłącznik",
+                "unmonitored_breaker": "Wyłącznik niemonitorowany",
+                "sub_panel": "Podrozdzielnica"
+            },
+            "state": {
+                "on": "Włączony",
+                "off": "Wyłączony",
+                "off_remote": "Wyłączony zdalnie",
+                "tripped": "Wyzwolony",
+                "unavailable": "Niedostępny",
+                "unknown": "Nieznany",
+                "switching": "Przełączanie…",
+                "switching_on": "Włączanie…",
+                "switching_off": "Wyłączanie…",
+                "not_monitored": "Niemonitorowany",
+                "switch_failed": "Nie udało się przełączyć"
+            },
+            "alarm": {
+                "over_current": "Przetężenie",
+                "over_voltage": "Przepięcie",
+                "under_voltage": "Za niskie napięcie"
+            },
+            "raw": {
+                "manualon": "Włączony ręcznie",
+                "manualoff": "Wyłączony ręcznie",
+                "remoteon": "Włączony zdalnie",
+                "remoteoff": "Wyłączony zdalnie",
+                "tripped": "Wyzwolony",
+                "softwaretrip": "Wyzwolony programowo",
+                "upstreamoff": "Brak zasilania",
+                "notcommunicating": "Brak komunikacji",
+                "normal": "Normalny"
+            },
+            "meter": {
+                "panel_load": "Obciążenie",
+                "leg_1": "Faza 1",
+                "leg_2": "Faza 2",
+                "frequency": "Częstotliwość",
+                "today": "Dziś",
+                "today_import": "Import dziś",
+                "cloud": "Chmura",
+                "wifi": "Wi-Fi",
+                "update": "Aktualizacja",
+                "cloud_connected": "Połączono z chmurą Leviton",
+                "cloud_offline": "Rozdzielnica offline",
+                "cloud_unknown": "Nieznany stan połączenia z chmurą",
+                "wifi_signal": "Sygnał Wi-Fi: {dbm} dBm",
+                "wifi_unknown": "Nieznana siła sygnału Wi-Fi",
+                "update_available": "Dostępna aktualizacja oprogramowania układowego (zainstaluj ją w aplikacji My Leviton)",
+                "update_current": "Oprogramowanie układowe jest aktualne",
+                "main": "Główny",
+                "main_breaker": "Wyłącznik główny",
+                "main_breaker_dead": "Wyłącznik główny (brak napięcia na obu fazach)"
+            },
+            "label": {
+                "circuit": "Obwód {position}",
+                "circuits": "Obwody {first} i {second}",
+                "amp_rating": "{amps} A",
+                "feeds_sub_panel": "Zasila podrozdzielnicę",
+                "feeds": "Zasila: {name}",
+                "show_details": "Pokaż szczegóły",
+                "open_sub_panel": "Otwórz podrozdzielnicę",
+                "open_sub_panel_dashboard": "Otwórz panel podrozdzielnicy",
+                "breaker_switch": "Wyłącznik {name}"
+            },
+            "action": {
+                "turn_on": "Włącz",
+                "turn_off": "Wyłącz",
+                "turn_on_name": "Włącz obwód {name}",
+                "turn_off_name": "Wyłącz obwód {name}",
+                "cancel": "Anuluj",
+                "close": "Zamknij",
+                "got_it": "Rozumiem",
+                "device_page": "Strona urządzenia"
+            },
+            "confirm": {
+                "turn_on_title": "Włączyć obwód {name}?",
+                "turn_off_title": "Wyłączyć obwód {name}?",
+                "turn_on_body": "Ten obwód znajdzie się pod napięciem.",
+                "turn_off_body": "Wszystko, co jest podłączone do tego obwodu, straci zasilanie.",
+                "gen1_off_warning": "To wyłącznik Gen 1: po wyłączeniu można go ponownie włączyć tylko ręcznie w rozdzielnicy.",
+                "blocked_title": "Obwodu {name} nie można włączyć zdalnie",
+                "blocked_body": "To inteligentny wyłącznik Gen 1. Można go wyłączyć z Home Assistant, ale ponownie włączyć trzeba go ręcznie w rozdzielnicy."
+            },
+            "detail": {
+                "both_legs": "Obie fazy",
+                "leg": "Faza {leg}",
+                "one_pole": "1-biegunowy",
+                "two_pole": "2-biegunowy",
+                "controls": "Sterowanie",
+                "breaker_power": "Zasilanie obwodu",
+                "power_on_hint": "Włączony: obwód jest pod napięciem",
+                "power_tripped_hint": "Wyzwolony: sprawdź obwód przed ponownym włączeniem",
+                "power_remote_off_hint": "Wyłączony zdalnie",
+                "gen1_note": "Wyłącznik Gen 1: można go wyłączyć zdalnie, ale ponownie włączyć trzeba go ręcznie w rozdzielnicy.",
+                "control_disabled": "Zdalne sterowanie jest wyłączone. Aby przełączać wyłączniki z Home Assistant, włącz ustawienie {option} w opcjach integracji LDATA.",
+                "option_breaker_control": "Zezwól na sterowanie wyłącznikami",
+                "identify": "Identyfikacja",
+                "identify_hint": "Miga diodą LED tego wyłącznika, aby łatwiej znaleźć go w rozdzielnicy",
+                "blink_led": "Miganie diody LED",
+                "identify_disabled": "Aby migać stąd diodą LED wyłącznika, włącz ustawienie {option} w opcjach integracji LDATA.",
+                "option_identify": "Zezwól na identyfikację",
+                "live": "Na żywo",
+                "power": "Moc",
+                "current": "Prąd",
+                "load": "Obciążenie",
+                "energy": "Energia",
+                "today": "Dziś",
+                "today_import": "Dziś, import",
+                "lifetime": "Łącznie",
+                "lifetime_import": "Łącznie, import",
+                "protection": "Zabezpieczenia",
+                "operational_state": "Stan pracy",
+                "diagnostics": "Diagnostyka",
+                "breaker_state": "Stan wyłącznika",
+                "second_pole": "Drugi biegun",
+                "remote_state": "Stan zdalnego sterowania",
+                "previous_state": "Poprzedni stan",
+                "change_reason": "Przyczyna ostatniej zmiany",
+                "circuit_type": "Typ obwodu",
+                "critical": "Obwód krytyczny",
+                "locked": "Zablokowany",
+                "meter_chip": "Układ pomiarowy",
+                "bluetooth": "Sygnał Bluetooth",
+                "device": "Urządzenie",
+                "model": "Model",
+                "rating": "Prąd znamionowy",
+                "remote_reset": "Zdalne włączanie",
+                "firmware": "Oprogramowanie układowe",
+                "hardware": "Sprzęt",
+                "serial": "Numer seryjny",
+                "status": "Status",
+                "other_entities": "Inne encje",
+                "yes": "Tak",
+                "no": "Nie",
+                "ok": "OK",
+                "fault": "Usterka",
+                "alarm": "Alarm",
+                "not_set": "Nie ustawiono",
+                "remote_reset_yes": "Obsługiwane (Gen 2)",
+                "remote_reset_no": "Nieobsługiwane (Gen 1)",
+                "standard_breaker": "To standardowy (nieinteligentny) wyłącznik. Leviton nie podaje dla niego stanu ani odczytów, więc nie ma tu czym sterować ani czego monitorować.",
+                "standard_breaker_hint": "Jeśli zasila podrozdzielnicę z własnym hubem LWHEM lub LDATA, połącz je za pomocą {option} w kodzie YAML tej karty, aby pokazać przy tym wyłączniku bieżące obciążenie tej podrozdzielnicy."
+            },
+            "setup": {
+                "choose_title": "Wybierz rozdzielnicę",
+                "choose_body": "Ustaw {option} na urządzenie swojej rozdzielnicy LDATA lub LWHEM (Ustawienia → Urządzenia oraz usługi → Urządzenia → twoja rozdzielnica).",
+                "empty_title": "Nie znaleziono wyłączników tej rozdzielnicy",
+                "check_devices": "Lista urządzeń dostępna dla karty",
+                "check_entities": "Lista encji dostępna dla karty",
+                "check_device_id": "Skonfigurowany identyfikator urządzenia",
+                "check_panel_found": "Znaleziono urządzenie rozdzielnicy",
+                "check_total_devices": "Widoczne urządzenia",
+                "check_linked_any": "Urządzenia powiązane z dowolną rozdzielnicą",
+                "check_linked_this": "Urządzenia powiązane z tą rozdzielnicą",
+                "check_breakers": "Wyłączniki z encją Status",
+                "empty_help": "Jeśli urządzenie rozdzielnicy nie zostało znalezione, skopiuj identyfikator urządzenia ze strony urządzenia samej rozdzielnicy, a nie ze strony wyłącznika. Jeśli zostało znalezione, ale nic nie jest z nim powiązane, zaktualizuj integrację LDATA i uruchom ponownie Home Assistant – samo ponowne wczytanie nie wystarczy."
+            }
+        },
+        "editor": {
+            "card_name": "Karta rozdzielnicy LDATA",
+            "card_description": "Realistyczny, interaktywny widok twojej rozdzielnicy Leviton.",
+            "panel": "Rozdzielnica",
+            "panel_help": "Wybierz rozdzielnicę (hub LDATA lub LWHEM), a nie wyłącznik. Powiązania z podrozdzielnicami ustawia się w YAML.",
+            "title": "Tytuł (opcjonalnie)",
+            "show_power": "Pokaż bieżącą moc i prąd",
+            "show_alarms": "Sygnalizuj alarmy",
+            "toggle": "Przełączaj wyłączniki bezpośrednio w rozdzielnicy",
+            "confirm": "Pytaj przed przełączeniem",
+            "show_panel_info": "Pokaż odczyty rozdzielnicy",
+            "appearance": "Oświetlenie",
+            "appearance_auto": "Zgodnie z motywem",
+            "appearance_light": "Jasne",
+            "appearance_dark": "Przygaszone",
+            "main_breaker": "Prąd znamionowy wyłącznika głównego (opcjonalnie)",
+            "main_breaker_help": "Leviton nie udostępnia danych wyłącznika głównego. Pozostaw puste w przypadku rozdzielnicy bez wyłącznika głównego."
+        }
+    }
+}

@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Účet je již nastaven",
+            "reauth_successful": "Opětovné ověření bylo úspěšné"
+        },
+        "error": {
+            "cannot_connect": "Nepodařilo se připojit",
+            "invalid_auth": "Neplatné ověření",
+            "invalid_2fa": "Neplatný kód dvoufaktorového ověření, zkuste to znovu",
+            "no_residence_selected": "Chcete-li pokračovat, vyberte alespoň jednu domácnost",
+            "unknown": "Neočekávaná chyba"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Uživatelské jméno pro my.leviton.com",
+                    "password": "Heslo pro my.leviton.com",
+                    "three_phase": "Napájení 120/208V z třífázové sítě (byt/bytový dům)",
+                    "allow_breaker_control": "Povolit ovládání jističů",
+                    "allow_led_blink": "Povolit identifikaci",
+                    "enable_decora": "Povolit zařízení Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Zobrazit rozvaděč v postranním panelu"
+                },
+                "title": "Nastavení LDATA"
+            },
+            "2fa": {
+                "title": "Dvoufaktorové ověření",
+                "description": "Pro účet {username} je vyžadován kód dvoufaktorového ověření. Podívejte se do ověřovací aplikace nebo do e-mailu a zadejte kód níže.",
+                "data": {
+                    "2fa_code": "Ověřovací kód"
+                }
+            },
+            "residence": {
+                "title": "Vyberte domácnosti",
+                "description": "Váš účet má přístup k více domácnostem. Vyberte ty, které chcete nastavit – z každé vybrané domácnosti vznikne samostatná položka integrace LDATA, takže se jejich rozvaděče a jističe nebudou míchat.",
+                "data": {
+                    "residences": "Domácnosti"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Volby integrace Leviton LDATA",
+                "data": {
+                    "three_phase": "Napájení 120/208V z třífázové sítě (byt/bytový dům)",
+                    "allow_breaker_control": "Povolit ovládání jističů",
+                    "allow_led_blink": "Povolit identifikaci",
+                    "enable_decora": "Povolit zařízení Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Zobrazit rozvaděč v postranním panelu",
+                    "gap_handling": "Zpracování výpadků dat (jen starší firmware)",
+                    "gap_threshold": "Práh výpadku (min)",
+                    "ha_inform_rate": "Interval aktualizace HA (sekundy)",
+                    "log_warnings": "Logovat obecné chyby integrace",
+                    "log_data_warnings": "Logovat varování k hodnotám dat (špičky/resety)",
+                    "log_all_raw": "Logovat nezpracovaný řetězec WebSocket",
+                    "log_parsed_data": "Logovat všechna zpracovaná data",
+                    "enable_specific_logging": "Povolit logování vybraných polí",
+                    "log_fields": "Pole k logování"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Jak často se mají aktualizovat senzory v systému Home Assistant (2-600 sekund). Nižší hodnoty = rychlejší odezva, ale vyšší zatížení systému a více zápisů do databáze.",
+                    "three_phase": "Zapněte pouze v případě, že máte třífázové napájení 120/208V (běžné v bytech a bytových domech se společným transformátorem). V tomto režimu se napětí dvoupólových jističů násobí hodnotou √3/2 (~0.866), aby se zobrazovalo správné sdružené napětí 208V místo nesprávných 240V. NEZAPÍNEJTE u běžného jednofázového domovního napájení 120/240V.",
+                    "allow_breaker_control": "Pokud je volba zapnutá, HA vytvoří entity spínačů, kterými lze jističe vypínat a znovu zapínat. Pokud je vypnutá, slouží jističe pouze jako senzory.",
+                    "allow_led_blink": "Pokud je volba zapnutá, HA vytvoří pro každý jistič spínač, který rozbliká jeho LED, abyste jistič v rozvaděči snadno našli. Pokud je vypnutá, žádné entity pro ovládání LED se nevytvoří. Nezávisí na volbě „Povolit ovládání jističů“.",
+                    "enable_decora": "Pokud je volba zapnutá, LDATA vyhledá ve vašem účtu také spínače, stmívače, ventilátory, zásuvky a zařízení GFCI řady Decora Smart Wi-Fi a vytvoří pro ně entity. Pokud žádná taková zařízení nemáte, nechte volbu vypnutou – ušetří to volání API navíc při každé aktualizaci.",
+                    "show_sidebar_panel": "Přidá do postranního panelu systému Home Assistant odkaz, který otevře interaktivní zobrazení vašeho rozvaděče na celou stránku. Máte-li více položek LDATA, zobrazí stejná stránka rozvaděče všech položek, které mají tuto volbu zapnutou.",
+                    "gap_handling": "Záložní řešení pro starší firmware bez hardwarových čítačů energie. Určuje, jak si senzory denní energie jističů poradí s výpadky, kdy nepřicházejí žádná data. Přeskočit: nejbezpečnější možnost. Extrapolovat: předpokládá poslední známý výkon. Průměr: kompromis. Rozvaděče s firmwarem 2.0+ používají hardwarové čítače a toto nastavení ignorují.",
+                    "gap_threshold": "Doba bez dat, po které se spustí zpracování výpadku (1-30 minut). Týká se pouze záložního výpočtu výkon×čas na starším firmwaru.",
+                    "log_warnings": "Loguje pády integrace a chyby webových požadavků.",
+                    "log_data_warnings": "Loguje varování o nesrovnalostech v datech ze služby Leviton (špičky/resety).",
+                    "log_all_raw": "Loguje nezpracovaný řetězec WebSocket tak, jak přišel ze služby Leviton. Varování: výstup není anonymizován a obsahuje ověřovací tokeny a ID zařízení. Pokud zrovna neladíte, volbu vypněte.",
+                    "log_parsed_data": "Loguje všechna pole jističů a rozvaděče po zpracování každé aktualizace přes WebSocket nebo REST. Hodí se k ověření hodnot bez zapínání logování nezpracovaných dat WebSocket.",
+                    "enable_specific_logging": "Loguje vybraná pole. Názvy polí zjistíte, když nakrátko zapnete volbu „Logovat všechna zpracovaná data“.",
+                    "log_fields": "Názvy polí zjistíte, když zapnete volbu „Logovat všechna zpracovaná data“ a podíváte se do logů systému Home Assistant. Zadejte je výše oddělené čárkami."
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Přeskočit – během výpadků energii nezapočítávat",
+                "extrapolate": "Extrapolovat – předpokládat, že trval poslední známý výkon",
+                "average": "Průměr – použít průměr posledního výkonu a výkonu po obnovení"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Resetovat referenční hodnotu senzoru energie",
+            "description": "Resetuje zaseknutý senzor energie LDATA. Aktuální hodnotu před resetem a po něm najdete v logu systému Home Assistant. Senzory celkové energie (spotřeba/import) přijmou další údaj z API. U denních senzorů se referenční hodnoty vymažou a senzor se znovu nastaví podle aktuálních hodnot z API.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entita",
+                    "description": "Senzor energie LDATA, který se má resetovat."
+                },
+                "value": {
+                    "name": "Nová hodnota v kWh (volitelná)",
+                    "description": "Vynutí konkrétní hodnotu v kWh místo aktuálního údaje z API. Ponechte prázdné, chcete-li přijmout hodnotu, kterou API ohlásí při další aktualizaci."
+                },
+                "baseline": {
+                    "name": "Hardwarová referenční hodnota v kWh (volitelná)",
+                    "description": "Ručně nastaví referenční hodnotu nezpracovaného hardwarového čítače, která se používá k výpočtu přírůstků u denních senzorů."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Resetovat všechny senzory energie rozvaděče",
+            "description": "Resetuje najednou všechny denní i celkové senzory energie rozvaděče WHEM. Použijte po obnovení továrního nastavení rozvaděče, kdy všechny hardwarové čítače energie současně klesnou na nulu. Referenční hodnoty všech denních senzorů se vymažou (denní součty začnou znovu od 0) a ochrany všech celkových senzorů se uvolní (každý bezpodmínečně přijme další údaj z API). Vyberte libovolné zařízení, které k rozvaděči patří – samotný rozvaděč, jistič nebo proudový transformátor (CT). Souhrn resetu jednotlivých senzorů najdete v logu systému Home Assistant.",
+            "fields": {
+                "device_id": {
+                    "name": "Zařízení rozvaděče",
+                    "description": "Libovolné zařízení patřící k rozvaděči WHEM – rozvaděč, jistič nebo proudový transformátor (CT). Resetují se všechny senzory energie rozvaděče, ke kterému zařízení patří."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Rozvaděč",
+            "empty_title": "Žádné rozvaděče k zobrazení",
+            "empty_body": "Integrace zatím nenašla žádný rozvaděč LDATA ani LWHEM. Možná se teprve spouští, nebo se nemůže spojit se službou Leviton."
+        },
+        "card": {
+            "name": {
+                "panel": "Rozvaděč",
+                "breaker": "Jistič",
+                "unmonitored_breaker": "Nesledovaný jistič",
+                "sub_panel": "Podružný rozvaděč"
+            },
+            "state": {
+                "on": "Zapnutý",
+                "off": "Vypnutý",
+                "off_remote": "Vypnutý dálkově",
+                "tripped": "Vypadlý",
+                "unavailable": "Nedostupný",
+                "unknown": "Neznámý",
+                "switching": "Přepínání…",
+                "switching_on": "Zapínání…",
+                "switching_off": "Vypínání…",
+                "not_monitored": "Nesledovaný",
+                "switch_failed": "Přepnutí se nezdařilo"
+            },
+            "alarm": {
+                "over_current": "Nadproud",
+                "over_voltage": "Přepětí",
+                "under_voltage": "Podpětí"
+            },
+            "raw": {
+                "manualon": "Zapnutý ručně",
+                "manualoff": "Vypnutý ručně",
+                "remoteon": "Zapnutý dálkově",
+                "remoteoff": "Vypnutý dálkově",
+                "tripped": "Vypadlý",
+                "softwaretrip": "Vypnutý softwarem",
+                "upstreamoff": "Bez napájení",
+                "notcommunicating": "Nekomunikuje",
+                "normal": "Normální"
+            },
+            "meter": {
+                "panel_load": "Celkové zatížení",
+                "leg_1": "Fáze 1",
+                "leg_2": "Fáze 2",
+                "frequency": "Frekvence",
+                "today": "Dnes",
+                "today_import": "Import dnes",
+                "cloud": "Cloud",
+                "wifi": "Wi-Fi",
+                "update": "Aktualizace",
+                "cloud_connected": "Připojeno ke cloudu Leviton",
+                "cloud_offline": "Rozvaděč je offline",
+                "cloud_unknown": "Neznámý stav připojení ke cloudu",
+                "wifi_signal": "Signál Wi-Fi: {dbm} dBm",
+                "wifi_unknown": "Neznámá síla signálu Wi-Fi",
+                "update_available": "Je dostupná aktualizace firmwaru (nainstalujte ji v aplikaci My Leviton)",
+                "update_current": "Firmware je aktuální",
+                "main": "Hlavní",
+                "main_breaker": "Hlavní jistič",
+                "main_breaker_dead": "Hlavní jistič (bez napětí na obou fázích)"
+            },
+            "label": {
+                "circuit": "Okruh {position}",
+                "circuits": "Okruhy {first} a {second}",
+                "amp_rating": "{amps} A",
+                "feeds_sub_panel": "Napájí podružný rozvaděč",
+                "feeds": "Napájí: {name}",
+                "show_details": "Zobrazit podrobnosti",
+                "open_sub_panel": "Otevřít podružný rozvaděč",
+                "open_sub_panel_dashboard": "Otevřít ovládací panel podružného rozvaděče",
+                "breaker_switch": "Jistič {name}"
+            },
+            "action": {
+                "turn_on": "Zapnout",
+                "turn_off": "Vypnout",
+                "turn_on_name": "Zapnout jistič {name}",
+                "turn_off_name": "Vypnout jistič {name}",
+                "cancel": "Zrušit",
+                "close": "Zavřít",
+                "got_it": "Rozumím",
+                "device_page": "Stránka zařízení"
+            },
+            "confirm": {
+                "turn_on_title": "Zapnout jistič {name}?",
+                "turn_off_title": "Vypnout jistič {name}?",
+                "turn_on_body": "Tento okruh bude pod napětím.",
+                "turn_off_body": "Vše, co je k tomuto okruhu připojeno, zůstane bez proudu.",
+                "gen1_off_warning": "Toto je jistič Gen 1: po vypnutí jej lze znovu zapnout jen ručně v rozvaděči.",
+                "blocked_title": "Jistič {name} nelze zapnout dálkově",
+                "blocked_body": "Toto je chytrý jistič Gen 1. Ze systému Home Assistant jej lze vypnout, ale znovu zapnout se musí ručně v rozvaděči."
+            },
+            "detail": {
+                "both_legs": "Obě fáze",
+                "leg": "Fáze {leg}",
+                "one_pole": "1pólový",
+                "two_pole": "2pólový",
+                "controls": "Ovládání",
+                "breaker_power": "Napájení okruhu",
+                "power_on_hint": "Zapnutý: okruh je pod napětím",
+                "power_tripped_hint": "Vypadlý: před opětovným zapnutím zkontrolujte okruh",
+                "power_remote_off_hint": "Vypnutý dálkově",
+                "gen1_note": "Jistič Gen 1: lze jej vypnout dálkově, ale znovu zapnout se musí ručně v rozvaděči.",
+                "control_disabled": "Dálkové ovládání je vypnuté. Chcete-li jističe přepínat ze systému Home Assistant, zapněte ve volbách integrace LDATA možnost {option}.",
+                "option_breaker_control": "Povolit ovládání jističů",
+                "identify": "Identifikace",
+                "identify_hint": "Rozbliká LED tohoto jističe, abyste jej v rozvaděči snadno našli",
+                "blink_led": "Blikání LED",
+                "identify_disabled": "Chcete-li odtud rozblikat LED jističe, zapněte ve volbách integrace LDATA možnost {option}.",
+                "option_identify": "Povolit identifikaci",
+                "live": "Aktuální hodnoty",
+                "power": "Výkon",
+                "current": "Proud",
+                "load": "Zatížení",
+                "energy": "Energie",
+                "today": "Dnes",
+                "today_import": "Dnes, import",
+                "lifetime": "Celkem",
+                "lifetime_import": "Celkem, import",
+                "protection": "Ochrana",
+                "operational_state": "Provozní stav",
+                "diagnostics": "Diagnostika",
+                "breaker_state": "Stav jističe",
+                "second_pole": "Druhý pól",
+                "remote_state": "Stav dálkového ovládání",
+                "previous_state": "Předchozí stav",
+                "change_reason": "Důvod poslední změny",
+                "circuit_type": "Typ okruhu",
+                "critical": "Kritický okruh",
+                "locked": "Uzamčeno",
+                "meter_chip": "Měřicí čip",
+                "bluetooth": "Signál Bluetooth",
+                "device": "Zařízení",
+                "model": "Model",
+                "rating": "Jmenovitý proud",
+                "remote_reset": "Dálkové zapnutí",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Sériové číslo",
+                "status": "Stav",
+                "other_entities": "Další entity",
+                "yes": "Ano",
+                "no": "Ne",
+                "ok": "OK",
+                "fault": "Porucha",
+                "alarm": "Alarm",
+                "not_set": "Nenastaveno",
+                "remote_reset_yes": "Podporováno (Gen 2)",
+                "remote_reset_no": "Nepodporováno (Gen 1)",
+                "standard_breaker": "Toto je běžný (nikoli chytrý) jistič. Leviton u něj nehlásí žádný stav ani naměřené hodnoty, takže zde není co ovládat ani sledovat.",
+                "standard_breaker_hint": "Pokud napájí podružný rozvaděč s vlastním hubem LWHEM nebo LDATA, propojte je pomocí {option} v YAML této karty a u tohoto jističe se bude zobrazovat aktuální zatížení daného rozvaděče."
+            },
+            "setup": {
+                "choose_title": "Vyberte rozvaděč",
+                "choose_body": "Nastavte {option} na zařízení svého rozvaděče LDATA nebo LWHEM (Nastavení → Zařízení a služby → Zařízení → váš rozvaděč).",
+                "empty_title": "Pro tento rozvaděč nebyly nalezeny žádné jističe",
+                "check_devices": "Seznam zařízení dostupný kartě",
+                "check_entities": "Seznam entit dostupný kartě",
+                "check_device_id": "Nastavené ID zařízení",
+                "check_panel_found": "Zařízení rozvaděče nalezeno",
+                "check_total_devices": "Viditelná zařízení",
+                "check_linked_any": "Zařízení propojená s libovolným rozvaděčem",
+                "check_linked_this": "Zařízení propojená s tímto rozvaděčem",
+                "check_breakers": "Jističe s entitou Status",
+                "empty_help": "Pokud zařízení rozvaděče nebylo nalezeno, zkopírujte ID zařízení ze stránky zařízení samotného rozvaděče, ne ze stránky jističe. Pokud nalezeno bylo, ale nic s ním není propojeno, aktualizujte integraci LDATA a restartujte Home Assistant; pouhé nové načtení nestačí."
+            }
+        },
+        "editor": {
+            "card_name": "Karta rozvaděče LDATA",
+            "card_description": "Realistické interaktivní zobrazení vašeho rozvaděče Leviton.",
+            "panel": "Rozvaděč",
+            "panel_help": "Vyberte rozvaděč (hub LDATA nebo LWHEM), ne jistič. Propojení s podružnými rozvaděči se nastavuje v YAML.",
+            "title": "Název (volitelný)",
+            "show_power": "Zobrazit aktuální výkon a proud",
+            "show_alarms": "Zvýraznit alarmy",
+            "toggle": "Přepínat jističe přímo v rozvaděči",
+            "confirm": "Před přepnutím se zeptat",
+            "show_panel_info": "Zobrazit naměřené hodnoty rozvaděče",
+            "appearance": "Osvětlení",
+            "appearance_auto": "Podle motivu",
+            "appearance_light": "Jasné",
+            "appearance_dark": "Tlumené",
+            "main_breaker": "Jmenovitý proud hlavního jističe (volitelný)",
+            "main_breaker_help": "Leviton údaje o hlavním jističi neposkytuje. U rozvaděče bez hlavního jističe ponechte prázdné."
+        }
+    }
+}

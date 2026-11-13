@@ -19,7 +19,8 @@
                     "three_phase": "120/208V Network Service (Apartment/Condo)",
                     "allow_breaker_control": "Allow breaker control",
                     "allow_led_blink": "Allow Identify",
-                    "enable_decora": "Enable Decora Smart Wi-Fi devices"
+                    "enable_decora": "Enable Decora Smart Wi-Fi devices",
+                    "show_sidebar_panel": "Show the load center in the sidebar"
                 },
                 "title": "Configure LDATA"
             },
@@ -48,6 +49,7 @@
                     "allow_breaker_control": "Allow Breaker Control",
                     "allow_led_blink": "Allow Identify",
                     "enable_decora": "Enable Decora Smart Wi-Fi devices",
+                    "show_sidebar_panel": "Show the load center in the sidebar",
                     "gap_handling": "Gap Handling (older firmware only)",
                     "gap_threshold": "Gap Threshold (mins)",
                     "ha_inform_rate": "HA Inform Rate (seconds)",
@@ -60,12 +62,13 @@
                 },
                 "data_description": {
                     "ha_inform_rate": "How often to update sensors in Home Assistant (2-600 seconds). Lower values = more responsive but higher system load and DB writes.",
-                    "three_phase": "Enable only if your service is 120/208V three-phase (common in apartments and condos with shared utility transformers). In this mode, two-pole breaker voltages are multiplied by \u221a3/2 (~0.866) to report the correct 208V line-to-line voltage instead of the incorrect 240V. Do NOT enable for standard 120/240V single-phase residential service.",
+                    "three_phase": "Enable only if your service is 120/208V three-phase (common in apartments and condos with shared utility transformers). In this mode, two-pole breaker voltages are multiplied by √3/2 (~0.866) to report the correct 208V line-to-line voltage instead of the incorrect 240V. Do NOT enable for standard 120/240V single-phase residential service.",
                     "allow_breaker_control": "When enabled, HA will create switch entities allowing you to trip/reset breakers. When disabled, breakers are only treated as sensors.",
                     "allow_led_blink": "When enabled, HA will create a switch per breaker to blink its LED for physical identification. When disabled, no LED-control entities are created. Independent of Allow Breaker Control.",
-                    "enable_decora": "When enabled, LDATA will also discover and create entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account. Leave disabled if you don't have any \u2014 it avoids extra API calls on every update.",
+                    "enable_decora": "When enabled, LDATA will also discover and create entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account. Leave disabled if you don't have any — it avoids extra API calls on every update.",
+                    "show_sidebar_panel": "Adds an item to the Home Assistant sidebar that opens a full-page, interactive view of your load center. If you have more than one LDATA entry, the same page shows the load centers of every entry that has this turned on.",
                     "gap_handling": "Fallback for older firmware without hardware energy counters. How breaker daily energy sensors handle gaps when no data is received. Skip: safest. Extrapolate: assume last known power. Average: compromise. Panels with firmware 2.0+ use hardware counters and ignore this setting.",
-                    "gap_threshold": "Time without data before gap handling activates (1-30 minutes). Only applies to power\u00d7time fallback on older firmware.",
+                    "gap_threshold": "Time without data before gap handling activates (1-30 minutes). Only applies to power×time fallback on older firmware.",
                     "log_warnings": "Log integration crashes or web errors.",
                     "log_data_warnings": "Log warnings of data inconsistencies from Leviton (spikes/resets).",
                     "log_all_raw": "Log the raw WebSocket string as received from Leviton. Warning: output is unredacted and will contain auth tokens and device IDs. Disable when not actively debugging.",
@@ -74,6 +77,232 @@
                     "log_fields": "To find field names, enable 'Log All Parsed Data' and check Home Assistant logs. Enter above as comma separated."
                 }
             }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Skip — Don't accumulate energy during gaps",
+                "extrapolate": "Extrapolate — Assume last known power continued",
+                "average": "Average — Use mean of last and recovery power"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Reset energy sensor baseline",
+            "description": "Reset a stuck LDATA energy sensor. Check the Home Assistant log for the current value before and after the reset. For lifetime sensors (consumption/import), the sensor will accept the next API reading. For daily sensors, baselines are cleared and the sensor re-establishes from the current API values.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entity",
+                    "description": "The LDATA energy sensor to reset."
+                },
+                "value": {
+                    "name": "New value in kWh (optional)",
+                    "description": "Force a specific kWh value instead of using the current API reading. Leave blank to accept whatever the API reports on the next update."
+                },
+                "baseline": {
+                    "name": "Hardware Baseline in kWh (optional)",
+                    "description": "Manually set the raw hardware counter baseline used for delta calculations on daily sensors."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Reset all panel energy sensors",
+            "description": "Reset all daily and lifetime energy sensors for a WHEM panel in one operation. Use this after a panel factory reset, when all hardware energy counters drop to zero simultaneously. All daily sensor baselines are cleared (daily totals restart from 0) and all lifetime sensor guards are released (each will accept the next API reading unconditionally). Select any device that belongs to the panel — the panel itself, a breaker, or a CT. Check the Home Assistant log for a per-sensor reset summary.",
+            "fields": {
+                "device_id": {
+                    "name": "Panel device",
+                    "description": "Any device belonging to the WHEM panel — the panel, a breaker, or a CT. All energy sensors for the resolved panel will be reset."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Load Center",
+            "empty_title": "No load centers to show",
+            "empty_body": "This integration has not found an LDATA or LWHEM panel yet. It may still be starting, or it may be unable to reach Leviton."
+        },
+        "card": {
+            "name": {
+                "panel": "Panel",
+                "breaker": "Breaker",
+                "unmonitored_breaker": "Unmonitored breaker",
+                "sub_panel": "Sub-panel"
+            },
+            "state": {
+                "on": "On",
+                "off": "Off",
+                "off_remote": "Off (remote)",
+                "tripped": "Tripped",
+                "unavailable": "Unavailable",
+                "unknown": "Unknown",
+                "switching": "Switching…",
+                "switching_on": "Switching on…",
+                "switching_off": "Switching off…",
+                "not_monitored": "Not monitored",
+                "switch_failed": "Couldn't switch"
+            },
+            "alarm": {
+                "over_current": "Over current",
+                "over_voltage": "Over voltage",
+                "under_voltage": "Under voltage"
+            },
+            "raw": {
+                "manualon": "Manual on",
+                "manualoff": "Manual off",
+                "remoteon": "Remote on",
+                "remoteoff": "Remote off",
+                "tripped": "Tripped",
+                "softwaretrip": "Software trip",
+                "upstreamoff": "Upstream off",
+                "notcommunicating": "Not communicating",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Panel load",
+                "leg_1": "Leg 1",
+                "leg_2": "Leg 2",
+                "frequency": "Frequency",
+                "today": "Today",
+                "today_import": "Today import",
+                "cloud": "Cloud",
+                "wifi": "Wi-Fi",
+                "update": "Update",
+                "cloud_connected": "Connected to the Leviton cloud",
+                "cloud_offline": "Panel offline",
+                "cloud_unknown": "Cloud status unknown",
+                "wifi_signal": "Wi-Fi signal: {dbm} dBm",
+                "wifi_unknown": "Wi-Fi signal unknown",
+                "update_available": "Firmware update available (install it in the My Leviton app)",
+                "update_current": "Firmware up to date",
+                "main": "Main",
+                "main_breaker": "Main breaker",
+                "main_breaker_dead": "Main breaker (no voltage on either leg)"
+            },
+            "label": {
+                "circuit": "Circuit {position}",
+                "circuits": "Circuits {first} and {second}",
+                "amp_rating": "{amps} amp",
+                "feeds_sub_panel": "Feeds a sub-panel",
+                "feeds": "Feeds {name}",
+                "show_details": "Show details",
+                "open_sub_panel": "Open sub-panel",
+                "open_sub_panel_dashboard": "Open sub-panel dashboard",
+                "breaker_switch": "{name} breaker"
+            },
+            "action": {
+                "turn_on": "Turn on",
+                "turn_off": "Turn off",
+                "turn_on_name": "Turn on {name}",
+                "turn_off_name": "Turn off {name}",
+                "cancel": "Cancel",
+                "close": "Close",
+                "got_it": "Got it",
+                "device_page": "Device page"
+            },
+            "confirm": {
+                "turn_on_title": "Turn on {name}?",
+                "turn_off_title": "Turn off {name}?",
+                "turn_on_body": "This circuit will be energized.",
+                "turn_off_body": "Everything on this circuit will lose power.",
+                "gen1_off_warning": "This is a Gen 1 breaker: once it is off, it can only be turned back on by hand at the panel.",
+                "blocked_title": "{name} can't be turned on remotely",
+                "blocked_body": "This is a Gen 1 smart breaker. It can be switched off from Home Assistant, but it has to be reset by hand at the panel."
+            },
+            "detail": {
+                "both_legs": "Both legs",
+                "leg": "Leg {leg}",
+                "one_pole": "1-pole",
+                "two_pole": "2-pole",
+                "controls": "Controls",
+                "breaker_power": "Breaker power",
+                "power_on_hint": "On: power is flowing",
+                "power_tripped_hint": "Tripped: check the circuit before resetting it",
+                "power_remote_off_hint": "Switched off remotely",
+                "gen1_note": "Gen 1 breaker: it can be switched off remotely but must be reset by hand at the panel.",
+                "control_disabled": "Remote control is off. Turn on {option} in the LDATA integration options to switch breakers from Home Assistant.",
+                "option_breaker_control": "Allow Breaker Control",
+                "identify": "Identify",
+                "identify_hint": "Blink this breaker's LED to find it in the panel",
+                "blink_led": "Blink LED",
+                "identify_disabled": "Turn on {option} in the LDATA integration options to blink a breaker's LED from here.",
+                "option_identify": "Allow Identify",
+                "live": "Live",
+                "power": "Power",
+                "current": "Current",
+                "load": "Load",
+                "energy": "Energy",
+                "today": "Today",
+                "today_import": "Today, import",
+                "lifetime": "Lifetime",
+                "lifetime_import": "Lifetime, import",
+                "protection": "Protection",
+                "operational_state": "Operational state",
+                "diagnostics": "Diagnostics",
+                "breaker_state": "Breaker state",
+                "second_pole": "Second pole",
+                "remote_state": "Remote state",
+                "previous_state": "Previous state",
+                "change_reason": "Last change reason",
+                "circuit_type": "Circuit type",
+                "critical": "Critical circuit",
+                "locked": "Locked",
+                "meter_chip": "Metering chip",
+                "bluetooth": "Bluetooth signal",
+                "device": "Device",
+                "model": "Model",
+                "rating": "Rating",
+                "remote_reset": "Remote reset",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Serial number",
+                "status": "Status",
+                "other_entities": "Other entities",
+                "yes": "Yes",
+                "no": "No",
+                "ok": "OK",
+                "fault": "Fault",
+                "alarm": "Alarm",
+                "not_set": "Not set",
+                "remote_reset_yes": "Supported (Gen 2)",
+                "remote_reset_no": "Not supported (Gen 1)",
+                "standard_breaker": "This is a standard (non-smart) breaker. Leviton reports no state or readings for it, so there is nothing to control or monitor here.",
+                "standard_breaker_hint": "If it feeds a sub-panel that has its own LWHEM or LDATA hub, link them with {option} in this card's YAML to show that panel's live load on this breaker."
+            },
+            "setup": {
+                "choose_title": "Choose your panel",
+                "choose_body": "Set {option} to your LDATA or LWHEM panel device (Settings → Devices & services → Devices → your panel).",
+                "empty_title": "No breakers found for this panel",
+                "check_devices": "Device list available to the card",
+                "check_entities": "Entity list available to the card",
+                "check_device_id": "Configured device ID",
+                "check_panel_found": "Panel device found",
+                "check_total_devices": "Devices seen",
+                "check_linked_any": "Devices linked to any panel",
+                "check_linked_this": "Devices linked to this panel",
+                "check_breakers": "Breakers with a Status entity",
+                "empty_help": "If the panel device is not found, copy the device ID from the panel's own device page, not from a breaker's. If it is found but nothing is linked to it, update the LDATA integration and restart Home Assistant; a reload is not enough."
+            }
+        },
+        "editor": {
+            "card_name": "LDATA Panel Card",
+            "card_description": "A realistic, interactive view of your Leviton load center.",
+            "panel": "Panel",
+            "panel_help": "Pick the panel (the LDATA or LWHEM hub), not a breaker. Sub-panel links are set in YAML.",
+            "title": "Title (optional)",
+            "show_power": "Show live watts and amps",
+            "show_alarms": "Flag alarms",
+            "toggle": "Switch breakers from the panel",
+            "confirm": "Ask before switching",
+            "show_panel_info": "Show the panel's readings",
+            "appearance": "Lighting",
+            "appearance_auto": "Follow theme",
+            "appearance_light": "Bright",
+            "appearance_dark": "Dimmed",
+            "main_breaker": "Main breaker rating (optional)",
+            "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty for a main-lug panel."
         }
     }
 }

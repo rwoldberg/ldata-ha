@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "A fiók már konfigurálva van",
+            "reauth_successful": "Az újrahitelesítés sikeres volt"
+        },
+        "error": {
+            "cannot_connect": "Sikertelen csatlakozás",
+            "invalid_auth": "Érvénytelen hitelesítés",
+            "invalid_2fa": "Érvénytelen kétlépcsős azonosító kód, próbálja újra",
+            "no_residence_selected": "A folytatáshoz válasszon ki legalább egy otthont",
+            "unknown": "Váratlan hiba"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "my.leviton.com felhasználónév",
+                    "password": "my.leviton.com jelszó",
+                    "three_phase": "120/208V-os hálózat (lakás/társasház)",
+                    "allow_breaker_control": "Megszakítók vezérlésének engedélyezése",
+                    "allow_led_blink": "Azonosítás engedélyezése",
+                    "enable_decora": "Decora Smart Wi-Fi eszközök engedélyezése",
+                    "show_sidebar_panel": "Elosztótábla megjelenítése az oldalsávban"
+                },
+                "title": "LDATA konfigurálása"
+            },
+            "2fa": {
+                "title": "Kétlépcsős azonosítás",
+                "description": "Ehhez a fiókhoz kétlépcsős azonosító kód szükséges: {username}. Kérjük, nézze meg a hitelesítő alkalmazását vagy az e-mailjeit, és adja meg alább a kódot.",
+                "data": {
+                    "2fa_code": "Azonosító kód"
+                }
+            },
+            "residence": {
+                "title": "Otthon(ok) kiválasztása",
+                "description": "A fiókja egynél több otthonhoz fér hozzá. Válassza ki, melyiket vagy melyikeket szeretné beállítani – mindegyik kiválasztott otthon külön LDATA integrációs bejegyzés lesz, így az elosztótábláik és megszakítóik jól elkülönülnek egymástól.",
+                "data": {
+                    "residences": "Otthonok"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Leviton LDATA beállításai",
+                "data": {
+                    "three_phase": "120/208V-os hálózat (lakás/társasház)",
+                    "allow_breaker_control": "Megszakítók vezérlésének engedélyezése",
+                    "allow_led_blink": "Azonosítás engedélyezése",
+                    "enable_decora": "Decora Smart Wi-Fi eszközök engedélyezése",
+                    "show_sidebar_panel": "Elosztótábla megjelenítése az oldalsávban",
+                    "gap_handling": "Adatkiesés kezelése (csak régebbi firmware esetén)",
+                    "gap_threshold": "Adatkiesési küszöb (perc)",
+                    "ha_inform_rate": "HA frissítési időköz (másodperc)",
+                    "log_warnings": "Általános integrációs hibák naplózása",
+                    "log_data_warnings": "Adatérték-figyelmeztetések naplózása (kiugró értékek/nullázódások)",
+                    "log_all_raw": "Nyers WebSocket-karakterlánc naplózása",
+                    "log_parsed_data": "Minden feldolgozott adat naplózása",
+                    "enable_specific_logging": "Megadott mezők naplózásának engedélyezése",
+                    "log_fields": "Naplózandó mezők"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Milyen gyakran frissüljenek az érzékelők a Home Assistantban (2-600 másodperc). Az alacsonyabb érték gyorsabb reagálást, de nagyobb rendszerterhelést és több adatbázis-írást jelent.",
+                    "three_phase": "Csak akkor engedélyezze, ha a hálózat 120/208V-os háromfázisú (gyakori a közös közműtranszformátorról ellátott lakásokban és társasházakban). Ebben a módban az integráció a kétpólusú megszakítók feszültségét √3/2-vel (~0.866) szorozza meg, így a helyes 208V-os vonali feszültség jelenik meg a hibás 240V helyett. NE engedélyezze szabványos 120/240V-os egyfázisú lakossági hálózat esetén.",
+                    "allow_breaker_control": "Ha engedélyezve van, a HA kapcsoló entitásokat hoz létre, amelyekkel a megszakítók le- és visszakapcsolhatók. Ha le van tiltva, a megszakítók csak érzékelőként jelennek meg.",
+                    "allow_led_blink": "Ha engedélyezve van, a HA megszakítónként létrehoz egy kapcsolót, amellyel a megszakító LED-je villogtatható, hogy a megszakító könnyen megtalálható legyen az elosztótáblán. Ha le van tiltva, nem jönnek létre LED-vezérlő entitások. Független a „Megszakítók vezérlésének engedélyezése” opciótól.",
+                    "enable_decora": "Ha engedélyezve van, az LDATA a fiókjában lévő Decora Smart Wi-Fi kapcsolókat, fényerőszabályzókat, ventilátorokat, aljzatokat és GFCI-ket is felderíti, és entitásokat hoz létre hozzájuk. Hagyja letiltva, ha nincs ilyen eszköze – így elkerülhetők a felesleges API-hívások minden frissítésnél.",
+                    "show_sidebar_panel": "Új elemet ad a Home Assistant oldalsávjához, amely az elosztótábla teljes oldalas, interaktív nézetét nyitja meg. Ha több LDATA bejegyzése van, ugyanazon az oldalon jelenik meg minden olyan bejegyzés elosztótáblája, amelynél ez be van kapcsolva.",
+                    "gap_handling": "Tartalék megoldás a hardveres energiaszámláló nélküli, régebbi firmware-ekhez. Azt határozza meg, hogyan kezeljék a megszakítók napi energiaérzékelői azokat az időszakokat, amikor nem érkezik adat. Kihagyás: a legbiztonságosabb. Extrapolálás: az utolsó ismert teljesítményt feltételezi. Átlagolás: kompromisszum. A 2.0+ firmware-rel működő elosztótáblák hardveres számlálókat használnak, és figyelmen kívül hagyják ezt a beállítást.",
+                    "gap_threshold": "Az adat nélkül eltelt idő, amely után az adatkiesés kezelése életbe lép (1-30 perc). Csak a régebbi firmware-ek teljesítmény×idő alapú tartalék számítására vonatkozik.",
+                    "log_warnings": "Az integráció összeomlásainak és a webes hibáknak a naplózása.",
+                    "log_data_warnings": "A Levitontól érkező adatok következetlenségeire (kiugró értékek/nullázódások) vonatkozó figyelmeztetések naplózása.",
+                    "log_all_raw": "A Levitontól kapott nyers WebSocket-karakterlánc naplózása. Figyelem: a kimenet nincs kitakarva, ezért hitelesítési tokeneket és eszközazonosítókat tartalmaz. Kapcsolja ki, ha éppen nem végez hibakeresést.",
+                    "log_parsed_data": "Az összes megszakító- és elosztótábla-mező naplózása minden WebSocket- vagy REST-frissítés feldolgozása után. Hasznos az értékek ellenőrzéséhez a nyers WebSocket-naplózás bekapcsolása nélkül.",
+                    "enable_specific_logging": "A megadott mezők naplózása. A mezőnevek a „Minden feldolgozott adat naplózása” opció rövid idejű bekapcsolásával deríthetők ki.",
+                    "log_fields": "A mezőnevek megtalálásához kapcsolja be a „Minden feldolgozott adat naplózása” opciót, és nézze meg a Home Assistant naplóját. A neveket fent, vesszővel elválasztva adja meg."
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Kihagyás – adatkiesés alatt nem számol energiát",
+                "extrapolate": "Extrapolálás – feltételezi, hogy az utolsó ismert teljesítmény változatlan maradt",
+                "average": "Átlagolás – a kiesés előtti utolsó és az utána mért első teljesítmény átlagával számol"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Energiaérzékelő alapértékének visszaállítása",
+            "description": "Visszaállít egy beragadt LDATA energiaérzékelőt. A visszaállítás előtti és utáni aktuális értéket a Home Assistant naplójában ellenőrizheti. Az összesített érzékelők (fogyasztás/import) a következő API-értéket fogadják el. A napi érzékelőknél az alapértékek törlődnek, és az érzékelő az aktuális API-értékekből indul újra.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entitás",
+                    "description": "A visszaállítandó LDATA energiaérzékelő."
+                },
+                "value": {
+                    "name": "Új érték kWh-ban (opcionális)",
+                    "description": "Egy megadott kWh-érték kényszerítése az aktuális API-érték használata helyett. Hagyja üresen, ha azt szeretné elfogadni, amit az API a következő frissítéskor közöl."
+                },
+                "baseline": {
+                    "name": "Hardveres alapérték kWh-ban (opcionális)",
+                    "description": "A napi érzékelők különbségszámításához használt nyers hardveres számláló alapértékének kézi beállítása."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Az elosztótábla összes energiaérzékelőjének visszaállítása",
+            "description": "Egy WHEM elosztótábla összes napi és összesített energiaérzékelőjének visszaállítása egyetlen művelettel. Akkor használja, ha az elosztótábla gyári visszaállítása után az összes hardveres energiaszámláló egyszerre nullázódott. Minden napi érzékelő alapértéke törlődik (a napi összegek 0-ról indulnak újra), és minden összesített érzékelő védelme feloldódik (mindegyik feltétel nélkül elfogadja a következő API-értéket). Válasszon ki egy tetszőleges, az elosztótáblához tartozó eszközt – magát az elosztótáblát, egy megszakítót vagy egy CT-t. Az érzékelőnkénti visszaállítás összefoglalóját a Home Assistant naplójában találja.",
+            "fields": {
+                "device_id": {
+                    "name": "Elosztótábla-eszköz",
+                    "description": "A WHEM elosztótáblához tartozó bármelyik eszköz – az elosztótábla, egy megszakító vagy egy CT. Az így azonosított elosztótábla összes energiaérzékelője visszaáll."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Elosztótábla",
+            "empty_title": "Nincs megjeleníthető elosztótábla",
+            "empty_body": "Az integráció még nem talált LDATA vagy LWHEM elosztótáblát. Lehet, hogy még indul, vagy nem éri el a Levitont."
+        },
+        "card": {
+            "name": {
+                "panel": "Elosztótábla",
+                "breaker": "Megszakító",
+                "unmonitored_breaker": "Nem felügyelt megszakító",
+                "sub_panel": "Alelosztó"
+            },
+            "state": {
+                "on": "Be",
+                "off": "Ki",
+                "off_remote": "Ki (távolról)",
+                "tripped": "Leoldott",
+                "unavailable": "Nem elérhető",
+                "unknown": "Ismeretlen",
+                "switching": "Kapcsolás…",
+                "switching_on": "Bekapcsolás…",
+                "switching_off": "Kikapcsolás…",
+                "not_monitored": "Nem felügyelt",
+                "switch_failed": "Sikertelen kapcsolás"
+            },
+            "alarm": {
+                "over_current": "Túláram",
+                "over_voltage": "Túlfeszültség",
+                "under_voltage": "Alulfeszültség"
+            },
+            "raw": {
+                "manualon": "Be (kézzel)",
+                "manualoff": "Ki (kézzel)",
+                "remoteon": "Be (távolról)",
+                "remoteoff": "Ki (távolról)",
+                "tripped": "Leoldott",
+                "softwaretrip": "Szoftveres leoldás",
+                "upstreamoff": "Nincs betáplálás",
+                "notcommunicating": "Nem kommunikál",
+                "normal": "Normál"
+            },
+            "meter": {
+                "panel_load": "Összterhelés",
+                "leg_1": "1. fázis",
+                "leg_2": "2. fázis",
+                "frequency": "Frekvencia",
+                "today": "Ma",
+                "today_import": "Mai import",
+                "cloud": "Felhő",
+                "wifi": "Wi-Fi",
+                "update": "Frissítés",
+                "cloud_connected": "Csatlakozva a Leviton felhőjéhez",
+                "cloud_offline": "Az elosztótábla offline",
+                "cloud_unknown": "A felhőkapcsolat állapota ismeretlen",
+                "wifi_signal": "Wi-Fi-jelerősség: {dbm} dBm",
+                "wifi_unknown": "A Wi-Fi-jelerősség ismeretlen",
+                "update_available": "Firmware-frissítés érhető el (telepítse a My Leviton alkalmazásban)",
+                "update_current": "A firmware naprakész",
+                "main": "Fő",
+                "main_breaker": "Főmegszakító",
+                "main_breaker_dead": "Főmegszakító (egyik fázison sincs feszültség)"
+            },
+            "label": {
+                "circuit": "{position}. áramkör",
+                "circuits": "{first}. és {second}. áramkör",
+                "amp_rating": "{amps} amper",
+                "feeds_sub_panel": "Alelosztót táplál",
+                "feeds": "Táplált alelosztó: {name}",
+                "show_details": "Részletek megjelenítése",
+                "open_sub_panel": "Alelosztó megnyitása",
+                "open_sub_panel_dashboard": "Alelosztó irányítópultjának megnyitása",
+                "breaker_switch": "{name} megszakító"
+            },
+            "action": {
+                "turn_on": "Bekapcsolás",
+                "turn_off": "Kikapcsolás",
+                "turn_on_name": "{name} bekapcsolása",
+                "turn_off_name": "{name} kikapcsolása",
+                "cancel": "Mégse",
+                "close": "Bezárás",
+                "got_it": "Értem",
+                "device_page": "Eszközoldal"
+            },
+            "confirm": {
+                "turn_on_title": "{name} bekapcsolása?",
+                "turn_off_title": "{name} kikapcsolása?",
+                "turn_on_body": "Ez az áramkör feszültség alá kerül.",
+                "turn_off_body": "Ezen az áramkörön minden áram nélkül marad.",
+                "gen1_off_warning": "Ez egy Gen 1 megszakító: kikapcsolás után csak kézzel, az elosztótáblánál kapcsolható vissza.",
+                "blocked_title": "Távolról nem kapcsolható be: {name}",
+                "blocked_body": "Ez egy Gen 1 okosmegszakító. A Home Assistantból kikapcsolható, de visszakapcsolni csak kézzel, az elosztótáblánál lehet."
+            },
+            "detail": {
+                "both_legs": "Mindkét fázis",
+                "leg": "{leg}. fázis",
+                "one_pole": "1 pólusú",
+                "two_pole": "2 pólusú",
+                "controls": "Vezérlők",
+                "breaker_power": "Megszakító kapcsolása",
+                "power_on_hint": "Be: az áramkör áram alatt van",
+                "power_tripped_hint": "Leoldott: visszakapcsolás előtt ellenőrizze az áramkört",
+                "power_remote_off_hint": "Távolról kikapcsolva",
+                "gen1_note": "Gen 1 megszakító: távolról kikapcsolható, de visszakapcsolni csak kézzel, az elosztótáblánál lehet.",
+                "control_disabled": "A távvezérlés ki van kapcsolva. Ha a Home Assistantból szeretné kapcsolni a megszakítókat, kapcsolja be a {option} opciót az LDATA integráció beállításaiban.",
+                "option_breaker_control": "Megszakítók vezérlésének engedélyezése",
+                "identify": "Azonosítás",
+                "identify_hint": "Villogtassa a megszakító LED-jét, hogy megtalálja az elosztótáblán",
+                "blink_led": "LED villogtatása",
+                "identify_disabled": "Ha innen szeretné villogtatni egy megszakító LED-jét, kapcsolja be az {option} opciót az LDATA integráció beállításaiban.",
+                "option_identify": "Azonosítás engedélyezése",
+                "live": "Élő adatok",
+                "power": "Teljesítmény",
+                "current": "Áramerősség",
+                "load": "Terhelés",
+                "energy": "Energia",
+                "today": "Ma",
+                "today_import": "Ma, import",
+                "lifetime": "Összesen",
+                "lifetime_import": "Összesen, import",
+                "protection": "Védelem",
+                "operational_state": "Üzemállapot",
+                "diagnostics": "Diagnosztika",
+                "breaker_state": "Megszakító állapota",
+                "second_pole": "Második pólus",
+                "remote_state": "Távoli állapot",
+                "previous_state": "Előző állapot",
+                "change_reason": "Utolsó változás oka",
+                "circuit_type": "Áramkör típusa",
+                "critical": "Kritikus áramkör",
+                "locked": "Zárolva",
+                "meter_chip": "Mérőchip",
+                "bluetooth": "Bluetooth-jelerősség",
+                "device": "Eszköz",
+                "model": "Modell",
+                "rating": "Névleges áram",
+                "remote_reset": "Távoli visszakapcsolás",
+                "firmware": "Firmware",
+                "hardware": "Hardver",
+                "serial": "Sorozatszám",
+                "status": "Állapot",
+                "other_entities": "További entitások",
+                "yes": "Igen",
+                "no": "Nem",
+                "ok": "OK",
+                "fault": "Hiba",
+                "alarm": "Riasztás",
+                "not_set": "Nincs beállítva",
+                "remote_reset_yes": "Támogatott (Gen 2)",
+                "remote_reset_no": "Nem támogatott (Gen 1)",
+                "standard_breaker": "Ez egy hagyományos (nem okos) megszakító. A Leviton nem közöl róla sem állapotot, sem mért értékeket, ezért itt nincs mit vezérelni vagy figyelni.",
+                "standard_breaker_hint": "Ha olyan alelosztót táplál, amelynek saját LWHEM vagy LDATA hubja van, kapcsolja össze őket a kártya YAML-kódjában a {option} beállítással, hogy ezen a megszakítón megjelenjen az alelosztó élő terhelése."
+            },
+            "setup": {
+                "choose_title": "Válassza ki az elosztótáblát",
+                "choose_body": "Állítsa a {option} értékét az LDATA vagy LWHEM elosztótábla eszközére (Beállítások → Eszközök és szolgáltatások → Eszközök → az Ön elosztótáblája).",
+                "empty_title": "Ehhez az elosztótáblához nem található megszakító",
+                "check_devices": "Az eszközlista elérhető a kártya számára",
+                "check_entities": "Az entitáslista elérhető a kártya számára",
+                "check_device_id": "Beállított eszközazonosító",
+                "check_panel_found": "Elosztótábla-eszköz megtalálva",
+                "check_total_devices": "Észlelt eszközök",
+                "check_linked_any": "Bármely elosztótáblához kapcsolt eszközök",
+                "check_linked_this": "Ehhez az elosztótáblához kapcsolt eszközök",
+                "check_breakers": "Állapot entitással rendelkező megszakítók",
+                "empty_help": "Ha az elosztótábla-eszköz nem található, az eszközazonosítót az elosztótábla saját eszközoldaláról másolja ki, ne egy megszakítóéról. Ha megtalálható, de semmi sem kapcsolódik hozzá, frissítse az LDATA integrációt, és indítsa újra a Home Assistantot; az újratöltés nem elég."
+            }
+        },
+        "editor": {
+            "card_name": "LDATA elosztótábla-kártya",
+            "card_description": "A Leviton elosztótábla élethű, interaktív nézete.",
+            "panel": "Elosztótábla",
+            "panel_help": "Az elosztótáblát (az LDATA vagy LWHEM hubot) válassza ki, ne egy megszakítót. Az alelosztók kapcsolatai YAML-ben adhatók meg.",
+            "title": "Cím (opcionális)",
+            "show_power": "Élő watt- és amperértékek megjelenítése",
+            "show_alarms": "Riasztások jelzése",
+            "toggle": "Megszakítók kapcsolása az elosztótábláról",
+            "confirm": "Megerősítés kérése kapcsolás előtt",
+            "show_panel_info": "Az elosztótábla mért értékeinek megjelenítése",
+            "appearance": "Megvilágítás",
+            "appearance_auto": "Téma követése",
+            "appearance_light": "Világos",
+            "appearance_dark": "Tompított",
+            "main_breaker": "Főmegszakító névleges árama (opcionális)",
+            "main_breaker_help": "A Leviton nem közli a főmegszakító adatait. Főmegszakító nélküli elosztótáblánál hagyja üresen."
+        }
+    }
+}

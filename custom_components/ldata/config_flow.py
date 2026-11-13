@@ -22,6 +22,8 @@ from .const import (
     ALLOW_LED_BLINK_DEFAULT,
     ENABLE_DECORA,
     ENABLE_DECORA_DEFAULT,
+    SHOW_SIDEBAR_PANEL,
+    SHOW_SIDEBAR_PANEL_DEFAULT,
     THREE_PHASE,
     THREE_PHASE_DEFAULT,
     HA_INFORM_RATE,
@@ -50,6 +52,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required("allow_breaker_control"): bool,
         vol.Required(ALLOW_LED_BLINK, default=ALLOW_LED_BLINK_DEFAULT): bool,
         vol.Required(ENABLE_DECORA, default=ENABLE_DECORA_DEFAULT): bool,
+        vol.Required(SHOW_SIDEBAR_PANEL, default=SHOW_SIDEBAR_PANEL_DEFAULT): bool,
     }
 )
 
@@ -299,6 +302,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(ALLOW_BREAKER_CONTROL, default=self.user_data.get(ALLOW_BREAKER_CONTROL, ALLOW_BREAKER_CONTROL_DEFAULT)): bool,
                 vol.Required(ALLOW_LED_BLINK, default=self.user_data.get(ALLOW_LED_BLINK, ALLOW_LED_BLINK_DEFAULT)): bool,
                 vol.Required(ENABLE_DECORA, default=self.user_data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT)): bool,
+                vol.Required(SHOW_SIDEBAR_PANEL, default=self.user_data.get(SHOW_SIDEBAR_PANEL, SHOW_SIDEBAR_PANEL_DEFAULT)): bool,
             })
 
         return self.async_show_form(
@@ -421,6 +425,10 @@ class OptionsFlow(config_entries.OptionsFlow):
                 ENABLE_DECORA,
                 default=current_options.get(ENABLE_DECORA, current_data.get(ENABLE_DECORA, ENABLE_DECORA_DEFAULT)),
             ): bool,
+            vol.Optional(
+                SHOW_SIDEBAR_PANEL,
+                default=current_options.get(SHOW_SIDEBAR_PANEL, current_data.get(SHOW_SIDEBAR_PANEL, SHOW_SIDEBAR_PANEL_DEFAULT)),
+            ): bool,
         }
 
         # Only show gap handling when at least one panel lacks hw counters
@@ -430,11 +438,15 @@ class OptionsFlow(config_entries.OptionsFlow):
                 default=current_options.get(GAP_HANDLING, GAP_HANDLING_DEFAULT),
             )] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
+                    # The translations (selector.gap_handling) name the
+                    # options; these English labels show where a language
+                    # has none.
                     options=[
                         selector.SelectOptionDict(value=value, label=label)
                         for value, label in GAP_HANDLING_LABELS.items()
                     ],
                     mode=selector.SelectSelectorMode.DROPDOWN,
+                    translation_key=GAP_HANDLING,
                 )
             )
             options_schema[vol.Optional(

@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Kontot är redan konfigurerat",
+            "reauth_successful": "Återautentiseringen lyckades"
+        },
+        "error": {
+            "cannot_connect": "Det gick inte att ansluta",
+            "invalid_auth": "Ogiltig autentisering",
+            "invalid_2fa": "Ogiltig tvåfaktorskod, försök igen",
+            "no_residence_selected": "Välj minst en bostad för att fortsätta",
+            "unknown": "Oväntat fel"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Användarnamn för my.leviton.com",
+                    "password": "Lösenord för my.leviton.com",
+                    "three_phase": "120/208V-matning från trefasnät (lägenhet/bostadsrätt)",
+                    "allow_breaker_control": "Tillåt styrning av dvärgbrytare",
+                    "allow_led_blink": "Tillåt identifiering",
+                    "enable_decora": "Aktivera Decora Smart Wi-Fi-enheter",
+                    "show_sidebar_panel": "Visa elcentralen i sidofältet"
+                },
+                "title": "Konfigurera LDATA"
+            },
+            "2fa": {
+                "title": "Tvåfaktorsautentisering",
+                "description": "En kod för tvåfaktorsautentisering krävs för {username}. Kontrollera din autentiseringsapp eller e-post och ange koden nedan.",
+                "data": {
+                    "2fa_code": "Autentiseringskod"
+                }
+            },
+            "residence": {
+                "title": "Välj bostäder",
+                "description": "Ditt konto har åtkomst till mer än en bostad. Välj vilken eller vilka du vill konfigurera – varje bostad du väljer blir en egen, separat post för LDATA-integrationen, så att deras elcentraler och dvärgbrytare hålls tydligt åtskilda.",
+                "data": {
+                    "residences": "Bostäder"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Alternativ för Leviton LDATA",
+                "data": {
+                    "three_phase": "120/208V-matning från trefasnät (lägenhet/bostadsrätt)",
+                    "allow_breaker_control": "Tillåt styrning av dvärgbrytare",
+                    "allow_led_blink": "Tillåt identifiering",
+                    "enable_decora": "Aktivera Decora Smart Wi-Fi-enheter",
+                    "show_sidebar_panel": "Visa elcentralen i sidofältet",
+                    "gap_handling": "Hantering av dataluckor (endast äldre firmware)",
+                    "gap_threshold": "Tröskel för dataluckor (minuter)",
+                    "ha_inform_rate": "Uppdateringsintervall för HA (sekunder)",
+                    "log_warnings": "Logga allmänna integrationsfel",
+                    "log_data_warnings": "Logga varningar om datavärden (toppar/nollställningar)",
+                    "log_all_raw": "Logga rå WebSocket-sträng",
+                    "log_parsed_data": "Logga all tolkad data",
+                    "enable_specific_logging": "Aktivera loggning av specifika fält",
+                    "log_fields": "Fält att logga"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Hur ofta sensorerna uppdateras i Home Assistant (2-600 sekunder). Lägre värden = snabbare respons men högre systembelastning och fler databasskrivningar.",
+                    "three_phase": "Aktivera endast om din elanslutning är 120/208V trefas (vanligt i lägenheter och bostadsrätter med gemensam nättransformator). I det här läget multipliceras spänningen för tvåpoliga dvärgbrytare med √3/2 (~0.866) så att rätt huvudspänning på 208V rapporteras i stället för felaktiga 240V. Aktivera INTE för vanlig enfasig 120/240V-anslutning i bostäder.",
+                    "allow_breaker_control": "När detta är aktiverat skapar HA brytarentiteter som låter dig lösa ut och återställa dvärgbrytare. När det är inaktiverat hanteras dvärgbrytarna enbart som sensorer.",
+                    "allow_led_blink": "När detta är aktiverat skapar HA en brytarentitet per dvärgbrytare som får dess LED att blinka, så att du kan hitta den i elcentralen. När det är inaktiverat skapas inga entiteter för LED-styrning. Oberoende av ”Tillåt styrning av dvärgbrytare”.",
+                    "enable_decora": "När detta är aktiverat upptäcker LDATA även Decora Smart Wi-Fi-strömbrytare, dimrar, fläktar, eluttag och GFCI-jordfelsbrytare på ditt konto och skapar entiteter för dem. Låt det vara inaktiverat om du inte har några – då undviks extra API-anrop vid varje uppdatering.",
+                    "show_sidebar_panel": "Lägger till ett objekt i Home Assistants sidofält som öppnar en interaktiv helsidesvy av din elcentral. Om du har mer än en LDATA-post visar samma sida elcentralerna för alla poster där detta är aktiverat.",
+                    "gap_handling": "Reservlösning för äldre firmware utan energiräknare i hårdvaran. Anger hur dvärgbrytarnas dagliga energisensorer hanterar luckor när ingen data tas emot. Hoppa över: säkrast. Extrapolera: anta senast kända effekt. Medelvärde: en kompromiss. Elcentraler med firmware 2.0+ använder hårdvaruräknare och ignorerar den här inställningen.",
+                    "gap_threshold": "Tid utan data innan hanteringen av dataluckor aktiveras (1-30 minuter). Gäller endast reservberäkningen effekt×tid på äldre firmware.",
+                    "log_warnings": "Logga krascher i integrationen eller webbfel.",
+                    "log_data_warnings": "Logga varningar om inkonsekvent data från Leviton (toppar/nollställningar).",
+                    "log_all_raw": "Logga den råa WebSocket-strängen precis som den tas emot från Leviton. Varning: utdata maskeras inte och innehåller autentiseringstokens och enhets-ID:n. Inaktivera när du inte aktivt felsöker.",
+                    "log_parsed_data": "Logga alla fält för dvärgbrytare och elcentral efter tolkningen av varje WebSocket- eller REST-uppdatering. Praktiskt för att kontrollera värden utan att aktivera loggning av rå WebSocket-data.",
+                    "enable_specific_logging": "Logga valfria angivna fält. Fältnamnen hittar du genom att tillfälligt aktivera ”Logga all tolkad data”.",
+                    "log_fields": "För att hitta fältnamnen aktiverar du ”Logga all tolkad data” och tittar i Home Assistants loggar. Ange dem ovan, avgränsade med kommatecken."
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Hoppa över – räkna inte in energi under dataluckor",
+                "extrapolate": "Extrapolera – anta att den senast kända effekten fortsatte",
+                "average": "Medelvärde – använd medelvärdet av effekten före och efter luckan"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Återställ energisensorns basvärde",
+            "description": "Återställ en LDATA-energisensor som har fastnat. Kontrollera Home Assistants logg för att se det aktuella värdet före och efter återställningen. För sensorer med totalvärden (förbrukning/import) godtar sensorn nästa avläsning från API:et. För dagliga sensorer rensas basvärdena och sensorn utgår på nytt från de aktuella API-värdena.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entitet",
+                    "description": "LDATA-energisensorn som ska återställas."
+                },
+                "value": {
+                    "name": "Nytt värde i kWh (valfritt)",
+                    "description": "Tvinga fram ett visst kWh-värde i stället för att använda den aktuella API-avläsningen. Lämna tomt för att godta det som API:et rapporterar vid nästa uppdatering."
+                },
+                "baseline": {
+                    "name": "Hårdvarubasvärde i kWh (valfritt)",
+                    "description": "Ange manuellt basvärdet för den råa hårdvaruräknaren, som används för deltaberäkningar i dagliga sensorer."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Återställ alla energisensorer för elcentralen",
+            "description": "Återställ alla dagliga och totala energisensorer för en WHEM-elcentral i ett enda steg. Använd detta efter en fabriksåterställning av elcentralen, när alla energiräknare i hårdvaran nollställs samtidigt. Basvärdena för alla dagliga sensorer rensas (dagssummorna börjar om från 0) och alla spärrar på sensorerna med totalvärden hävs (var och en godtar nästa API-avläsning utan villkor). Välj valfri enhet som hör till elcentralen – själva elcentralen, en dvärgbrytare eller en CT. Kontrollera Home Assistants logg för en sammanfattning av återställningen per sensor.",
+            "fields": {
+                "device_id": {
+                    "name": "Elcentralens enhet",
+                    "description": "Valfri enhet som hör till WHEM-elcentralen – elcentralen, en dvärgbrytare eller en CT. Alla energisensorer för den elcentral som enheten hör till återställs."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Elcentral",
+            "empty_title": "Inga elcentraler att visa",
+            "empty_body": "Integrationen har inte hittat någon LDATA- eller LWHEM-elcentral ännu. Den kanske fortfarande startar, eller så når den inte Leviton."
+        },
+        "card": {
+            "name": {
+                "panel": "Elcentral",
+                "breaker": "Dvärgbrytare",
+                "unmonitored_breaker": "Oövervakad dvärgbrytare",
+                "sub_panel": "Undercentral"
+            },
+            "state": {
+                "on": "På",
+                "off": "Av",
+                "off_remote": "Av (fjärrstyrt)",
+                "tripped": "Utlöst",
+                "unavailable": "Otillgänglig",
+                "unknown": "Okänd",
+                "switching": "Slår om…",
+                "switching_on": "Slår på…",
+                "switching_off": "Slår av…",
+                "not_monitored": "Övervakas inte",
+                "switch_failed": "Kunde inte slå om"
+            },
+            "alarm": {
+                "over_current": "Överström",
+                "over_voltage": "Överspänning",
+                "under_voltage": "Underspänning"
+            },
+            "raw": {
+                "manualon": "Manuellt på",
+                "manualoff": "Manuellt av",
+                "remoteon": "Fjärrstyrt på",
+                "remoteoff": "Fjärrstyrt av",
+                "tripped": "Utlöst",
+                "softwaretrip": "Utlöst av programvara",
+                "upstreamoff": "Ingen matning uppströms",
+                "notcommunicating": "Kommunicerar inte",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Total belastning",
+                "leg_1": "Fas 1",
+                "leg_2": "Fas 2",
+                "frequency": "Frekvens",
+                "today": "I dag",
+                "today_import": "Import i dag",
+                "cloud": "Moln",
+                "wifi": "Wi-Fi",
+                "update": "Firmware",
+                "cloud_connected": "Ansluten till Levitons moln",
+                "cloud_offline": "Elcentralen är offline",
+                "cloud_unknown": "Molnstatus okänd",
+                "wifi_signal": "Wi-Fi-signal: {dbm} dBm",
+                "wifi_unknown": "Wi-Fi-signal okänd",
+                "update_available": "Firmwareuppdatering tillgänglig (installera den i appen My Leviton)",
+                "update_current": "Firmwaren är uppdaterad",
+                "main": "Huvud",
+                "main_breaker": "Huvudbrytare",
+                "main_breaker_dead": "Huvudbrytare (ingen spänning på någon av faserna)"
+            },
+            "label": {
+                "circuit": "Grupp {position}",
+                "circuits": "Grupp {first} och {second}",
+                "amp_rating": "{amps} ampere",
+                "feeds_sub_panel": "Matar en undercentral",
+                "feeds": "Matar {name}",
+                "show_details": "Visa detaljer",
+                "open_sub_panel": "Öppna undercentralen",
+                "open_sub_panel_dashboard": "Öppna undercentralens kontrollpanel",
+                "breaker_switch": "Dvärgbrytare {name}"
+            },
+            "action": {
+                "turn_on": "Slå på",
+                "turn_off": "Slå av",
+                "turn_on_name": "Slå på {name}",
+                "turn_off_name": "Slå av {name}",
+                "cancel": "Avbryt",
+                "close": "Stäng",
+                "got_it": "Jag förstår",
+                "device_page": "Enhetssida"
+            },
+            "confirm": {
+                "turn_on_title": "Slå på {name}?",
+                "turn_off_title": "Slå av {name}?",
+                "turn_on_body": "Den här gruppen blir spänningssatt.",
+                "turn_off_body": "Allt på den här gruppen blir strömlöst.",
+                "gen1_off_warning": "Detta är en Gen 1-dvärgbrytare: när den väl är avslagen kan den bara slås på igen för hand vid elcentralen.",
+                "blocked_title": "{name} kan inte slås på via fjärrstyrning",
+                "blocked_body": "Detta är en smart dvärgbrytare av Gen 1. Den kan slås av från Home Assistant, men måste återställas för hand vid elcentralen."
+            },
+            "detail": {
+                "both_legs": "Båda faserna",
+                "leg": "Fas {leg}",
+                "one_pole": "1-polig",
+                "two_pole": "2-polig",
+                "controls": "Reglage",
+                "breaker_power": "Dvärgbrytare på/av",
+                "power_on_hint": "På: gruppen har ström",
+                "power_tripped_hint": "Utlöst: kontrollera gruppen innan du återställer den",
+                "power_remote_off_hint": "Avslagen via fjärrstyrning",
+                "gen1_note": "Gen 1-dvärgbrytare: den kan slås av via fjärrstyrning men måste återställas för hand vid elcentralen.",
+                "control_disabled": "Fjärrstyrning är avstängd. Aktivera {option} i LDATA-integrationens alternativ för att slå av och på dvärgbrytare från Home Assistant.",
+                "option_breaker_control": "Tillåt styrning av dvärgbrytare",
+                "identify": "Identifiera",
+                "identify_hint": "Låt dvärgbrytarens LED blinka så att du hittar den i elcentralen",
+                "blink_led": "Blinka med LED:en",
+                "identify_disabled": "Aktivera {option} i LDATA-integrationens alternativ för att blinka med en dvärgbrytares LED härifrån.",
+                "option_identify": "Tillåt identifiering",
+                "live": "Just nu",
+                "power": "Effekt",
+                "current": "Ström",
+                "load": "Belastning",
+                "energy": "Energi",
+                "today": "I dag",
+                "today_import": "I dag, import",
+                "lifetime": "Totalt",
+                "lifetime_import": "Totalt, import",
+                "protection": "Skydd",
+                "operational_state": "Drifttillstånd",
+                "diagnostics": "Diagnostik",
+                "breaker_state": "Dvärgbrytarens tillstånd",
+                "second_pole": "Andra polen",
+                "remote_state": "Fjärrtillstånd",
+                "previous_state": "Föregående tillstånd",
+                "change_reason": "Orsak till senaste ändring",
+                "circuit_type": "Grupptyp",
+                "critical": "Kritisk grupp",
+                "locked": "Låst",
+                "meter_chip": "Mätchip",
+                "bluetooth": "Bluetooth-signal",
+                "device": "Enhet",
+                "model": "Modell",
+                "rating": "Märkström",
+                "remote_reset": "Fjärråterställning",
+                "firmware": "Firmware",
+                "hardware": "Hårdvara",
+                "serial": "Serienummer",
+                "status": "Status",
+                "other_entities": "Övriga entiteter",
+                "yes": "Ja",
+                "no": "Nej",
+                "ok": "OK",
+                "fault": "Fel",
+                "alarm": "Larm",
+                "not_set": "Inte angivet",
+                "remote_reset_yes": "Stöds (Gen 2)",
+                "remote_reset_no": "Stöds inte (Gen 1)",
+                "standard_breaker": "Detta är en vanlig dvärgbrytare (inte smart). Leviton rapporterar varken tillstånd eller mätvärden för den, så här finns inget att styra eller övervaka.",
+                "standard_breaker_hint": "Om den matar en undercentral med egen LWHEM- eller LDATA-hubb kan du länka dem med {option} i kortets YAML för att visa undercentralens aktuella belastning på den här dvärgbrytaren."
+            },
+            "setup": {
+                "choose_title": "Välj din elcentral",
+                "choose_body": "Sätt {option} till enheten för din LDATA- eller LWHEM-elcentral (Inställningar → Enheter och tjänster → Enheter → din elcentral).",
+                "empty_title": "Inga dvärgbrytare hittades för den här elcentralen",
+                "check_devices": "Enhetslistan är tillgänglig för kortet",
+                "check_entities": "Entitetslistan är tillgänglig för kortet",
+                "check_device_id": "Konfigurerat enhets-ID",
+                "check_panel_found": "Elcentralens enhet hittad",
+                "check_total_devices": "Hittade enheter",
+                "check_linked_any": "Enheter kopplade till någon elcentral",
+                "check_linked_this": "Enheter kopplade till den här elcentralen",
+                "check_breakers": "Dvärgbrytare med en Status-entitet",
+                "empty_help": "Om elcentralens enhet inte hittas kopierar du enhets-ID:t från elcentralens egen enhetssida, inte från en dvärgbrytares. Om den hittas men inget är kopplat till den uppdaterar du LDATA-integrationen och startar om Home Assistant; det räcker inte att ladda om."
+            }
+        },
+        "editor": {
+            "card_name": "LDATA-kort för elcentral",
+            "card_description": "En realistisk, interaktiv vy av din Leviton-elcentral.",
+            "panel": "Elcentral",
+            "panel_help": "Välj elcentralen (LDATA- eller LWHEM-hubben), inte en dvärgbrytare. Länkar till undercentraler anges i YAML.",
+            "title": "Rubrik (valfritt)",
+            "show_power": "Visa watt och ampere i realtid",
+            "show_alarms": "Markera larm",
+            "toggle": "Slå av och på dvärgbrytare direkt i elcentralen",
+            "confirm": "Fråga innan något slås av eller på",
+            "show_panel_info": "Visa elcentralens mätvärden",
+            "appearance": "Belysning",
+            "appearance_auto": "Följ temat",
+            "appearance_light": "Ljus",
+            "appearance_dark": "Dämpad",
+            "main_breaker": "Huvudbrytarens märkström (valfritt)",
+            "main_breaker_help": "Leviton rapporterar inte huvudbrytaren. Lämna tomt för en elcentral utan huvudbrytare."
+        }
+    }
+}

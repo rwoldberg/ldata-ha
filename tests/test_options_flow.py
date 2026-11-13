@@ -7,13 +7,15 @@ import pytest
 from homeassistant.config_entries import SOURCE_USER, ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
-from custom_components.ldata.config_flow import OptionsFlow
+from custom_components.ldata.config_flow import STEP_USER_DATA_SCHEMA, OptionsFlow
 from custom_components.ldata.const import (
     DOMAIN,
     GAP_HANDLING,
     GAP_HANDLING_AVERAGE,
+    GAP_HANDLING_LABELS,
     GAP_THRESHOLD,
     HA_INFORM_RATE,
+    SHOW_SIDEBAR_PANEL,
     THREE_PHASE,
 )
 
@@ -149,3 +151,66 @@ async def test_options_save_keeps_hidden_gap_options() -> None:
     assert result["data"][GAP_THRESHOLD] == 12.0
     assert result["data"][THREE_PHASE] is True
     assert result["data"]["suppressed_import_uids"] == SUPPRESSED
+
+
+def _marker(form, key: str):
+    return next(m for m in form["data_schema"].schema if str(m) == key)
+
+
+async def test_sidebar_panel_is_offered_and_off_by_default() -> None:
+    """The sidebar page is opt-in: an untouched form saves it as off."""
+    entry = _entry(_stored_options())
+    flow = _flow(entry)
+
+    form = await flow.async_step_init()
+    assert _marker(form, SHOW_SIDEBAR_PANEL).default() is False
+
+    result = await flow.async_step_init(form["data_schema"]({}))
+    assert result["data"][SHOW_SIDEBAR_PANEL] is False
+
+
+async def test_sidebar_panel_option_shows_what_is_stored() -> None:
+    """The form starts from the stored option, else from the choice made at setup."""
+    stored = _entry({**_stored_options(), SHOW_SIDEBAR_PANEL: True})
+    assert _marker(await _flow(stored).async_step_init(), SHOW_SIDEBAR_PANEL).default() is True
+
+    at_setup = _entry(_stored_options())
+    object.__setattr__(at_setup, "data", MappingProxyType({**at_setup.data, SHOW_SIDEBAR_PANEL: True}))
+    assert _marker(await _flow(at_setup).async_step_init(), SHOW_SIDEBAR_PANEL).default() is True
+
+    turned_off = _entry({**_stored_options(), SHOW_SIDEBAR_PANEL: False})
+    object.__setattr__(turned_off, "data", MappingProxyType({**turned_off.data, SHOW_SIDEBAR_PANEL: True}))
+    assert _marker(await _flow(turned_off).async_step_init(), SHOW_SIDEBAR_PANEL).default() is False
+
+
+async def test_sidebar_panel_can_be_turned_on() -> None:
+    entry = _entry(_stored_options())
+    flow = _flow(entry)
+
+    form = await flow.async_step_init()
+    result = await flow.async_step_init(form["data_schema"]({SHOW_SIDEBAR_PANEL: True}))
+
+    assert result["data"][SHOW_SIDEBAR_PANEL] is True
+    # ... without losing what the form does not show.
+    assert result["data"]["suppressed_import_uids"] == SUPPRESSED
+
+
+async def test_setup_form_offers_the_sidebar_panel_off_by_default() -> None:
+    filled = STEP_USER_DATA_SCHEMA(
+        {
+            CONF_USERNAME: "user@example.com",
+            CONF_PASSWORD: "secret",
+            THREE_PHASE: False,
+            "allow_breaker_control": False,
+        }
+    )
+    assert filled[SHOW_SIDEBAR_PANEL] is False
+
+
+async def test_gap_handling_choices_can_be_translated() -> None:
+    """The dropdown names its translation key and keeps English as the fallback."""
+    form = await _flow(_entry(_stored_options())).async_step_init()
+    config = form["data_schema"].schema[_marker(form, GAP_HANDLING)].config
+
+    assert config["translation_key"] == GAP_HANDLING
+    assert {option["value"]: option["label"] for option in config["options"]} == GAP_HANDLING_LABELS

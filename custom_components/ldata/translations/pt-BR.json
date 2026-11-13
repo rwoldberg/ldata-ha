@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "A conta já está configurada",
+            "reauth_successful": "A reautenticação foi bem-sucedida"
+        },
+        "error": {
+            "cannot_connect": "Falha ao conectar",
+            "invalid_auth": "Autenticação inválida",
+            "invalid_2fa": "Código de dois fatores inválido. Tente novamente.",
+            "no_residence_selected": "Selecione pelo menos uma residência para continuar",
+            "unknown": "Erro inesperado"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Usuário do my.leviton.com",
+                    "password": "Senha do my.leviton.com",
+                    "three_phase": "Rede trifásica 120/208V (apartamento/condomínio)",
+                    "allow_breaker_control": "Permitir controle dos disjuntores",
+                    "allow_led_blink": "Permitir identificação",
+                    "enable_decora": "Habilitar dispositivos Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Mostrar o quadro de distribuição na barra lateral"
+                },
+                "title": "Configurar o LDATA"
+            },
+            "2fa": {
+                "title": "Autenticação de dois fatores",
+                "description": "É necessário um código de autenticação de dois fatores para {username}. Verifique seu aplicativo autenticador ou seu e-mail e insira o código abaixo.",
+                "data": {
+                    "2fa_code": "Código de autenticação"
+                }
+            },
+            "residence": {
+                "title": "Selecionar residência(s)",
+                "description": "Sua conta tem acesso a mais de uma residência. Selecione qual(is) deseja configurar — cada residência escolhida se torna uma entrada própria da integração LDATA, mantendo os quadros e disjuntores de cada uma bem separados.",
+                "data": {
+                    "residences": "Residências"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opções do Leviton LDATA",
+                "data": {
+                    "three_phase": "Rede trifásica 120/208V (apartamento/condomínio)",
+                    "allow_breaker_control": "Permitir controle dos disjuntores",
+                    "allow_led_blink": "Permitir identificação",
+                    "enable_decora": "Habilitar dispositivos Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Mostrar o quadro de distribuição na barra lateral",
+                    "gap_handling": "Tratamento de lacunas de dados (somente firmware antigo)",
+                    "gap_threshold": "Limite de lacuna (min)",
+                    "ha_inform_rate": "Intervalo de atualização do HA (segundos)",
+                    "log_warnings": "Registrar erros gerais da integração",
+                    "log_data_warnings": "Registrar avisos de valores de dados (picos/reinícios)",
+                    "log_all_raw": "Registrar a string bruta do WebSocket",
+                    "log_parsed_data": "Registrar todos os dados analisados",
+                    "enable_specific_logging": "Habilitar o registro de campos específicos",
+                    "log_fields": "Campos a registrar"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Com que frequência os sensores são atualizados no Home Assistant (2-600 segundos). Valores menores = resposta mais rápida, porém maior carga no sistema e mais gravações no banco de dados.",
+                    "three_phase": "Habilite somente se a sua rede elétrica for trifásica de 120/208V (comum em apartamentos e condomínios com transformadores compartilhados da concessionária). Nesse modo, as tensões dos disjuntores bipolares são multiplicadas por √3/2 (~0.866) para informar a tensão correta de 208V entre fases, em vez do valor incorreto de 240V. NÃO habilite para a rede elétrica residencial monofásica padrão de 120/240V.",
+                    "allow_breaker_control": "Quando habilitado, o HA cria entidades de interruptor que permitem desarmar/rearmar os disjuntores. Quando desabilitado, os disjuntores são tratados apenas como sensores.",
+                    "allow_led_blink": "Quando habilitado, o HA cria um interruptor por disjuntor para fazer o LED dele piscar, permitindo a identificação física. Quando desabilitado, nenhuma entidade de controle de LED é criada. Independe de “Permitir controle dos disjuntores”.",
+                    "enable_decora": "Quando habilitado, o LDATA também descobre e cria entidades para interruptores, dimmers, ventiladores, tomadas e GFCIs Decora Smart Wi-Fi da sua conta. Deixe desabilitado se você não tiver nenhum — isso evita chamadas extras à API a cada atualização.",
+                    "show_sidebar_panel": "Adiciona à barra lateral do Home Assistant um item que abre uma visualização interativa, em página inteira, do seu quadro de distribuição. Se você tiver mais de uma entrada LDATA, a mesma página mostra os quadros de todas as entradas em que esta opção estiver ativada.",
+                    "gap_handling": "Alternativa para firmware antigo sem contadores de energia em hardware. Define como os sensores de energia diária dos disjuntores tratam as lacunas quando nenhum dado é recebido. Ignorar: o mais seguro. Extrapolar: presume a última potência conhecida. Média: meio-termo. Quadros com firmware 2.0+ usam contadores de hardware e ignoram esta configuração.",
+                    "gap_threshold": "Tempo sem dados até que o tratamento de lacunas seja ativado (1-30 minutos). Aplica-se apenas ao cálculo alternativo potência×tempo em firmware antigo.",
+                    "log_warnings": "Registrar falhas da integração ou erros web.",
+                    "log_data_warnings": "Registrar avisos de inconsistências nos dados da Leviton (picos/reinícios).",
+                    "log_all_raw": "Registrar a string bruta do WebSocket exatamente como recebida da Leviton. Aviso: a saída não é mascarada e conterá tokens de autenticação e IDs de dispositivos. Desabilite quando não estiver depurando ativamente.",
+                    "log_parsed_data": "Registrar todos os campos de disjuntores e quadros após a análise de cada atualização WebSocket ou REST. Útil para conferir valores sem habilitar o registro bruto do WebSocket.",
+                    "enable_specific_logging": "Registrar qualquer campo especificado. Os nomes dos campos podem ser encontrados habilitando brevemente “Registrar todos os dados analisados”.",
+                    "log_fields": "Para encontrar os nomes dos campos, habilite “Registrar todos os dados analisados” e consulte os logs do Home Assistant. Insira-os acima, separados por vírgulas."
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Ignorar — não acumular energia durante as lacunas",
+                "extrapolate": "Extrapolar — presumir que a última potência conhecida se manteve",
+                "average": "Média — usar a média entre a última potência e a potência na retomada"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Redefinir a referência do sensor de energia",
+            "description": "Redefine um sensor de energia LDATA travado. Consulte o log do Home Assistant para ver o valor atual antes e depois da redefinição. Para sensores de total acumulado (consumo/importação), o sensor aceitará a próxima leitura da API. Para sensores diários, as referências são apagadas e o sensor se restabelece a partir dos valores atuais da API.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entidade",
+                    "description": "O sensor de energia LDATA a ser redefinido."
+                },
+                "value": {
+                    "name": "Novo valor em kWh (opcional)",
+                    "description": "Força um valor específico em kWh em vez de usar a leitura atual da API. Deixe em branco para aceitar o que a API informar na próxima atualização."
+                },
+                "baseline": {
+                    "name": "Referência de hardware em kWh (opcional)",
+                    "description": "Define manualmente a referência bruta do contador de hardware usada nos cálculos de variação dos sensores diários."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Redefinir todos os sensores de energia do quadro",
+            "description": "Redefine todos os sensores de energia diários e de total acumulado de um quadro WHEM em uma única operação. Use esta ação após uma restauração de fábrica do quadro, quando todos os contadores de energia de hardware voltam a zero ao mesmo tempo. Todas as referências dos sensores diários são apagadas (os totais diários recomeçam do 0) e todas as travas dos sensores de total acumulado são liberadas (cada um aceitará a próxima leitura da API incondicionalmente). Selecione qualquer dispositivo que pertença ao quadro — o próprio quadro, um disjuntor ou um CT. Consulte o log do Home Assistant para ver um resumo da redefinição por sensor.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo do quadro",
+                    "description": "Qualquer dispositivo pertencente ao quadro WHEM — o quadro, um disjuntor ou um CT. Todos os sensores de energia do quadro identificado serão redefinidos."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Quadro de distribuição",
+            "empty_title": "Nenhum quadro de distribuição para mostrar",
+            "empty_body": "Esta integração ainda não encontrou nenhum quadro LDATA ou LWHEM. Ela pode ainda estar iniciando ou pode não estar conseguindo se comunicar com a Leviton."
+        },
+        "card": {
+            "name": {
+                "panel": "Quadro",
+                "breaker": "Disjuntor",
+                "unmonitored_breaker": "Disjuntor não monitorado",
+                "sub_panel": "Quadro secundário"
+            },
+            "state": {
+                "on": "Ligado",
+                "off": "Desligado",
+                "off_remote": "Desligado (remoto)",
+                "tripped": "Desarmado",
+                "unavailable": "Indisponível",
+                "unknown": "Desconhecido",
+                "switching": "Comutando…",
+                "switching_on": "Ligando…",
+                "switching_off": "Desligando…",
+                "not_monitored": "Não monitorado",
+                "switch_failed": "Falha ao comutar"
+            },
+            "alarm": {
+                "over_current": "Sobrecorrente",
+                "over_voltage": "Sobretensão",
+                "under_voltage": "Subtensão"
+            },
+            "raw": {
+                "manualon": "Ligado manualmente",
+                "manualoff": "Desligado manualmente",
+                "remoteon": "Ligado remotamente",
+                "remoteoff": "Desligado remotamente",
+                "tripped": "Desarmado",
+                "softwaretrip": "Desarme por software",
+                "upstreamoff": "Sem alimentação a montante",
+                "notcommunicating": "Sem comunicação",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Carga do quadro",
+                "leg_1": "Fase 1",
+                "leg_2": "Fase 2",
+                "frequency": "Frequência",
+                "today": "Hoje",
+                "today_import": "Importação hoje",
+                "cloud": "Nuvem",
+                "wifi": "Wi-Fi",
+                "update": "Atualização",
+                "cloud_connected": "Conectado à nuvem da Leviton",
+                "cloud_offline": "Quadro offline",
+                "cloud_unknown": "Status da nuvem desconhecido",
+                "wifi_signal": "Sinal Wi-Fi: {dbm} dBm",
+                "wifi_unknown": "Sinal Wi-Fi desconhecido",
+                "update_available": "Atualização de firmware disponível (instale pelo aplicativo My Leviton)",
+                "update_current": "Firmware atualizado",
+                "main": "Geral",
+                "main_breaker": "Disjuntor geral",
+                "main_breaker_dead": "Disjuntor geral (sem tensão em nenhuma das fases)"
+            },
+            "label": {
+                "circuit": "Circuito {position}",
+                "circuits": "Circuitos {first} e {second}",
+                "amp_rating": "{amps} amperes",
+                "feeds_sub_panel": "Alimenta um quadro secundário",
+                "feeds": "Alimenta {name}",
+                "show_details": "Mostrar detalhes",
+                "open_sub_panel": "Abrir quadro secundário",
+                "open_sub_panel_dashboard": "Abrir o dashboard do quadro secundário",
+                "breaker_switch": "Disjuntor {name}"
+            },
+            "action": {
+                "turn_on": "Ligar",
+                "turn_off": "Desligar",
+                "turn_on_name": "Ligar {name}",
+                "turn_off_name": "Desligar {name}",
+                "cancel": "Cancelar",
+                "close": "Fechar",
+                "got_it": "Entendi",
+                "device_page": "Ver dispositivo"
+            },
+            "confirm": {
+                "turn_on_title": "Ligar {name}?",
+                "turn_off_title": "Desligar {name}?",
+                "turn_on_body": "Este circuito será energizado.",
+                "turn_off_body": "Tudo o que estiver ligado a este circuito ficará sem energia.",
+                "gen1_off_warning": "Este é um disjuntor Gen 1: depois de desligado, ele só pode ser religado manualmente, no quadro.",
+                "blocked_title": "Não é possível ligar {name} remotamente",
+                "blocked_body": "Este é um disjuntor inteligente Gen 1. Ele pode ser desligado pelo Home Assistant, mas precisa ser rearmado manualmente, no quadro."
+            },
+            "detail": {
+                "both_legs": "Ambas as fases",
+                "leg": "Fase {leg}",
+                "one_pole": "Monopolar",
+                "two_pole": "Bipolar",
+                "controls": "Controles",
+                "breaker_power": "Ligar/desligar disjuntor",
+                "power_on_hint": "Ligado: o circuito está energizado",
+                "power_tripped_hint": "Desarmado: verifique o circuito antes de rearmá-lo",
+                "power_remote_off_hint": "Desligado remotamente",
+                "gen1_note": "Disjuntor Gen 1: pode ser desligado remotamente, mas precisa ser rearmado manualmente, no quadro.",
+                "control_disabled": "O acionamento remoto está desativado. Ative {option} nas opções da integração LDATA para ligar e desligar disjuntores pelo Home Assistant.",
+                "option_breaker_control": "Permitir controle dos disjuntores",
+                "identify": "Identificar",
+                "identify_hint": "Pisca o LED deste disjuntor para você encontrá-lo no quadro",
+                "blink_led": "Piscar LED",
+                "identify_disabled": "Ative {option} nas opções da integração LDATA para piscar o LED de um disjuntor a partir daqui.",
+                "option_identify": "Permitir identificação",
+                "live": "Em tempo real",
+                "power": "Potência",
+                "current": "Corrente",
+                "load": "Carga",
+                "energy": "Energia",
+                "today": "Hoje",
+                "today_import": "Hoje, importação",
+                "lifetime": "Total acumulado",
+                "lifetime_import": "Total acumulado, importação",
+                "protection": "Proteção",
+                "operational_state": "Estado operacional",
+                "diagnostics": "Diagnóstico",
+                "breaker_state": "Estado do disjuntor",
+                "second_pole": "Segundo polo",
+                "remote_state": "Estado remoto",
+                "previous_state": "Estado anterior",
+                "change_reason": "Motivo da última alteração",
+                "circuit_type": "Tipo de circuito",
+                "critical": "Circuito crítico",
+                "locked": "Bloqueado",
+                "meter_chip": "Chip de medição",
+                "bluetooth": "Sinal Bluetooth",
+                "device": "Dispositivo",
+                "model": "Modelo",
+                "rating": "Corrente nominal",
+                "remote_reset": "Rearme remoto",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Número de série",
+                "status": "Status",
+                "other_entities": "Outras entidades",
+                "yes": "Sim",
+                "no": "Não",
+                "ok": "OK",
+                "fault": "Falha",
+                "alarm": "Alarme",
+                "not_set": "Não definido",
+                "remote_reset_yes": "Com suporte (Gen 2)",
+                "remote_reset_no": "Sem suporte (Gen 1)",
+                "standard_breaker": "Este é um disjuntor comum (não inteligente). A Leviton não informa estado nem leituras para ele, então não há nada para controlar ou monitorar aqui.",
+                "standard_breaker_hint": "Se ele alimentar um quadro secundário que tenha seu próprio hub LWHEM ou LDATA, vincule-os com {option} no YAML deste cartão para mostrar neste disjuntor a carga em tempo real desse quadro."
+            },
+            "setup": {
+                "choose_title": "Escolha seu quadro",
+                "choose_body": "Defina {option} como o dispositivo do seu quadro LDATA ou LWHEM (Configurações → Dispositivos & Serviços → Dispositivos → seu quadro).",
+                "empty_title": "Nenhum disjuntor encontrado para este quadro",
+                "check_devices": "Lista de dispositivos disponível para o cartão",
+                "check_entities": "Lista de entidades disponível para o cartão",
+                "check_device_id": "ID de dispositivo configurado",
+                "check_panel_found": "Dispositivo do quadro encontrado",
+                "check_total_devices": "Dispositivos detectados",
+                "check_linked_any": "Dispositivos vinculados a algum quadro",
+                "check_linked_this": "Dispositivos vinculados a este quadro",
+                "check_breakers": "Disjuntores com uma entidade Status",
+                "empty_help": "Se o dispositivo do quadro não for encontrado, copie o ID do dispositivo da página de dispositivo do próprio quadro, não da de um disjuntor. Se ele for encontrado, mas nada estiver vinculado a ele, atualize a integração LDATA e reinicie o Home Assistant; recarregar não é suficiente."
+            }
+        },
+        "editor": {
+            "card_name": "Cartão do quadro LDATA",
+            "card_description": "Uma visualização realista e interativa do seu quadro de distribuição Leviton.",
+            "panel": "Quadro",
+            "panel_help": "Escolha o quadro (o hub LDATA ou LWHEM), não um disjuntor. Os vínculos com quadros secundários são definidos em YAML.",
+            "title": "Título (opcional)",
+            "show_power": "Mostrar watts e amperes em tempo real",
+            "show_alarms": "Sinalizar alarmes",
+            "toggle": "Ligar e desligar disjuntores pelo quadro",
+            "confirm": "Perguntar antes de ligar ou desligar",
+            "show_panel_info": "Mostrar as leituras do quadro",
+            "appearance": "Iluminação",
+            "appearance_auto": "Seguir o tema",
+            "appearance_light": "Intensa",
+            "appearance_dark": "Atenuada",
+            "main_breaker": "Corrente nominal do disjuntor geral (opcional)",
+            "main_breaker_help": "A Leviton não informa o disjuntor geral. Deixe em branco se o quadro não tiver disjuntor geral."
+        }
+    }
+}

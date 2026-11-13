@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "La cuenta ya está configurada",
+            "reauth_successful": "La reautenticación fue exitosa"
+        },
+        "error": {
+            "cannot_connect": "No se pudo conectar",
+            "invalid_auth": "Autenticación inválida",
+            "invalid_2fa": "Código de dos factores inválido, inténtelo de nuevo",
+            "no_residence_selected": "Seleccione al menos una residencia para continuar",
+            "unknown": "Error inesperado"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Nombre de usuario de my.leviton.com",
+                    "password": "Contraseña de my.leviton.com",
+                    "three_phase": "Servicio trifásico de 120/208V (apartamento/condominio)",
+                    "allow_breaker_control": "Permitir el control de los interruptores",
+                    "allow_led_blink": "Permitir identificar",
+                    "enable_decora": "Habilitar los dispositivos Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Mostrar el centro de carga en la barra lateral"
+                },
+                "title": "Configurar LDATA"
+            },
+            "2fa": {
+                "title": "Autenticación de dos factores",
+                "description": "Se requiere un código de autenticación de dos factores para {username}. Revise su aplicación de autenticación o su correo electrónico e ingrese el código a continuación.",
+                "data": {
+                    "2fa_code": "Código de autenticación"
+                }
+            },
+            "residence": {
+                "title": "Seleccionar residencias",
+                "description": "Su cuenta tiene acceso a más de una residencia. Seleccione las que desea configurar: cada una se convertirá en una entrada independiente de la integración LDATA, de modo que sus centros de carga e interruptores queden bien separados.",
+                "data": {
+                    "residences": "Residencias"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opciones de Leviton LDATA",
+                "data": {
+                    "three_phase": "Servicio trifásico de 120/208V (apartamento/condominio)",
+                    "allow_breaker_control": "Permitir el control de los interruptores",
+                    "allow_led_blink": "Permitir identificar",
+                    "enable_decora": "Habilitar los dispositivos Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Mostrar el centro de carga en la barra lateral",
+                    "gap_handling": "Manejo de intervalos sin datos (solo firmware antiguo)",
+                    "gap_threshold": "Umbral de intervalo sin datos (min)",
+                    "ha_inform_rate": "Intervalo de actualización de HA (segundos)",
+                    "log_warnings": "Registrar errores generales de la integración",
+                    "log_data_warnings": "Registrar advertencias sobre los valores de los datos (picos/reinicios)",
+                    "log_all_raw": "Registrar la cadena WebSocket sin procesar",
+                    "log_parsed_data": "Registrar todos los datos analizados",
+                    "enable_specific_logging": "Habilitar el registro de campos específicos",
+                    "log_fields": "Campos que se registrarán"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Con qué frecuencia se actualizan los sensores en Home Assistant (2-600 segundos). Valores más bajos = respuesta más rápida, pero mayor carga del sistema y más escrituras en la base de datos.",
+                    "three_phase": "Habilite esta opción solo si su servicio es trifásico de 120/208V (común en apartamentos y condominios con transformadores compartidos de la compañía eléctrica). En este modo, los voltajes de los interruptores de dos polos se multiplican por √3/2 (~0.866) para reportar el voltaje correcto entre fases, 208V, en lugar del valor incorrecto de 240V. NO la habilite si tiene el servicio residencial monofásico estándar de 120/240V.",
+                    "allow_breaker_control": "Si está habilitada, HA creará entidades de tipo interruptor (switch) que le permiten disparar y restablecer los interruptores del centro de carga. Si está deshabilitada, los interruptores solo se tratan como sensores.",
+                    "allow_led_blink": "Si está habilitada, HA creará una entidad de tipo interruptor (switch) por cada interruptor del centro de carga para hacer parpadear su LED y poder identificarlo físicamente. Si está deshabilitada, no se crean entidades de control del LED. Es independiente de “Permitir el control de los interruptores”.",
+                    "enable_decora": "Si está habilitada, LDATA también detectará los interruptores de pared, atenuadores, ventiladores, tomacorrientes y GFCI Decora Smart Wi-Fi de su cuenta y creará sus entidades. Déjela deshabilitada si no tiene ninguno: así se evitan llamadas adicionales a la API en cada actualización.",
+                    "show_sidebar_panel": "Agrega a la barra lateral de Home Assistant un elemento que abre una vista interactiva a página completa de su centro de carga. Si tiene más de una entrada de LDATA, la misma página muestra los centros de carga de todas las entradas que tengan esta opción activada.",
+                    "gap_handling": "Respaldo para firmware antiguo sin contadores de energía por hardware. Define cómo manejan los sensores de energía diaria de los interruptores los intervalos en los que no se reciben datos. Omitir: lo más seguro. Extrapolar: se asume la última potencia conocida. Promediar: punto intermedio. Los centros de carga con firmware 2.0+ usan contadores por hardware e ignoran esta configuración.",
+                    "gap_threshold": "Tiempo sin datos tras el cual se activa el manejo de intervalos sin datos (1-30 minutos). Solo se aplica al cálculo de respaldo de potencia×tiempo en firmware antiguo.",
+                    "log_warnings": "Registra las fallas de la integración o los errores web.",
+                    "log_data_warnings": "Registra advertencias sobre inconsistencias en los datos de Leviton (picos/reinicios).",
+                    "log_all_raw": "Registra la cadena WebSocket sin procesar tal como se recibe de Leviton. Advertencia: la salida no oculta ningún dato y contendrá tokens de autenticación e ID de dispositivos. Deshabilite esta opción cuando no esté depurando activamente.",
+                    "log_parsed_data": "Registra todos los campos de los interruptores y del centro de carga después de analizar cada actualización de WebSocket o REST. Es útil para verificar valores sin habilitar el registro de WebSocket sin procesar.",
+                    "enable_specific_logging": "Registra los campos que usted especifique. Puede encontrar los nombres de los campos habilitando brevemente “Registrar todos los datos analizados”.",
+                    "log_fields": "Para encontrar los nombres de los campos, habilite “Registrar todos los datos analizados” y revise los registros de Home Assistant. Ingréselos arriba separados por comas."
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Omitir: no acumular energía durante los intervalos sin datos",
+                "extrapolate": "Extrapolar: asumir que se mantuvo la última potencia conocida",
+                "average": "Promediar: usar el promedio entre la última potencia y la de recuperación"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Restablecer el valor de referencia del sensor de energía",
+            "description": "Restablece un sensor de energía de LDATA que quedó atascado. Revise en el registro de Home Assistant el valor actual antes y después del restablecimiento. En los sensores de total acumulado (consumo/importación), el sensor aceptará la siguiente lectura de la API. En los sensores diarios, se borran los valores de referencia y el sensor se vuelve a establecer a partir de los valores actuales de la API.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entidad",
+                    "description": "El sensor de energía de LDATA que se va a restablecer."
+                },
+                "value": {
+                    "name": "Nuevo valor en kWh (opcional)",
+                    "description": "Fuerza un valor específico en kWh en lugar de usar la lectura actual de la API. Déjelo en blanco para aceptar lo que reporte la API en la siguiente actualización."
+                },
+                "baseline": {
+                    "name": "Valor de referencia del hardware en kWh (opcional)",
+                    "description": "Establece manualmente el valor de referencia del contador sin procesar del hardware que se usa para calcular las diferencias en los sensores diarios."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Restablecer todos los sensores de energía del centro de carga",
+            "description": "Restablece en una sola operación todos los sensores de energía diarios y de total acumulado de un centro de carga WHEM. Use esta acción después de restablecer el centro de carga a los valores de fábrica, cuando todos los contadores de energía del hardware vuelven a cero al mismo tiempo. Se borran los valores de referencia de todos los sensores diarios (los totales diarios vuelven a empezar desde 0) y se liberan las protecciones de todos los sensores de total acumulado (cada uno aceptará sin condiciones la siguiente lectura de la API). Seleccione cualquier dispositivo que pertenezca al centro de carga: el propio centro de carga, un interruptor o un CT. Revise en el registro de Home Assistant el resumen del restablecimiento de cada sensor.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo del centro de carga",
+                    "description": "Cualquier dispositivo que pertenezca al centro de carga WHEM: el centro de carga, un interruptor o un CT. Se restablecerán todos los sensores de energía del centro de carga correspondiente."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Centro de carga",
+            "empty_title": "No hay centros de carga para mostrar",
+            "empty_body": "Esta integración aún no ha encontrado ningún centro de carga LDATA o LWHEM. Es posible que todavía se esté iniciando o que no pueda conectarse con Leviton."
+        },
+        "card": {
+            "name": {
+                "panel": "Centro de carga",
+                "breaker": "Interruptor",
+                "unmonitored_breaker": "Interruptor sin monitoreo",
+                "sub_panel": "Subpanel"
+            },
+            "state": {
+                "on": "Encendido",
+                "off": "Apagado",
+                "off_remote": "Apagado (remoto)",
+                "tripped": "Disparado",
+                "unavailable": "No disponible",
+                "unknown": "Desconocido",
+                "switching": "Cambiando…",
+                "switching_on": "Encendiendo…",
+                "switching_off": "Apagando…",
+                "not_monitored": "Sin monitoreo",
+                "switch_failed": "No se pudo accionar"
+            },
+            "alarm": {
+                "over_current": "Sobrecorriente",
+                "over_voltage": "Sobrevoltaje",
+                "under_voltage": "Bajo voltaje"
+            },
+            "raw": {
+                "manualon": "Encendido manual",
+                "manualoff": "Apagado manual",
+                "remoteon": "Encendido remoto",
+                "remoteoff": "Apagado remoto",
+                "tripped": "Disparado",
+                "softwaretrip": "Disparo por software",
+                "upstreamoff": "Sin alimentación aguas arriba",
+                "notcommunicating": "Sin comunicación",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Carga total",
+                "leg_1": "Fase 1",
+                "leg_2": "Fase 2",
+                "frequency": "Frecuencia",
+                "today": "Hoy",
+                "today_import": "Importación hoy",
+                "cloud": "Nube",
+                "wifi": "Wi-Fi",
+                "update": "Firmware",
+                "cloud_connected": "Conectado a la nube de Leviton",
+                "cloud_offline": "Centro de carga sin conexión",
+                "cloud_unknown": "Estado de la nube desconocido",
+                "wifi_signal": "Señal Wi-Fi: {dbm} dBm",
+                "wifi_unknown": "Señal Wi-Fi desconocida",
+                "update_available": "Actualización de firmware disponible (instálela en la aplicación My Leviton)",
+                "update_current": "Firmware actualizado",
+                "main": "Principal",
+                "main_breaker": "Interruptor principal",
+                "main_breaker_dead": "Interruptor principal (sin voltaje en ninguna fase)"
+            },
+            "label": {
+                "circuit": "Circuito {position}",
+                "circuits": "Circuitos {first} y {second}",
+                "amp_rating": "{amps} amperes",
+                "feeds_sub_panel": "Alimenta un subpanel",
+                "feeds": "Alimenta a {name}",
+                "show_details": "Mostrar detalles",
+                "open_sub_panel": "Abrir subpanel",
+                "open_sub_panel_dashboard": "Abrir el tablero del subpanel",
+                "breaker_switch": "Interruptor {name}"
+            },
+            "action": {
+                "turn_on": "Encender",
+                "turn_off": "Apagar",
+                "turn_on_name": "Encender {name}",
+                "turn_off_name": "Apagar {name}",
+                "cancel": "Cancelar",
+                "close": "Cerrar",
+                "got_it": "Entendido",
+                "device_page": "Ver dispositivo"
+            },
+            "confirm": {
+                "turn_on_title": "¿Encender {name}?",
+                "turn_off_title": "¿Apagar {name}?",
+                "turn_on_body": "Este circuito quedará energizado.",
+                "turn_off_body": "Todo lo que esté conectado a este circuito se quedará sin energía.",
+                "gen1_off_warning": "Este interruptor es Gen 1: una vez apagado, solo se puede volver a encender manualmente en el centro de carga.",
+                "blocked_title": "{name} no se puede encender de forma remota",
+                "blocked_body": "Este es un interruptor inteligente Gen 1. Se puede apagar desde Home Assistant, pero hay que restablecerlo manualmente en el centro de carga."
+            },
+            "detail": {
+                "both_legs": "Ambas fases",
+                "leg": "Fase {leg}",
+                "one_pole": "1 polo",
+                "two_pole": "2 polos",
+                "controls": "Controles",
+                "breaker_power": "Encendido del interruptor",
+                "power_on_hint": "Encendido: el circuito tiene energía",
+                "power_tripped_hint": "Disparado: revise el circuito antes de restablecerlo",
+                "power_remote_off_hint": "Apagado de forma remota",
+                "gen1_note": "Interruptor Gen 1: se puede apagar de forma remota, pero hay que restablecerlo manualmente en el centro de carga.",
+                "control_disabled": "El control remoto está desactivado. Active {option} en las opciones de la integración LDATA para accionar los interruptores desde Home Assistant.",
+                "option_breaker_control": "Permitir el control de los interruptores",
+                "identify": "Identificar",
+                "identify_hint": "Haga parpadear el LED de este interruptor para ubicarlo en el centro de carga",
+                "blink_led": "Hacer parpadear el LED",
+                "identify_disabled": "Active {option} en las opciones de la integración LDATA para hacer parpadear desde aquí el LED de un interruptor.",
+                "option_identify": "Permitir identificar",
+                "live": "En tiempo real",
+                "power": "Potencia",
+                "current": "Corriente",
+                "load": "Carga",
+                "energy": "Energía",
+                "today": "Hoy",
+                "today_import": "Hoy, importación",
+                "lifetime": "Total acumulado",
+                "lifetime_import": "Total acumulado, importación",
+                "protection": "Protección",
+                "operational_state": "Estado operativo",
+                "diagnostics": "Diagnóstico",
+                "breaker_state": "Estado del interruptor",
+                "second_pole": "Segundo polo",
+                "remote_state": "Estado remoto",
+                "previous_state": "Estado anterior",
+                "change_reason": "Motivo del último cambio",
+                "circuit_type": "Tipo de circuito",
+                "critical": "Circuito crítico",
+                "locked": "Bloqueado",
+                "meter_chip": "Chip de medición",
+                "bluetooth": "Señal Bluetooth",
+                "device": "Dispositivo",
+                "model": "Modelo",
+                "rating": "Capacidad",
+                "remote_reset": "Restablecimiento remoto",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Número de serie",
+                "status": "Estado",
+                "other_entities": "Otras entidades",
+                "yes": "Sí",
+                "no": "No",
+                "ok": "OK",
+                "fault": "Falla",
+                "alarm": "Alarma",
+                "not_set": "Sin definir",
+                "remote_reset_yes": "Compatible (Gen 2)",
+                "remote_reset_no": "No compatible (Gen 1)",
+                "standard_breaker": "Este es un interruptor estándar (no inteligente). Leviton no reporta su estado ni sus lecturas, así que aquí no hay nada que controlar ni monitorear.",
+                "standard_breaker_hint": "Si alimenta un subpanel que tiene su propio hub LWHEM o LDATA, vincúlelos con {option} en el YAML de esta tarjeta para mostrar en este interruptor la carga en tiempo real de ese subpanel."
+            },
+            "setup": {
+                "choose_title": "Elija su centro de carga",
+                "choose_body": "Indique en {option} el dispositivo de su centro de carga LDATA o LWHEM (Configuración → Dispositivos y servicios → Dispositivos → su centro de carga).",
+                "empty_title": "No se encontraron interruptores para este centro de carga",
+                "check_devices": "Lista de dispositivos disponible para la tarjeta",
+                "check_entities": "Lista de entidades disponible para la tarjeta",
+                "check_device_id": "ID de dispositivo configurado",
+                "check_panel_found": "Dispositivo del centro de carga encontrado",
+                "check_total_devices": "Dispositivos detectados",
+                "check_linked_any": "Dispositivos vinculados a algún centro de carga",
+                "check_linked_this": "Dispositivos vinculados a este centro de carga",
+                "check_breakers": "Interruptores con una entidad “Status”",
+                "empty_help": "Si no se encuentra el dispositivo del centro de carga, copie el ID de dispositivo desde la página de dispositivo del propio centro de carga, no desde la de un interruptor. Si se encuentra pero no tiene nada vinculado, actualice la integración LDATA y reinicie Home Assistant; no basta con recargarla."
+            }
+        },
+        "editor": {
+            "card_name": "Tarjeta de centro de carga LDATA",
+            "card_description": "Una vista realista e interactiva de su centro de carga Leviton.",
+            "panel": "Centro de carga",
+            "panel_help": "Elija el centro de carga (el hub LDATA o LWHEM), no un interruptor. Los vínculos con subpaneles se definen en YAML.",
+            "title": "Título (opcional)",
+            "show_power": "Mostrar watts y amperes en tiempo real",
+            "show_alarms": "Resaltar las alarmas",
+            "toggle": "Accionar los interruptores desde el centro de carga",
+            "confirm": "Pedir confirmación antes de accionar",
+            "show_panel_info": "Mostrar las lecturas del centro de carga",
+            "appearance": "Iluminación",
+            "appearance_auto": "Según el tema",
+            "appearance_light": "Intensa",
+            "appearance_dark": "Tenue",
+            "main_breaker": "Capacidad del interruptor principal (opcional)",
+            "main_breaker_help": "Leviton no reporta el interruptor principal. Déjelo vacío si el centro de carga es de zapatas principales (sin interruptor principal)."
+        }
+    }
+}

@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Kontoen er allerede konfigurert",
+            "reauth_successful": "Autentisering på nytt var vellykket"
+        },
+        "error": {
+            "cannot_connect": "Tilkobling mislyktes",
+            "invalid_auth": "Ugyldig godkjenning",
+            "invalid_2fa": "Ugyldig tofaktorkode, prøv igjen",
+            "no_residence_selected": "Velg minst én bolig for å fortsette",
+            "unknown": "Uventet feil"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Brukernavn for my.leviton.com",
+                    "password": "Passord for my.leviton.com",
+                    "three_phase": "120/208V-forsyning fra trefasenett (leilighet/selveierleilighet)",
+                    "allow_breaker_control": "Tillat styring av automatsikringer",
+                    "allow_led_blink": "Tillat identifisering",
+                    "enable_decora": "Aktiver Decora Smart Wi-Fi-enheter",
+                    "show_sidebar_panel": "Vis sikringsskapet i sidepanelet"
+                },
+                "title": "Konfigurer LDATA"
+            },
+            "2fa": {
+                "title": "Tofaktorautentisering",
+                "description": "En tofaktorkode kreves for {username}. Sjekk autentiseringsappen eller e-posten din, og skriv inn koden nedenfor.",
+                "data": {
+                    "2fa_code": "Autentiseringskode"
+                }
+            },
+            "residence": {
+                "title": "Velg bolig(er)",
+                "description": "Kontoen din har tilgang til mer enn én bolig. Velg hvilke(n) du vil sette opp – hver bolig du velger, blir en egen, separat oppføring for LDATA-integrasjonen, slik at sikringsskapene og automatsikringene deres holdes tydelig atskilt.",
+                "data": {
+                    "residences": "Boliger"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Alternativer for Leviton LDATA",
+                "data": {
+                    "three_phase": "120/208V-forsyning fra trefasenett (leilighet/selveierleilighet)",
+                    "allow_breaker_control": "Tillat styring av automatsikringer",
+                    "allow_led_blink": "Tillat identifisering",
+                    "enable_decora": "Aktiver Decora Smart Wi-Fi-enheter",
+                    "show_sidebar_panel": "Vis sikringsskapet i sidepanelet",
+                    "gap_handling": "Håndtering av datahull (kun eldre fastvare)",
+                    "gap_threshold": "Terskel for datahull (minutter)",
+                    "ha_inform_rate": "Oppdateringsintervall for HA (sekunder)",
+                    "log_warnings": "Logg generelle integrasjonsfeil",
+                    "log_data_warnings": "Logg advarsler om dataverdier (topper/nullstillinger)",
+                    "log_all_raw": "Logg rå WebSocket-streng",
+                    "log_parsed_data": "Logg alle tolkede data",
+                    "enable_specific_logging": "Aktiver logging av bestemte felt",
+                    "log_fields": "Felt som skal logges"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Hvor ofte sensorene oppdateres i Home Assistant (2-600 sekunder). Lavere verdier = raskere respons, men høyere systembelastning og flere databaseskrivinger.",
+                    "three_phase": "Aktiver bare hvis strømforsyningen din er 120/208V trefase (vanlig i leiligheter og sameier med felles transformator). I denne modusen multipliseres spenningen for topolede automatsikringer med √3/2 (~0.866), slik at riktig linjespenning på 208V rapporteres i stedet for feilaktige 240V. IKKE aktiver dette ved vanlig enfaset 120/240V-boligforsyning.",
+                    "allow_breaker_control": "Når dette er aktivert, oppretter HA bryterentiteter som lar deg løse ut automatsikringer og slå dem på igjen. Når det er deaktivert, behandles automatsikringene bare som sensorer.",
+                    "allow_led_blink": "Når dette er aktivert, oppretter HA en bryterentitet per automatsikring som får LED-en til å blinke, slik at du kan finne den i sikringsskapet. Når det er deaktivert, opprettes ingen entiteter for LED-styring. Uavhengig av «Tillat styring av automatsikringer».",
+                    "enable_decora": "Når dette er aktivert, oppdager LDATA også Decora Smart Wi-Fi-brytere, dimmere, vifter, stikkontakter og GFCI-jordfeilbrytere på kontoen din og oppretter entiteter for dem. La det være deaktivert hvis du ikke har noen – da unngås ekstra API-kall ved hver oppdatering.",
+                    "show_sidebar_panel": "Legger til et element i sidepanelet i Home Assistant som åpner en interaktiv helsidevisning av sikringsskapet ditt. Hvis du har mer enn én LDATA-oppføring, viser den samme siden sikringsskapene for alle oppføringer der dette er slått på.",
+                    "gap_handling": "Reserveløsning for eldre fastvare uten energitellere i maskinvaren. Bestemmer hvordan automatsikringenes daglige energisensorer håndterer hull når ingen data mottas. Hopp over: tryggest. Ekstrapoler: anta sist kjente effekt. Gjennomsnitt: et kompromiss. Sikringsskap med fastvare 2.0+ bruker maskinvaretellere og ignorerer denne innstillingen.",
+                    "gap_threshold": "Tid uten data før håndteringen av datahull trer i kraft (1-30 minutter). Gjelder bare reserveberegningen effekt×tid på eldre fastvare.",
+                    "log_warnings": "Logg krasj i integrasjonen eller webfeil.",
+                    "log_data_warnings": "Logg advarsler om uoverensstemmelser i data fra Leviton (topper/nullstillinger).",
+                    "log_all_raw": "Logg den rå WebSocket-strengen slik den mottas fra Leviton. Advarsel: Utdataene sladdes ikke og inneholder autentiseringstokener og enhets-ID-er. Deaktiver når du ikke aktivt feilsøker.",
+                    "log_parsed_data": "Logg alle felt for automatsikringer og sikringsskap etter tolkingen av hver WebSocket- eller REST-oppdatering. Nyttig for å kontrollere verdier uten å aktivere logging av rå WebSocket-data.",
+                    "enable_specific_logging": "Logg et hvilket som helst angitt felt. Feltnavnene finner du ved å aktivere «Logg alle tolkede data» en kort stund.",
+                    "log_fields": "For å finne feltnavnene aktiverer du «Logg alle tolkede data» og ser i loggene til Home Assistant. Skriv dem inn ovenfor, atskilt med komma."
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Hopp over – ikke regn med energi under datahull",
+                "extrapolate": "Ekstrapoler – anta at den sist kjente effekten fortsatte",
+                "average": "Gjennomsnitt – bruk gjennomsnittet av effekten før og etter hullet"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Tilbakestill energisensorens basisverdi",
+            "description": "Tilbakestill en LDATA-energisensor som har hengt seg opp. Sjekk loggen i Home Assistant for gjeldende verdi før og etter tilbakestillingen. For sensorer med totalverdier (forbruk/import) godtar sensoren neste API-avlesning. For daglige sensorer slettes basisverdiene, og sensoren starter på nytt ut fra gjeldende API-verdier.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entitet",
+                    "description": "LDATA-energisensoren som skal tilbakestilles."
+                },
+                "value": {
+                    "name": "Ny verdi i kWh (valgfritt)",
+                    "description": "Tving frem en bestemt kWh-verdi i stedet for å bruke gjeldende API-avlesning. La feltet stå tomt for å godta det API-et rapporterer ved neste oppdatering."
+                },
+                "baseline": {
+                    "name": "Maskinvare-basisverdi i kWh (valgfritt)",
+                    "description": "Angi manuelt basisverdien for den rå maskinvaretelleren, som brukes til deltaberegninger for daglige sensorer."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Tilbakestill alle energisensorene i sikringsskapet",
+            "description": "Tilbakestill alle daglige og totale energisensorer for et WHEM-sikringsskap i én operasjon. Bruk dette etter en fabrikktilbakestilling av sikringsskapet, når alle energitellerne i maskinvaren faller til null samtidig. Basisverdiene for alle daglige sensorer slettes (dagstotalene starter på nytt fra 0), og alle sperrer på sensorene med totalverdier oppheves (hver sensor godtar neste API-avlesning uten forbehold). Velg en hvilken som helst enhet som tilhører sikringsskapet – selve sikringsskapet, en automatsikring eller en CT. Sjekk loggen i Home Assistant for et sammendrag av tilbakestillingen per sensor.",
+            "fields": {
+                "device_id": {
+                    "name": "Sikringsskapets enhet",
+                    "description": "En hvilken som helst enhet som tilhører WHEM-sikringsskapet – sikringsskapet, en automatsikring eller en CT. Alle energisensorene for sikringsskapet som enheten tilhører, tilbakestilles."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Sikringsskap",
+            "empty_title": "Ingen sikringsskap å vise",
+            "empty_body": "Integrasjonen har ikke funnet noe LDATA- eller LWHEM-sikringsskap ennå. Den holder kanskje fortsatt på å starte, eller så får den ikke kontakt med Leviton."
+        },
+        "card": {
+            "name": {
+                "panel": "Sikringsskap",
+                "breaker": "Automatsikring",
+                "unmonitored_breaker": "Uovervåket automatsikring",
+                "sub_panel": "Underfordeling"
+            },
+            "state": {
+                "on": "På",
+                "off": "Av",
+                "off_remote": "Av (fjernstyrt)",
+                "tripped": "Utløst",
+                "unavailable": "Utilgjengelig",
+                "unknown": "Ukjent",
+                "switching": "Kobler om…",
+                "switching_on": "Slår på…",
+                "switching_off": "Slår av…",
+                "not_monitored": "Overvåkes ikke",
+                "switch_failed": "Kunne ikke koble om"
+            },
+            "alarm": {
+                "over_current": "Overstrøm",
+                "over_voltage": "Overspenning",
+                "under_voltage": "Underspenning"
+            },
+            "raw": {
+                "manualon": "Manuelt på",
+                "manualoff": "Manuelt av",
+                "remoteon": "Fjernstyrt på",
+                "remoteoff": "Fjernstyrt av",
+                "tripped": "Utløst",
+                "softwaretrip": "Utløst av programvare",
+                "upstreamoff": "Ingen forsyning oppstrøms",
+                "notcommunicating": "Kommuniserer ikke",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Total belastning",
+                "leg_1": "Fase 1",
+                "leg_2": "Fase 2",
+                "frequency": "Frekvens",
+                "today": "I dag",
+                "today_import": "Import i dag",
+                "cloud": "Sky",
+                "wifi": "Wi-Fi",
+                "update": "Fastvare",
+                "cloud_connected": "Koblet til Leviton-skyen",
+                "cloud_offline": "Sikringsskapet er frakoblet",
+                "cloud_unknown": "Skystatus ukjent",
+                "wifi_signal": "Wi-Fi-signal: {dbm} dBm",
+                "wifi_unknown": "Wi-Fi-signal ukjent",
+                "update_available": "Fastvareoppdatering tilgjengelig (installer den i My Leviton-appen)",
+                "update_current": "Fastvaren er oppdatert",
+                "main": "Hoved",
+                "main_breaker": "Hovedsikring",
+                "main_breaker_dead": "Hovedsikring (ingen spenning på noen av fasene)"
+            },
+            "label": {
+                "circuit": "Kurs {position}",
+                "circuits": "Kurs {first} og {second}",
+                "amp_rating": "{amps} ampere",
+                "feeds_sub_panel": "Forsyner en underfordeling",
+                "feeds": "Forsyner {name}",
+                "show_details": "Vis detaljer",
+                "open_sub_panel": "Åpne underfordelingen",
+                "open_sub_panel_dashboard": "Åpne dashbordet for underfordelingen",
+                "breaker_switch": "Automatsikring {name}"
+            },
+            "action": {
+                "turn_on": "Slå på",
+                "turn_off": "Slå av",
+                "turn_on_name": "Slå på {name}",
+                "turn_off_name": "Slå av {name}",
+                "cancel": "Avbryt",
+                "close": "Lukk",
+                "got_it": "Skjønner",
+                "device_page": "Enhetsside"
+            },
+            "confirm": {
+                "turn_on_title": "Slå på {name}?",
+                "turn_off_title": "Slå av {name}?",
+                "turn_on_body": "Denne kursen blir spenningssatt.",
+                "turn_off_body": "Alt på denne kursen mister strømmen.",
+                "gen1_off_warning": "Dette er en Gen 1-automatsikring: Når den først er slått av, kan den bare slås på igjen for hånd i sikringsskapet.",
+                "blocked_title": "{name} kan ikke slås på via fjernstyring",
+                "blocked_body": "Dette er en smart Gen 1-automatsikring. Den kan slås av fra Home Assistant, men må slås på igjen for hånd i sikringsskapet."
+            },
+            "detail": {
+                "both_legs": "Begge faser",
+                "leg": "Fase {leg}",
+                "one_pole": "1-polet",
+                "two_pole": "2-polet",
+                "controls": "Betjening",
+                "breaker_power": "Automatsikring av/på",
+                "power_on_hint": "På: Kursen har strøm",
+                "power_tripped_hint": "Utløst: Sjekk kursen før du slår den på igjen",
+                "power_remote_off_hint": "Slått av via fjernstyring",
+                "gen1_note": "Gen 1-automatsikring: Den kan slås av via fjernstyring, men må slås på igjen for hånd i sikringsskapet.",
+                "control_disabled": "Fjernstyring er slått av. Aktiver {option} i alternativene for LDATA-integrasjonen for å slå automatsikringer av og på fra Home Assistant.",
+                "option_breaker_control": "Tillat styring av automatsikringer",
+                "identify": "Identifiser",
+                "identify_hint": "Få LED-en på automatsikringen til å blinke, slik at du finner den i sikringsskapet",
+                "blink_led": "Blink med LED-en",
+                "identify_disabled": "Aktiver {option} i alternativene for LDATA-integrasjonen for å få LED-en på en automatsikring til å blinke herfra.",
+                "option_identify": "Tillat identifisering",
+                "live": "Akkurat nå",
+                "power": "Effekt",
+                "current": "Strøm",
+                "load": "Belastning",
+                "energy": "Energi",
+                "today": "I dag",
+                "today_import": "I dag, import",
+                "lifetime": "Totalt",
+                "lifetime_import": "Totalt, import",
+                "protection": "Vern",
+                "operational_state": "Driftstilstand",
+                "diagnostics": "Diagnostikk",
+                "breaker_state": "Automatsikringens tilstand",
+                "second_pole": "Andre pol",
+                "remote_state": "Fjerntilstand",
+                "previous_state": "Forrige tilstand",
+                "change_reason": "Årsak til siste endring",
+                "circuit_type": "Kurstype",
+                "critical": "Kritisk kurs",
+                "locked": "Låst",
+                "meter_chip": "Målebrikke",
+                "bluetooth": "Bluetooth-signal",
+                "device": "Enhet",
+                "model": "Modell",
+                "rating": "Merkestrøm",
+                "remote_reset": "Fjerninnkobling",
+                "firmware": "Fastvare",
+                "hardware": "Maskinvare",
+                "serial": "Serienummer",
+                "status": "Status",
+                "other_entities": "Øvrige entiteter",
+                "yes": "Ja",
+                "no": "Nei",
+                "ok": "OK",
+                "fault": "Feil",
+                "alarm": "Alarm",
+                "not_set": "Ikke angitt",
+                "remote_reset_yes": "Støttes (Gen 2)",
+                "remote_reset_no": "Støttes ikke (Gen 1)",
+                "standard_breaker": "Dette er en vanlig automatsikring (ikke smart). Leviton rapporterer verken tilstand eller målinger for den, så det er ingenting å styre eller overvåke her.",
+                "standard_breaker_hint": "Hvis den forsyner en underfordeling med egen LWHEM- eller LDATA-hub, kan du koble dem sammen med {option} i kortets YAML for å vise underfordelingens gjeldende belastning på denne automatsikringen."
+            },
+            "setup": {
+                "choose_title": "Velg sikringsskapet ditt",
+                "choose_body": "Sett {option} til enheten for LDATA- eller LWHEM-sikringsskapet ditt (Innstillinger → Enheter og tjenester → Enheter → sikringsskapet ditt).",
+                "empty_title": "Fant ingen automatsikringer for dette sikringsskapet",
+                "check_devices": "Enhetslisten er tilgjengelig for kortet",
+                "check_entities": "Entitetslisten er tilgjengelig for kortet",
+                "check_device_id": "Konfigurert enhets-ID",
+                "check_panel_found": "Sikringsskapets enhet funnet",
+                "check_total_devices": "Enheter funnet",
+                "check_linked_any": "Enheter knyttet til et sikringsskap",
+                "check_linked_this": "Enheter knyttet til dette sikringsskapet",
+                "check_breakers": "Automatsikringer med en Status-entitet",
+                "empty_help": "Hvis sikringsskapets enhet ikke blir funnet, kopierer du enhets-ID-en fra sikringsskapets egen enhetsside, ikke fra enhetssiden til en automatsikring. Hvis den blir funnet, men ingenting er knyttet til den, oppdaterer du LDATA-integrasjonen og starter Home Assistant på nytt; det holder ikke å laste inn på nytt."
+            }
+        },
+        "editor": {
+            "card_name": "LDATA-kort for sikringsskap",
+            "card_description": "En realistisk, interaktiv visning av Leviton-sikringsskapet ditt.",
+            "panel": "Sikringsskap",
+            "panel_help": "Velg sikringsskapet (LDATA- eller LWHEM-huben), ikke en automatsikring. Koblinger til underfordelinger angis i YAML.",
+            "title": "Tittel (valgfritt)",
+            "show_power": "Vis watt og ampere i sanntid",
+            "show_alarms": "Marker alarmer",
+            "toggle": "Slå automatsikringer av og på direkte i sikringsskapet",
+            "confirm": "Spør før noe slås av eller på",
+            "show_panel_info": "Vis sikringsskapets målinger",
+            "appearance": "Belysning",
+            "appearance_auto": "Følg tema",
+            "appearance_light": "Lyst",
+            "appearance_dark": "Dempet",
+            "main_breaker": "Hovedsikringens merkestrøm (valgfritt)",
+            "main_breaker_help": "Leviton rapporterer ikke hovedsikringen. La feltet stå tomt for et sikringsskap uten hovedsikring."
+        }
+    }
+}

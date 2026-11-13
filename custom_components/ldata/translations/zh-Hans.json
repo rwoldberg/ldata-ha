@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "账户已配置",
+            "reauth_successful": "重新认证成功"
+        },
+        "error": {
+            "cannot_connect": "连接失败",
+            "invalid_auth": "身份验证无效",
+            "invalid_2fa": "双重认证代码无效，请重试",
+            "no_residence_selected": "请至少选择一处住宅才能继续",
+            "unknown": "意外错误"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "my.leviton.com 用户名",
+                    "password": "my.leviton.com 密码",
+                    "three_phase": "120/208V 三相供电（公寓/共管公寓）",
+                    "allow_breaker_control": "允许控制断路器",
+                    "allow_led_blink": "允许识别断路器",
+                    "enable_decora": "启用 Decora Smart Wi-Fi 设备",
+                    "show_sidebar_panel": "在侧边栏显示配电箱"
+                },
+                "title": "配置 LDATA"
+            },
+            "2fa": {
+                "title": "双重认证",
+                "description": "{username} 需要双重认证代码。请查看您的身份验证器应用或电子邮件，然后在下方输入代码。",
+                "data": {
+                    "2fa_code": "认证代码"
+                }
+            },
+            "residence": {
+                "title": "选择住宅",
+                "description": "您的账户可以访问多处住宅。请选择要设置的住宅——您选择的每一处都会成为一个独立的 LDATA 集成条目，各自的配电箱和断路器互不混杂。",
+                "data": {
+                    "residences": "住宅"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Leviton LDATA 选项",
+                "data": {
+                    "three_phase": "120/208V 三相供电（公寓/共管公寓）",
+                    "allow_breaker_control": "允许控制断路器",
+                    "allow_led_blink": "允许识别断路器",
+                    "enable_decora": "启用 Decora Smart Wi-Fi 设备",
+                    "show_sidebar_panel": "在侧边栏显示配电箱",
+                    "gap_handling": "数据中断处理（仅限旧版固件）",
+                    "gap_threshold": "数据中断阈值（分钟）",
+                    "ha_inform_rate": "HA 更新间隔（秒）",
+                    "log_warnings": "记录集成的一般错误",
+                    "log_data_warnings": "记录数据值警告（突增/重置）",
+                    "log_all_raw": "记录原始 WebSocket 字符串",
+                    "log_parsed_data": "记录所有已解析数据",
+                    "enable_specific_logging": "启用指定字段的日志记录",
+                    "log_fields": "要记录的字段"
+                },
+                "data_description": {
+                    "ha_inform_rate": "在 Home Assistant 中更新传感器的间隔（2-600 秒）。数值越小，响应越及时，但系统负载和数据库写入也越多。",
+                    "three_phase": "仅当您的供电为 120/208V 三相时才启用（常见于共用供电变压器的公寓和共管公寓）。在此模式下，双极断路器的电压会乘以 √3/2（约 0.866），以报告正确的 208V 线电压，而不是错误的 240V。标准的 120/240V 单相住宅供电切勿启用。",
+                    "allow_breaker_control": "启用后，HA 会创建开关实体，让您可以控制断路器跳闸或合闸。禁用后，断路器仅作为传感器使用。",
+                    "allow_led_blink": "启用后，HA 会为每个断路器创建一个开关，用于让其 LED 闪烁，方便在配电箱中找到对应的断路器。禁用后，不会创建任何 LED 控制实体。此选项与“允许控制断路器”相互独立。",
+                    "enable_decora": "启用后，LDATA 还会发现您账户中的 Decora Smart Wi-Fi 开关、调光器、风扇、插座和 GFCI，并为它们创建实体。如果您没有这类设备，请保持禁用，以免每次更新时产生额外的 API 调用。",
+                    "show_sidebar_panel": "在 Home Assistant 侧边栏中添加一个项目，用于打开配电箱的整页交互式视图。如果您有多个 LDATA 条目，同一页面会显示所有已开启此选项的条目的配电箱。",
+                    "gap_handling": "针对没有硬件电能计数器的旧版固件的备用方案。用于设置断路器的每日电能传感器在收不到数据时如何处理中断时段。跳过：最稳妥。外推：按最后已知的功率估算。平均：折中方案。固件为 2.0+ 的配电箱使用硬件计数器，会忽略此设置。",
+                    "gap_threshold": "持续多长时间没有数据后启动数据中断处理（1-30 分钟）。仅适用于旧版固件的“功率×时间”备用算法。",
+                    "log_warnings": "记录集成崩溃或网络错误。",
+                    "log_data_warnings": "记录 Leviton 数据不一致的警告（突增/重置）。",
+                    "log_all_raw": "记录从 Leviton 收到的原始 WebSocket 字符串。警告：输出内容未经脱敏，会包含认证令牌和设备 ID。不调试时请禁用。",
+                    "log_parsed_data": "每次解析 WebSocket 或 REST 更新后，记录断路器和配电箱的所有字段。无需启用原始 WebSocket 日志记录即可核对数值。",
+                    "enable_specific_logging": "记录指定的字段。短暂启用“记录所有已解析数据”即可查到字段名称。",
+                    "log_fields": "要查找字段名称，请启用“记录所有已解析数据”并查看 Home Assistant 日志。请在上方输入字段名称，以逗号分隔。"
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "跳过：数据中断期间不累计电能",
+                "extrapolate": "外推：假定中断期间保持最后已知的功率",
+                "average": "平均：取中断前与恢复后功率的平均值"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "重置电能传感器基线",
+            "description": "重置卡住的 LDATA 电能传感器。可在 Home Assistant 日志中查看重置前后的当前值。对于累计传感器（消耗/输入），传感器将接受下一次 API 读数。对于每日传感器，基线会被清除，传感器将根据当前的 API 值重新建立基线。",
+            "fields": {
+                "entity_id": {
+                    "name": "实体",
+                    "description": "要重置的 LDATA 电能传感器。"
+                },
+                "value": {
+                    "name": "新值（kWh，可选）",
+                    "description": "强制使用指定的 kWh 值，而不采用当前的 API 读数。留空则接受 API 在下次更新时报告的值。"
+                },
+                "baseline": {
+                    "name": "硬件基线（kWh，可选）",
+                    "description": "手动设置原始硬件计数器的基线，用于每日传感器的增量计算。"
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "重置配电箱的所有电能传感器",
+            "description": "一次性重置某个 WHEM 配电箱的所有每日和累计电能传感器。适用于配电箱恢复出厂设置之后，此时所有硬件电能计数器会同时归零。所有每日传感器的基线都会被清除（每日总量从 0 重新开始），所有累计传感器的保护也会解除（各传感器将无条件接受下一次 API 读数）。请选择属于该配电箱的任意设备：配电箱本身、某个断路器或某个 CT。可在 Home Assistant 日志中查看每个传感器的重置摘要。",
+            "fields": {
+                "device_id": {
+                    "name": "配电箱设备",
+                    "description": "属于该 WHEM 配电箱的任意设备：配电箱、断路器或 CT。所对应配电箱的所有电能传感器都将被重置。"
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "配电箱",
+            "empty_title": "没有可显示的配电箱",
+            "empty_body": "此集成尚未找到 LDATA 或 LWHEM 配电箱。它可能仍在启动，也可能无法连接到 Leviton。"
+        },
+        "card": {
+            "name": {
+                "panel": "配电箱",
+                "breaker": "断路器",
+                "unmonitored_breaker": "未监测的断路器",
+                "sub_panel": "分配电箱"
+            },
+            "state": {
+                "on": "已合闸",
+                "off": "已分闸",
+                "off_remote": "已远程分闸",
+                "tripped": "已跳闸",
+                "unavailable": "不可用",
+                "unknown": "未知",
+                "switching": "操作中…",
+                "switching_on": "合闸中…",
+                "switching_off": "分闸中…",
+                "not_monitored": "未监测",
+                "switch_failed": "操作失败"
+            },
+            "alarm": {
+                "over_current": "过流",
+                "over_voltage": "过压",
+                "under_voltage": "欠压"
+            },
+            "raw": {
+                "manualon": "手动合闸",
+                "manualoff": "手动分闸",
+                "remoteon": "远程合闸",
+                "remoteoff": "远程分闸",
+                "tripped": "已跳闸",
+                "softwaretrip": "软件跳闸",
+                "upstreamoff": "上级断电",
+                "notcommunicating": "通信中断",
+                "normal": "正常"
+            },
+            "meter": {
+                "panel_load": "配电箱负载",
+                "leg_1": "相线 1",
+                "leg_2": "相线 2",
+                "frequency": "频率",
+                "today": "今日",
+                "today_import": "今日输入",
+                "cloud": "云端",
+                "wifi": "Wi-Fi",
+                "update": "更新",
+                "cloud_connected": "已连接到 Leviton 云端",
+                "cloud_offline": "配电箱离线",
+                "cloud_unknown": "云端状态未知",
+                "wifi_signal": "Wi-Fi 信号：{dbm} dBm",
+                "wifi_unknown": "Wi-Fi 信号未知",
+                "update_available": "有可用的固件更新（请在 My Leviton 应用中安装）",
+                "update_current": "固件已是最新版本",
+                "main": "总开关",
+                "main_breaker": "总开关",
+                "main_breaker_dead": "总开关（两条相线均无电压）"
+            },
+            "label": {
+                "circuit": "回路 {position}",
+                "circuits": "回路 {first} 和 {second}",
+                "amp_rating": "{amps} 安培",
+                "feeds_sub_panel": "为分配电箱供电",
+                "feeds": "为“{name}”供电",
+                "show_details": "显示详情",
+                "open_sub_panel": "打开分配电箱",
+                "open_sub_panel_dashboard": "打开分配电箱仪表盘",
+                "breaker_switch": "{name} 断路器"
+            },
+            "action": {
+                "turn_on": "合闸",
+                "turn_off": "分闸",
+                "turn_on_name": "将“{name}”合闸",
+                "turn_off_name": "将“{name}”分闸",
+                "cancel": "取消",
+                "close": "关闭",
+                "got_it": "知道了",
+                "device_page": "设备页面"
+            },
+            "confirm": {
+                "turn_on_title": "要将“{name}”合闸吗？",
+                "turn_off_title": "要将“{name}”分闸吗？",
+                "turn_on_body": "该回路将通电。",
+                "turn_off_body": "该回路上的所有用电设备都将断电。",
+                "gen1_off_warning": "这是 Gen 1 断路器：分闸后，只能到配电箱前手动合闸。",
+                "blocked_title": "“{name}”无法远程合闸",
+                "blocked_body": "这是 Gen 1 智能断路器。可以通过 Home Assistant 将其分闸，但必须到配电箱前手动合闸。"
+            },
+            "detail": {
+                "both_legs": "两条相线",
+                "leg": "相线 {leg}",
+                "one_pole": "单极",
+                "two_pole": "双极",
+                "controls": "控制",
+                "breaker_power": "断路器电源",
+                "power_on_hint": "已合闸：正在供电",
+                "power_tripped_hint": "已跳闸：请先检查回路再合闸",
+                "power_remote_off_hint": "已远程分闸",
+                "gen1_note": "Gen 1 断路器：可以远程分闸，但必须到配电箱前手动合闸。",
+                "control_disabled": "远程控制已关闭。要通过 Home Assistant 控制断路器，请在 LDATA 集成选项中开启“{option}”。",
+                "option_breaker_control": "允许控制断路器",
+                "identify": "识别",
+                "identify_hint": "让此断路器的 LED 闪烁，以便在配电箱中找到它",
+                "blink_led": "LED 闪烁",
+                "identify_disabled": "要在此处让断路器的 LED 闪烁，请在 LDATA 集成选项中开启“{option}”。",
+                "option_identify": "允许识别断路器",
+                "live": "实时数据",
+                "power": "功率",
+                "current": "电流",
+                "load": "负载",
+                "energy": "电能",
+                "today": "今日",
+                "today_import": "今日输入",
+                "lifetime": "累计",
+                "lifetime_import": "累计输入",
+                "protection": "保护",
+                "operational_state": "运行状态",
+                "diagnostics": "诊断",
+                "breaker_state": "断路器状态",
+                "second_pole": "第二极",
+                "remote_state": "远程状态",
+                "previous_state": "上一状态",
+                "change_reason": "上次变更原因",
+                "circuit_type": "回路类型",
+                "critical": "关键回路",
+                "locked": "锁定",
+                "meter_chip": "计量芯片",
+                "bluetooth": "Bluetooth 信号",
+                "device": "设备",
+                "model": "型号",
+                "rating": "额定电流",
+                "remote_reset": "远程合闸",
+                "firmware": "固件",
+                "hardware": "硬件",
+                "serial": "序列号",
+                "status": "状态",
+                "other_entities": "其他实体",
+                "yes": "是",
+                "no": "否",
+                "ok": "正常",
+                "fault": "故障",
+                "alarm": "报警",
+                "not_set": "未设置",
+                "remote_reset_yes": "支持（Gen 2）",
+                "remote_reset_no": "不支持（Gen 1）",
+                "standard_breaker": "这是普通（非智能）断路器。Leviton 不会报告它的状态或读数，因此这里没有可控制或监测的内容。",
+                "standard_breaker_hint": "如果它为一个自带 LWHEM 或 LDATA 网关的分配电箱供电，可在此卡片的 YAML 中用 {option} 将两者关联，以便在此断路器上显示该分配电箱的实时负载。"
+            },
+            "setup": {
+                "choose_title": "选择您的配电箱",
+                "choose_body": "请将 {option} 设置为您的 LDATA 或 LWHEM 配电箱设备（设置 → 设备与服务 → 设备 → 您的配电箱）。",
+                "empty_title": "未找到此配电箱的断路器",
+                "check_devices": "卡片可获取设备列表",
+                "check_entities": "卡片可获取实体列表",
+                "check_device_id": "已配置的设备 ID",
+                "check_panel_found": "找到配电箱设备",
+                "check_total_devices": "发现的设备",
+                "check_linked_any": "已关联到任意配电箱的设备",
+                "check_linked_this": "已关联到此配电箱的设备",
+                "check_breakers": "带有 Status 实体的断路器",
+                "empty_help": "如果未找到配电箱设备，请从配电箱自身的设备页面复制设备 ID，而不是从断路器的设备页面复制。如果已找到配电箱设备，但没有任何设备与其关联，请更新 LDATA 集成并重新启动 Home Assistant；仅重新加载是不够的。"
+            }
+        },
+        "editor": {
+            "card_name": "LDATA 配电箱卡片",
+            "card_description": "以逼真、可交互的方式呈现您的 Leviton 配电箱。",
+            "panel": "配电箱",
+            "panel_help": "请选择配电箱（LDATA 或 LWHEM 网关），而不是断路器。分配电箱的关联需在 YAML 中设置。",
+            "title": "标题（可选）",
+            "show_power": "显示实时功率和电流",
+            "show_alarms": "标记报警",
+            "toggle": "在配电箱图上直接操作断路器",
+            "confirm": "操作前先确认",
+            "show_panel_info": "显示配电箱读数",
+            "appearance": "光线",
+            "appearance_auto": "跟随主题",
+            "appearance_light": "明亮",
+            "appearance_dark": "昏暗",
+            "main_breaker": "总开关额定电流（可选）",
+            "main_breaker_help": "Leviton 不会报告总开关的信息。如果配电箱没有总开关，请留空。"
+        }
+    }
+}

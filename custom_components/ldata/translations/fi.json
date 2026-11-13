@@ -1,0 +1,308 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Tili on jo määritetty",
+            "reauth_successful": "Uudelleentodennus onnistui"
+        },
+        "error": {
+            "cannot_connect": "Yhteyden muodostaminen epäonnistui",
+            "invalid_auth": "Virheellinen todennus",
+            "invalid_2fa": "Virheellinen kaksivaiheinen todennuskoodi, yritä uudelleen",
+            "no_residence_selected": "Valitse vähintään yksi koti jatkaaksesi",
+            "unknown": "Odottamaton virhe"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "my.leviton.com-käyttäjätunnus",
+                    "password": "my.leviton.com-salasana",
+                    "three_phase": "120/208V-sähköliittymä (kerrostaloasunto)",
+                    "allow_breaker_control": "Salli johdonsuojien ohjaus",
+                    "allow_led_blink": "Salli tunnistus",
+                    "enable_decora": "Ota Decora Smart Wi-Fi -laitteet käyttöön",
+                    "show_sidebar_panel": "Näytä sähkökeskus sivupalkissa"
+                },
+                "title": "Määritä LDATA"
+            },
+            "2fa": {
+                "title": "Kaksivaiheinen todennus",
+                "description": "Tili {username} vaatii kaksivaiheisen todennuskoodin. Tarkista koodi todennussovelluksestasi tai sähköpostistasi ja syötä se alle.",
+                "data": {
+                    "2fa_code": "Todennuskoodi"
+                }
+            },
+            "residence": {
+                "title": "Valitse kodit",
+                "description": "Tililläsi on pääsy useampaan kuin yhteen kotiin. Valitse määritettävät kodit – jokaisesta valitsemastasi tulee oma erillinen LDATA-integraation esiintymänsä, jolloin niiden sähkökeskukset ja johdonsuojat pysyvät selkeästi erillään.",
+                "data": {
+                    "residences": "Kodit"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Leviton LDATA -asetukset",
+                "data": {
+                    "three_phase": "120/208V-sähköliittymä (kerrostaloasunto)",
+                    "allow_breaker_control": "Salli johdonsuojien ohjaus",
+                    "allow_led_blink": "Salli tunnistus",
+                    "enable_decora": "Ota Decora Smart Wi-Fi -laitteet käyttöön",
+                    "show_sidebar_panel": "Näytä sähkökeskus sivupalkissa",
+                    "gap_handling": "Datakatkosten käsittely (vain vanhempi laiteohjelmisto)",
+                    "gap_threshold": "Datakatkoksen kynnys (min)",
+                    "ha_inform_rate": "HA-päivitysväli (sekuntia)",
+                    "log_warnings": "Kirjaa lokiin integraation yleiset virheet",
+                    "log_data_warnings": "Kirjaa lokiin data-arvojen varoitukset (piikit/nollautumiset)",
+                    "log_all_raw": "Kirjaa lokiin raaka WebSocket-merkkijono",
+                    "log_parsed_data": "Kirjaa lokiin kaikki jäsennetty data",
+                    "enable_specific_logging": "Ota käyttöön tiettyjen kenttien kirjaus",
+                    "log_fields": "Lokiin kirjattavat kentät"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Kuinka usein sensorit päivitetään Home Assistantissa (2-600 sekuntia). Pienempi arvo = nopeampi reagointi, mutta suurempi järjestelmän kuormitus ja enemmän tietokantakirjoituksia.",
+                    "three_phase": "Ota käyttöön vain, jos sähköliittymäsi on kolmivaiheinen 120/208V-liittymä (yleinen kerrostaloissa, joissa on yhteinen jakelumuuntaja). Tässä tilassa kaksinapaisten johdonsuojien jännitteet kerrotaan luvulla √3/2 (~0.866), jolloin pääjännitteeksi saadaan oikea 208V virheellisen 240V sijaan. ÄLÄ ota käyttöön tavallisessa yksivaiheisessa 120/240V-asuinliittymässä.",
+                    "allow_breaker_control": "Kun tämä on käytössä, HA luo kytkinentiteetit, joilla voit kytkeä johdonsuojia pois ja takaisin päälle. Kun tämä ei ole käytössä, johdonsuojia käsitellään vain sensoreina.",
+                    "allow_led_blink": "Kun tämä on käytössä, HA luo jokaiselle johdonsuojalle kytkimen, jolla sen LED-valon saa vilkkumaan, jotta johdonsuoja löytyy sähkökeskuksesta. Kun tämä ei ole käytössä, LED-ohjausentiteettejä ei luoda. Ei riipu asetuksesta ”Salli johdonsuojien ohjaus”.",
+                    "enable_decora": "Kun tämä on käytössä, LDATA etsii myös tililläsi olevat Decora Smart Wi-Fi -kytkimet, himmentimet, tuulettimet, pistorasiat ja GFCI-laitteet ja luo niille entiteetit. Jätä pois käytöstä, jos sinulla ei ole näitä laitteita – näin vältetään ylimääräiset API-kutsut jokaisella päivityksellä.",
+                    "show_sidebar_panel": "Lisää Home Assistantin sivupalkkiin kohdan, joka avaa sähkökeskuksesi koko sivun kokoisen, interaktiivisen näkymän. Jos sinulla on useampi LDATA-esiintymä, samalla sivulla näkyvät kaikkien niiden esiintymien sähkökeskukset, joissa tämä on käytössä.",
+                    "gap_handling": "Varamenetelmä vanhemmille laiteohjelmistoille, joissa ei ole laitteiston energialaskureita. Määrittää, miten johdonsuojien päiväkohtaiset energiasensorit käsittelevät katkokset, joiden aikana dataa ei saada. Ohita: turvallisin. Ekstrapoloi: olettaa viimeisimmän tunnetun tehon. Keskiarvo: kompromissi. Sähkökeskukset, joissa on laiteohjelmisto 2.0+, käyttävät laitteiston laskureita eivätkä huomioi tätä asetusta.",
+                    "gap_threshold": "Aika ilman dataa, jonka jälkeen datakatkosten käsittely aktivoituu (1-30 minuuttia). Koskee vain vanhemman laiteohjelmiston teho×aika-varalaskentaa.",
+                    "log_warnings": "Kirjaa lokiin integraation kaatumiset ja verkkovirheet.",
+                    "log_data_warnings": "Kirjaa lokiin varoitukset Levitonin datan epäjohdonmukaisuuksista (piikit/nollautumiset).",
+                    "log_all_raw": "Kirjaa lokiin Levitonilta vastaanotetun WebSocket-merkkijonon raakamuodossa. Varoitus: tulostetta ei ole sensuroitu, ja se sisältää todennustunnisteita ja laitetunnuksia. Poista käytöstä, kun et tee vianmääritystä.",
+                    "log_parsed_data": "Kirjaa lokiin kaikki johdonsuojien ja sähkökeskuksen kentät jokaisen WebSocket- tai REST-päivityksen jäsentämisen jälkeen. Hyödyllinen arvojen tarkistamiseen ilman WebSocket-raakadatan kirjausta.",
+                    "enable_specific_logging": "Kirjaa lokiin määritetyt kentät. Kenttien nimet saat selville ottamalla hetkeksi käyttöön asetuksen ”Kirjaa lokiin kaikki jäsennetty data”.",
+                    "log_fields": "Saat kenttien nimet selville ottamalla käyttöön asetuksen ”Kirjaa lokiin kaikki jäsennetty data” ja katsomalla Home Assistantin lokeja. Syötä nimet yllä olevaan kenttään pilkuilla erotettuina."
+                }
+            }
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Ohita – energiaa ei kerrytetä katkosten aikana",
+                "extrapolate": "Ekstrapoloi – oletetaan viimeisimmän tunnetun tehon jatkuneen",
+                "average": "Keskiarvo – käytetään viimeisen ja katkoksen jälkeisen tehon keskiarvoa"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Nollaa energiasensorin lähtötaso",
+            "description": "Nollaa jumiin jääneen LDATA-energiasensorin. Tarkista nykyinen arvo Home Assistantin lokista ennen nollausta ja sen jälkeen. Kokonaisenergian sensorit (kulutus/tuonti) hyväksyvät seuraavan API-lukeman. Päiväkohtaisten sensorien lähtötasot tyhjennetään, ja sensori muodostaa ne uudelleen nykyisistä API-arvoista.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entiteetti",
+                    "description": "Nollattava LDATA-energiasensori."
+                },
+                "value": {
+                    "name": "Uusi arvo, kWh (valinnainen)",
+                    "description": "Pakota tietty kWh-arvo nykyisen API-lukeman käyttämisen sijaan. Jätä tyhjäksi, jos haluat hyväksyä sen, mitä API ilmoittaa seuraavassa päivityksessä."
+                },
+                "baseline": {
+                    "name": "Laitteiston lähtötaso, kWh (valinnainen)",
+                    "description": "Aseta käsin laitteiston raakalaskurin lähtötaso, jota käytetään päiväkohtaisten sensorien muutoslaskennassa."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Nollaa sähkökeskuksen kaikki energiasensorit",
+            "description": "Nollaa WHEM-sähkökeskuksen kaikki päiväkohtaiset ja kokonaisenergian sensorit yhdellä kertaa. Käytä tätä sähkökeskuksen tehdasasetusten palautuksen jälkeen, kun kaikki laitteiston energialaskurit nollautuvat samanaikaisesti. Kaikkien päiväkohtaisten sensorien lähtötasot tyhjennetään (päivän summat alkavat uudelleen arvosta 0) ja kaikkien kokonaisenergian sensorien suojaukset vapautetaan (jokainen hyväksyy seuraavan API-lukeman ehdoitta). Valitse mikä tahansa sähkökeskukseen kuuluva laite – itse sähkökeskus, johdonsuoja tai CT. Katso sensorikohtainen nollausyhteenveto Home Assistantin lokista.",
+            "fields": {
+                "device_id": {
+                    "name": "Sähkökeskuksen laite",
+                    "description": "Mikä tahansa WHEM-sähkökeskukseen kuuluva laite – sähkökeskus, johdonsuoja tai CT. Kaikki näin tunnistetun sähkökeskuksen energiasensorit nollataan."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Sähkökeskus",
+            "empty_title": "Ei näytettäviä sähkökeskuksia",
+            "empty_body": "Integraatio ei ole vielä löytänyt LDATA- tai LWHEM-sähkökeskusta. Se voi olla vielä käynnistymässä, tai se ei saa yhteyttä Levitoniin."
+        },
+        "card": {
+            "name": {
+                "panel": "Sähkökeskus",
+                "breaker": "Johdonsuoja",
+                "unmonitored_breaker": "Valvomaton johdonsuoja",
+                "sub_panel": "Alakeskus"
+            },
+            "state": {
+                "on": "Päällä",
+                "off": "Pois",
+                "off_remote": "Pois (etänä)",
+                "tripped": "Lauennut",
+                "unavailable": "Ei saatavissa",
+                "unknown": "Tuntematon",
+                "switching": "Kytketään…",
+                "switching_on": "Kytketään päälle…",
+                "switching_off": "Kytketään pois…",
+                "not_monitored": "Ei valvota",
+                "switch_failed": "Kytkentä epäonnistui"
+            },
+            "alarm": {
+                "over_current": "Ylivirta",
+                "over_voltage": "Ylijännite",
+                "under_voltage": "Alijännite"
+            },
+            "raw": {
+                "manualon": "Päällä (käsin)",
+                "manualoff": "Pois (käsin)",
+                "remoteon": "Päällä (etänä)",
+                "remoteoff": "Pois (etänä)",
+                "tripped": "Lauennut",
+                "softwaretrip": "Laukaistu ohjelmallisesti",
+                "upstreamoff": "Ei syöttöä",
+                "notcommunicating": "Ei yhteyttä",
+                "normal": "Normaali"
+            },
+            "meter": {
+                "panel_load": "Keskuksen kuorma",
+                "leg_1": "Vaihe 1",
+                "leg_2": "Vaihe 2",
+                "frequency": "Taajuus",
+                "today": "Tänään",
+                "today_import": "Tuonti tänään",
+                "cloud": "Pilvi",
+                "wifi": "Wi-Fi",
+                "update": "Päivitys",
+                "cloud_connected": "Yhdistetty Levitonin pilvipalveluun",
+                "cloud_offline": "Sähkökeskus ei ole verkossa",
+                "cloud_unknown": "Pilviyhteyden tila tuntematon",
+                "wifi_signal": "Wi-Fi-signaali: {dbm} dBm",
+                "wifi_unknown": "Wi-Fi-signaali tuntematon",
+                "update_available": "Laiteohjelmistopäivitys saatavilla (asenna se My Leviton -sovelluksessa)",
+                "update_current": "Laiteohjelmisto on ajan tasalla",
+                "main": "Pääkytkin",
+                "main_breaker": "Pääkatkaisija",
+                "main_breaker_dead": "Pääkatkaisija (ei jännitettä kummassakaan vaiheessa)"
+            },
+            "label": {
+                "circuit": "Piiri {position}",
+                "circuits": "Piirit {first} ja {second}",
+                "amp_rating": "{amps} ampeeria",
+                "feeds_sub_panel": "Syöttää alakeskusta",
+                "feeds": "Syöttää alakeskusta {name}",
+                "show_details": "Näytä tiedot",
+                "open_sub_panel": "Avaa alakeskus",
+                "open_sub_panel_dashboard": "Avaa alakeskuksen kojelauta",
+                "breaker_switch": "Johdonsuoja {name}"
+            },
+            "action": {
+                "turn_on": "Kytke päälle",
+                "turn_off": "Kytke pois",
+                "turn_on_name": "Kytke {name} päälle",
+                "turn_off_name": "Kytke {name} pois päältä",
+                "cancel": "Peruuta",
+                "close": "Sulje",
+                "got_it": "Selvä",
+                "device_page": "Laitesivu"
+            },
+            "confirm": {
+                "turn_on_title": "Kytketäänkö {name} päälle?",
+                "turn_off_title": "Kytketäänkö {name} pois päältä?",
+                "turn_on_body": "Tämä piiri tulee jännitteiseksi.",
+                "turn_off_body": "Kaikki tähän piiriin kytketty jää ilman sähköä.",
+                "gen1_off_warning": "Tämä on Gen 1 -johdonsuoja: kun se on kytketty pois, sen saa takaisin päälle vain käsin sähkökeskuksesta.",
+                "blocked_title": "Johdonsuojaa {name} ei voi kytkeä päälle etänä",
+                "blocked_body": "Tämä on älykäs Gen 1 -johdonsuoja. Sen voi kytkeä pois Home Assistantista, mutta takaisin päälle se on kytkettävä käsin sähkökeskuksesta."
+            },
+            "detail": {
+                "both_legs": "Kumpikin vaihe",
+                "leg": "Vaihe {leg}",
+                "one_pole": "1-napainen",
+                "two_pole": "2-napainen",
+                "controls": "Ohjaus",
+                "breaker_power": "Johdonsuojan kytkentä",
+                "power_on_hint": "Päällä: virta kulkee",
+                "power_tripped_hint": "Lauennut: tarkista piiri ennen kuin kytket sen takaisin päälle",
+                "power_remote_off_hint": "Kytketty pois etänä",
+                "gen1_note": "Gen 1 -johdonsuoja: sen voi kytkeä pois etänä, mutta takaisin päälle se on kytkettävä käsin sähkökeskuksesta.",
+                "control_disabled": "Etäohjaus ei ole käytössä. Ota LDATA-integraation asetuksista käyttöön asetus {option}, jos haluat kytkeä johdonsuojia Home Assistantista.",
+                "option_breaker_control": "Salli johdonsuojien ohjaus",
+                "identify": "Tunnistus",
+                "identify_hint": "Vilkuta tämän johdonsuojan LED-valoa, jotta löydät sen sähkökeskuksesta",
+                "blink_led": "Vilkuta LED-valoa",
+                "identify_disabled": "Ota LDATA-integraation asetuksista käyttöön asetus {option}, jos haluat vilkuttaa johdonsuojan LED-valoa täältä.",
+                "option_identify": "Salli tunnistus",
+                "live": "Nyt",
+                "power": "Teho",
+                "current": "Virta",
+                "load": "Kuorma",
+                "energy": "Energia",
+                "today": "Tänään",
+                "today_import": "Tänään, tuonti",
+                "lifetime": "Yhteensä",
+                "lifetime_import": "Yhteensä, tuonti",
+                "protection": "Suojaus",
+                "operational_state": "Toimintatila",
+                "diagnostics": "Diagnostiikka",
+                "breaker_state": "Johdonsuojan tila",
+                "second_pole": "Toinen napa",
+                "remote_state": "Etäohjauksen tila",
+                "previous_state": "Edellinen tila",
+                "change_reason": "Viimeisimmän muutoksen syy",
+                "circuit_type": "Piirin tyyppi",
+                "critical": "Kriittinen piiri",
+                "locked": "Lukittu",
+                "meter_chip": "Mittaussiru",
+                "bluetooth": "Bluetooth-signaali",
+                "device": "Laite",
+                "model": "Malli",
+                "rating": "Nimellisvirta",
+                "remote_reset": "Päällekytkentä etänä",
+                "firmware": "Laiteohjelmisto",
+                "hardware": "Laitteisto",
+                "serial": "Sarjanumero",
+                "status": "Tila",
+                "other_entities": "Muut entiteetit",
+                "yes": "Kyllä",
+                "no": "Ei",
+                "ok": "OK",
+                "fault": "Vika",
+                "alarm": "Hälytys",
+                "not_set": "Ei asetettu",
+                "remote_reset_yes": "Tuettu (Gen 2)",
+                "remote_reset_no": "Ei tuettu (Gen 1)",
+                "standard_breaker": "Tämä on tavallinen johdonsuoja (ei älykäs). Leviton ei ilmoita sen tilaa eikä mittauslukemia, joten täällä ei ole mitään ohjattavaa tai valvottavaa.",
+                "standard_breaker_hint": "Jos se syöttää alakeskusta, jolla on oma LWHEM- tai LDATA-keskitin, yhdistä ne tämän kortin YAML-määrityksessä asetuksella {option}, niin alakeskuksen reaaliaikainen kuorma näkyy tässä johdonsuojassa."
+            },
+            "setup": {
+                "choose_title": "Valitse sähkökeskus",
+                "choose_body": "Aseta asetuksen {option} arvoksi LDATA- tai LWHEM-sähkökeskuksesi laite (Asetukset → Laitteet & palvelut → Laitteet → oma sähkökeskuksesi).",
+                "empty_title": "Tälle sähkökeskukselle ei löytynyt johdonsuojia",
+                "check_devices": "Laiteluettelo on kortin käytettävissä",
+                "check_entities": "Entiteettiluettelo on kortin käytettävissä",
+                "check_device_id": "Määritetty laitetunnus",
+                "check_panel_found": "Sähkökeskuksen laite löytyi",
+                "check_total_devices": "Havaitut laitteet",
+                "check_linked_any": "Johonkin sähkökeskukseen liitetyt laitteet",
+                "check_linked_this": "Tähän sähkökeskukseen liitetyt laitteet",
+                "check_breakers": "Johdonsuojat, joilla on tilaentiteetti",
+                "empty_help": "Jos sähkökeskuksen laitetta ei löydy, kopioi laitetunnus sähkökeskuksen omalta laitesivulta, ei johdonsuojan sivulta. Jos laite löytyy mutta siihen ei ole liitetty mitään, päivitä LDATA-integraatio ja käynnistä Home Assistant uudelleen; pelkkä uudelleenlataus ei riitä."
+            }
+        },
+        "editor": {
+            "card_name": "LDATA-sähkökeskuskortti",
+            "card_description": "Realistinen, interaktiivinen näkymä Leviton-sähkökeskuksestasi.",
+            "panel": "Sähkökeskus",
+            "panel_help": "Valitse sähkökeskus (LDATA- tai LWHEM-keskitin), ei johdonsuojaa. Alakeskusten linkit asetetaan YAML-määrityksessä.",
+            "title": "Otsikko (valinnainen)",
+            "show_power": "Näytä reaaliaikaiset watit ja ampeerit",
+            "show_alarms": "Korosta hälytykset",
+            "toggle": "Kytke johdonsuojia suoraan sähkökeskuksesta",
+            "confirm": "Kysy ennen kytkemistä",
+            "show_panel_info": "Näytä sähkökeskuksen lukemat",
+            "appearance": "Valaistus",
+            "appearance_auto": "Teeman mukaan",
+            "appearance_light": "Kirkas",
+            "appearance_dark": "Himmennetty",
+            "main_breaker": "Pääkatkaisijan nimellisvirta (valinnainen)",
+            "main_breaker_help": "Leviton ei ilmoita pääkatkaisijaa. Jätä tyhjäksi, jos sähkökeskuksessa ei ole pääkatkaisijaa."
+        }
+    }
+}

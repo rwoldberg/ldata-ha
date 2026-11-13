@@ -54,46 +54,54 @@ If you do not wish to use HACS, then please download the latest version from the
 
 ## Panel Card (Lovelace)
 
-A custom Lovelace card that renders a visual representation of a physical panel � breakers laid out in their real slot positions, live Watts/Amps, alarm highlighting, and an on/off switch per breaker (if 'Allow Control is enabled').
+A custom Lovelace card that shows your panel as it looks on the wall. It isn't a drawing: the card is assembled from ray-traced images of a Leviton load center and its breakers, modeled from Leviton's own product photos. You get the white cover with its embossed door surround, the dead front, and every breaker in its real space.
 
 Features:
-- Auto-discovers breakers for a panel via Home Assistant's device registry � no manual entity list to maintain.
-- Left/right column placement and slot numbering match the physical panel (odd positions left, even positions right).
-- 2-pole (240V) breakers render as a single double-height slot spanning both of their positions (e.g. `5/7`), not squeezed into one row.
-- Panel mounting orientation (normal vs. rotated 180�) is auto-detected from Leviton's own data � no config needed unless you want to force an orientation.
-- Optional live power/current readout and over-current/under-voltage alarm highlighting per slot.
-- When breaker control is enabled, each slot shows its own on/off switch � pressing it asks for confirmation before actually toggling. Clicking anywhere else on a slot opens that breaker's device page.
-- Attempting to turn on a Gen1 breaker (hardware that can be tripped remotely but not reset remotely) shows an informational dialog instead of a confirmation � Gen1 breakers must be reset by hand at the panel.
-- Optional linking of a "dumb" (non-smart) breaker to the downstream sub-panel it physically feeds � the linked slot shows that sub-panel's own live Watts/Amps and gets its own distinct color, instead of the plain grey "unmonitored" fill. Clicking it opens the sub-panel's own full breaker layout in a popup.
+- Auto-discovers breakers for a panel via Home Assistant's device registry — no manual entity list to maintain.
+- Sized to your panel: a 20-space panel shows 10 rows, a 42-space panel 21. Breakers keep their true proportions at any card width and the circuit labels take the rest. On a phone the labels drop the amp reading and rating (both still in the breaker's details) so circuit names stay readable.
+- Breakers show what the hardware shows, following Leviton's own handle and LED table: a green handle window when on, a white one with the handle switched over when turned off by hand, red with the handle centered when tripped. A breaker switched off remotely keeps its green handle and lights its "OFF" LED, as the real one does.
+- Left/right column placement and space numbering match the physical panel (odd positions left, even positions right). 2-pole (240V) breakers span both of their positions with the single handle where Leviton puts it, open spaces show filler plates, and non-smart breakers are shown as standard Leviton breakers.
+- Panel mounting orientation (normal vs. rotated 180°) is auto-detected from Leviton's own data — no config needed unless you want to force an orientation.
+- Each circuit is labeled beside the door with its name, live power and current. The line under a label fills to show how close the circuit runs to its rating (amber above 50%, red above 80%). Over-current, over-voltage, under-voltage and fault alarms turn the label red.
+- Click a breaker's rocker to switch it. The card asks for confirmation first and shows the breaker as switching until Leviton confirms the change. Needs **Allow Breaker Control** in the integration options.
+- Click a label, or anywhere else on a breaker, for its detail sheet: on/off control, Identify (Blink LED), live power, current and load, today's and lifetime energy, every alarm, the raw breaker state and last change reason, Bluetooth signal, model, firmware and serial number. Each row opens Home Assistant's own dialog (with history) for that entity, and **Device page** goes to the breaker's device.
+- Gen1 breakers can be tripped remotely but not reset remotely — trying to turn one on explains that instead of sending a command that would do nothing.
+- Above the door, the cover shows the panel's load, each leg's voltage and current, line frequency, today's energy and your CT clamps (e.g. Grid, Solar), with pilot lights for the cloud connection, Wi-Fi signal, and a firmware update when one is available.
+- Optional linking of a "dumb" (non-smart) breaker to the downstream sub-panel it physically feeds — the linked breaker shows that sub-panel's live Watts/Amps, and clicking it opens the sub-panel's own card in a popup.
+- Follows your theme: with a dark theme the panel is shown under dimmer lighting.
+- Speaks your language: the card's texts follow the language set in your Home Assistant profile (see [Languages](#languages)).
+- Can also be a page of its own in Home Assistant's sidebar, with no dashboard to set up (see [Sidebar page](#sidebar-page)).
 
 ### 1. Install the card file
 
-Nothing to do here for most setups � the integration serves the card directly from its own `custom_components/ldata/www/` folder and registers it as a Lovelace resource automatically, so there's no file to copy and no manual "Add Resource" step. Just make sure the integration is installed and Home Assistant has been **restarted** (not just reloaded) since � this registration happens once at startup.
+Nothing to do here for most setups — the integration serves the card directly from its own `custom_components/ldata/www/` folder and registers it as a Lovelace resource automatically, so there's no file to copy and no manual "Add Resource" step. Just make sure Home Assistant has been **restarted** (not just reloaded) after installing or updating the integration. The registration runs at startup, and after an update it points browsers at the new card, so no hard refresh is needed. The card's images are served from the same folder, so there is nothing else to install.
 
-If your dashboard is in legacy YAML mode (not the default UI/storage mode), auto-registration doesn't apply and you'll need to add the resource manually: URL `/ldata_static/ldata-panel-card.js`, type **JavaScript Module**.
-
-If the card isn't picking up an update after a new release, a hard browser refresh (Ctrl+Shift+R / Cmd+Shift+R) usually clears it; the underlying file is always current as soon as `custom_components/ldata` is updated and HA is restarted.
+If your dashboard is in legacy YAML mode (not the default UI/storage mode), auto-registration doesn't apply and you'll need to add the resource manually: URL `/ldata_static/ldata-panel-card.js`, type **JavaScript Module**. Use that exact URL rather than a copy of the file somewhere else, so the card can find its images next to it. After an update, a hard browser refresh (Ctrl+Shift+R / Cmd+Shift+R) picks up the new card.
 
 ### 2. Add the card to a dashboard
 
-1. Edit a dashboard, click **+ Add Card**, and choose **Manual** (or **Custom: LDATA Panel Card** if it appears in the picker).
-2. Use the YAML below, filling in `device_id` with your panel's device (find it under **Settings > Devices & Services > Devices**, click your LDATA/LWHEM panel � not a breaker � and copy the device ID from the page URL).
+1. Edit a dashboard, click **+ Add Card**, and choose **LDATA Panel Card**. It picks your panel automatically; if you have more than one, choose the panel in the card's editor, where the options below can also be set.
+2. Or choose **Manual** and use the YAML below, filling in `device_id` with your panel's device (find it under **Settings > Devices & Services > Devices**, click your LDATA/LWHEM panel — not a breaker — and copy the device ID from the page URL).
 
 ```yaml
 type: custom:ldata-panel-card
 device_id: <panel device id>
 title: "Main Panel"        # optional, defaults to the device's name
-show_power: true           # optional, show live Watts/Amps per slot
-show_alarms: true          # optional, highlight over-current/under-voltage alarms
-toggle: true                # optional, show an on/off switch on each slot when control is enabled
-# rotate_180: true          # optional override � only set this if auto-detected orientation is wrong
+show_power: true           # optional, live Watts/Amps on each circuit label
+show_alarms: true          # optional, flag over-current/over-voltage/under-voltage alarms
+toggle: true               # optional, let each breaker's rocker switch it (needs Allow Breaker Control)
+confirm: true              # optional, ask before switching a breaker
+show_panel_info: true      # optional, the panel's own readings above the door
+appearance: auto           # optional, auto (follow theme), light, or dark (dimmed lighting)
+# main_breaker: 200        # optional, show a main breaker with this rating (Leviton doesn't report it)
+# rotate_180: true         # optional override — only set this if auto-detected orientation is wrong
 ```
 
 If you have multiple panels, add one card per panel, each with its own `device_id`.
 
 ### Showing live CT (Grid/Solar) Watts and Amps above the panel card
 
-The panel card itself only shows breakers � for a live whole-panel reading, add standard Home Assistant cards above it using your CT clamp's own sensors. Each CT is its own device, named after its usage type (e.g. "Grid", "Solar") � find its Watts/Amps entity IDs under **Settings > Devices & Services > Devices**, click the CT device (linked under your panel), and copy them from its Sensors tab.
+The card already shows each CT clamp's live power above the door. If you'd also like those readings as their own tiles or trend graphs, add standard Home Assistant cards above the panel card using your CT clamp's own sensors. Each CT is its own device, named after its usage type (e.g. "Grid", "Solar") — find its Watts/Amps entity IDs under **Settings > Devices & Services > Devices**, click the CT device (linked under your panel), and copy them from its Sensors tab.
 
 ```yaml
 cards:
@@ -150,7 +158,7 @@ Or use `sensor` cards with `graph: line` if you'd rather see a trend line under 
 
 ### Doing the same for a nested/sub-panel (e.g. a panel 2)
 
-If you have a second physical panel (a sub-panel fed from the main one) that shows up as its own device under **Settings > Devices & Services** � separate from your main panel � the integration treats it exactly the same as the main panel: its own breakers, its own CT clamp(s) if it has any, and its own `device_id`. There's nothing "nested" about it structurally, so just repeat the exact same pattern with that panel's own `device_id` and its own CT entity IDs:
+If you have a second physical panel (a sub-panel fed from the main one) that shows up as its own device under **Settings > Devices & Services** — separate from your main panel — the integration treats it exactly the same as the main panel: its own breakers, its own CT clamp(s) if it has any, and its own `device_id`. There's nothing "nested" about it structurally, so just repeat the exact same pattern with that panel's own `device_id` and its own CT entity IDs:
 
 ```yaml
 cards:
@@ -167,7 +175,7 @@ cards:
     device_id: <main panel device id>
     title: "Main Panel"
 
-  # Panel 2 (sub-)panel � same pattern, its own device_id and CT entities
+  # Panel 2 (sub-)panel — same pattern, its own device_id and CT entities
   - type: horizontal-stack
     cards:
       - type: tile
@@ -181,37 +189,61 @@ cards:
     title: "Panel 2 Panel"
 ```
 
-If the sub-panel doesn't have its own CT clamp, it won't have a "Grid Power"-style entity of its own � in that case the closest equivalent is the Watts/Amps of whichever breaker on the main panel feeds power to it (every smart breaker has its own Watts/Amps sensors, same as any other breaker).
+If the sub-panel doesn't have its own CT clamp, it won't have a "Grid Power"-style entity of its own — in that case the closest equivalent is the Watts/Amps of whichever breaker on the main panel feeds power to it (every smart breaker has its own Watts/Amps sensors, same as any other breaker).
 
 ### Linking a "dumb" breaker to the sub-panel it feeds
 
-If a sub-panel is fed by a **"dumb" (non-smart) breaker** on the main panel � no monitoring data of its own, just a physical slot � the card has no way to know that breaker feeds another panel; Leviton's API doesn't report that relationship at all. You can tell the card about it by hand in the main panel's card config, and it'll show that sub-panel's own live Watts/Amps directly on the dumb breaker's slot, with a distinct blue fill so it reads at a glance as "feeds another panel" rather than "just unmonitored":
+If a sub-panel is fed by a **"dumb" (non-smart) breaker** on the main panel — no monitoring data of its own, just a physical slot — the card has no way to know that breaker feeds another panel; Leviton's API doesn't report that relationship at all. You can tell the card about it by hand in the main panel's card config, and it'll show that sub-panel's own live Watts/Amps on the dumb breaker's label, printed in blue with a "↳ sub-panel name" prefix so it reads at a glance as "feeds another panel" rather than "just unmonitored":
 
 ```yaml
 type: custom:ldata-panel-card
 device_id: <main panel device id>
 sub_panels:
-  - breaker_position: 9                    # the dumb breaker's slot number (the badge shown on its tile)
+  - breaker_position: 9                    # the dumb breaker's slot number (printed beside it on the panel)
     panel_device_id: <sub-panel device id>  # find under Settings > Devices & Services > Devices, same as device_id above
-    rating: 50                             # optional � see below
+    rating: 50                             # optional — see below
 ```
 
-Add one entry per dumb breaker you want linked � a single card can link more than one, e.g. if a panel has two dumb breakers each feeding a different sub-panel.
+Add one entry per dumb breaker you want linked — a single card can link more than one, e.g. if a panel has two dumb breakers each feeding a different sub-panel.
 
-Leviton's API never reports a rating for a dumb breaker (it's not a smart device, so there's no data on it at all) � if you know the breaker's own max amp rating (e.g. it's a 50A double-pole feeding the sub-panel), add `rating` and it shows up the same way a smart breaker's does, right before the Watts/Amps readout.
+Leviton's API never reports a rating for a dumb breaker (it's not a smart device, so there's no data on it at all) — if you know the breaker's own max amp rating (e.g. it's a 50A double-pole feeding the sub-panel), add `rating` and it shows on the label the same way a smart breaker's does.
 
-Clicking the linked slot (or its sub-panel name, which is its own clickable link) opens that sub-panel's own full breaker layout right there in a popup � a live, independent `ldata-panel-card` for the sub-panel's `device_id`, with nothing more to configure than what's already in the entry above. Close it with the ?, Escape, or by clicking outside it.
+Clicking the linked breaker opens that sub-panel's own full breaker layout right there in a popup — a live, independent `ldata-panel-card` for the sub-panel's `device_id`, with nothing more to configure than what's already in the entry above. Close it with ✕, Escape, or by clicking outside it.
 
-If you'd rather leave this card entirely and jump to a real dashboard view instead � say the sub-panel already has its own `ldata-panel-card` on some other dashboard � add `view_path` with the URL path to it (open that dashboard/view in your browser and copy the path after the domain, e.g. `/lovelace/DASHBOARD_NAME`) and it replaces the popup with a normal page navigation:
+If you'd rather leave this card entirely and jump to a real dashboard view instead — say the sub-panel already has its own `ldata-panel-card` on some other dashboard — add `view_path` with the URL path to it (open that dashboard/view in your browser and copy the path after the domain, e.g. `/lovelace/DASHBOARD_NAME`) and it replaces the popup with a normal page navigation:
 
 ```yaml
 sub_panels:
   - breaker_position: 9
     panel_device_id: <sub-panel device id>
-    view_path: /lovelace/DASHBOARD_NAME   # optional override � see above
+    view_path: /lovelace/DASHBOARD_NAME   # optional override — see above
 ```
 
-There's no registry mapping a device id to "the dashboard view showing its card" � a device can appear on any number of dashboards or none � so this can't be auto-detected; the popup is the default precisely because it needs nothing beyond `panel_device_id`, and `view_path` only takes effect once you set it explicitly.
+There's no registry mapping a device id to "the dashboard view showing its card" — a device can appear on any number of dashboards or none — so this can't be auto-detected; the popup is the default precisely because it needs nothing beyond `panel_device_id`, and `view_path` only takes effect once you set it explicitly.
+
+## Sidebar page
+
+The integration can add a **Load Center** item to Home Assistant's sidebar. It opens a full page with the panel card for every load center the integration has found: side by side on a wide screen, stacked on a phone. There is no dashboard to create and nothing to configure on the card.
+
+It is **off by default**. Turn it on with **Show the load center in the sidebar**, either when you first set the integration up or later under **Settings > Devices & Services > Leviton LDATA > Configure**. The item appears (or disappears) as soon as you save; no restart is needed.
+
+- The page lists the load centers by name. Breakers are switched, and their details opened, exactly as on the dashboard card.
+- If you have more than one LDATA entry (one per residence), there is still a single sidebar item. It shows the load centers of every entry that has the option turned on.
+- The item is there as soon as Home Assistant starts and stays while the integration reloads or cannot reach Leviton, so a wall tablet left on the page stays on it. Until the integration has data, the breakers show as unavailable.
+- The page uses the card's defaults. For the card's options (a main breaker, sub-panel links, lighting, and so on), add the card to a dashboard instead; both can be used at the same time.
+- The item's name in the sidebar is in the language Home Assistant itself is set to (**Settings > System > General**). Home Assistant shows one name to all users, so it does not follow each user's own language the way the page does. You can hide or move the item like any other by editing the sidebar.
+
+## Languages
+
+The panel card, the sidebar page, the setup and options dialogs, and the integration's two actions are translated into:
+
+Chinese (Simplified and Traditional), Czech, Danish, Dutch, English, Finnish, French, German, Hungarian, Italian, Norwegian Bokmål, Polish, Portuguese (Portugal and Brazil), Romanian, Russian, Spanish (Spain and Latin America), Swedish and Ukrainian.
+
+These are the languages of the countries where Home Assistant is used most, covering roughly 94% of installations that report to [Home Assistant Analytics](https://analytics.home-assistant.io/). Everything follows the language in your Home Assistant profile; any other language gets English.
+
+Entity names (for example "Kitchen Watts") stay in English. The panel card finds each breaker's entities by those names, so translating them would break existing dashboards and automations.
+
+To add or correct a language, copy `custom_components/ldata/translations/en.json` to `<language code>.json` (Home Assistant's own code, such as `ja` or `pt-BR`), translate the values and leave the keys and the `{placeholders}` as they are. Add the code to `LANGUAGES` in `tests/test_translations.py`; `python3 -m pytest tests/test_translations.py` then checks the file.
 
 ## Decora Smart Wi-Fi Support
 
@@ -318,6 +350,9 @@ Addon is auto reloading on submit.
 
 - Enable Decora Smart Wi-Fi devices (default off)
   - Discovers and creates entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account (a separate Leviton product line from the LDATA/WHEM breaker panels). Leave off if you don't have any � it avoids extra API calls on every update. Can be set at initial setup or toggled later here.
+
+- Show the load center in the sidebar (default off)
+  - Adds a sidebar item that opens a full-page, interactive view of your load center(s). See [Sidebar page](#sidebar-page).
 
 - Log General Integration Errors
   - Integration crashes or web errors
