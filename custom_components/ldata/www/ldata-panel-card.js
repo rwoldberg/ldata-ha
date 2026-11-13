@@ -2442,8 +2442,10 @@ button { font: inherit; }
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.07) 0, rgba(255, 255, 255, 0) 24%, rgba(0, 0, 0, 0) 62%, rgba(0, 0, 0, 0.055) 100%);
   pointer-events: none;
 }
+/* Dark themes: the cover stays white, as the real one is, and only loses its
+   glare. Much below 0.9 the white turns gray and the panel looks faded. */
 :host([appearance="dark"]) .cover {
-  filter: brightness(0.66) contrast(1.05) saturate(0.92);
+  filter: brightness(0.92) contrast(1.05) saturate(0.92);
   box-shadow: 0 calc(var(--u) * 0.06) calc(var(--u) * 0.16) rgba(0, 0, 0, 0.6), 0 calc(var(--u) * 0.3) calc(var(--u) * 0.8) rgba(0, 0, 0, 0.4);
 }
 

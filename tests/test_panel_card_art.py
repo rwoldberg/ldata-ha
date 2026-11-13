@@ -67,3 +67,15 @@ def test_images_stay_small_enough_to_load_over_a_remote_link() -> None:
 
     assert total < 800_000, f"{total} bytes of artwork"
     assert max(path.stat().st_size for path in IMAGES) < 120_000
+
+
+def test_dark_appearance_keeps_the_cover_white() -> None:
+    # The load center is white. With a dark theme the card takes the glare off
+    # it; dimmed much further (it was 0.66) the white turns gray and the whole
+    # panel looks faded.
+    rule = re.search(r':host\(\[appearance="dark"\]\) \.cover \{([^}]*)\}', CARD)
+
+    assert rule is not None
+    brightness = re.search(r"brightness\(([0-9.]+)\)", rule.group(1))
+    assert brightness is not None
+    assert 0.85 <= float(brightness.group(1)) < 1
