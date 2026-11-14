@@ -77,6 +77,77 @@ def _panel_firmware_versions(panel: dict) -> tuple[str, str | None]:
     return installed, available or None
 
 
+# The firmware a breaker runs as separate images, each with the version
+# installed and the one Leviton has downloaded to the panel for it. Names and
+# order (most important first) are the ones the My Leviton app uses.
+_BREAKER_FIRMWARE_IMAGES = (
+    ("BLE", "firmwareVersionBLE", "downloadedBLE"),
+    ("GFCI", "firmwareVersionGFCI", "downloadedGFCI"),
+    ("AFCI", "firmwareVersionAFCI", "downloadedAFCI"),
+    ("SiLabs", "firmwareVersionSiLabs", "downloadedSiLabs"),
+    ("TreeTable", "firmwareVersionTreeTable", "downloadedTreeTable"),
+)
+# Every breaker field the firmware check reads; kept as received so a partial
+# WebSocket frame can be merged into what is already known.
+BREAKER_FIRMWARE_FIELDS = (
+    "updateAvailability",
+    "updateVersion",
+    *(key for _name, installed, downloaded in _BREAKER_FIRMWARE_IMAGES for key in (installed, downloaded)),
+)
+# "FWC2422000100": the app compares the last three digits, the build.
+_BREAKER_FIRMWARE_BUILD = re.compile(r"^D?T?FW[A-Z]\d+(\d{3})$")
+
+
+def _breaker_firmware_build(version: typing.Any) -> int | None:
+    match = _BREAKER_FIRMWARE_BUILD.match(str(version or ""))
+    return int(match.group(1)) if match else None
+
+
+def _breaker_firmware_versions(
+    fields: dict, *, ldata: bool, firmware: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """Return a breaker's installed and available firmware, and what changes.
+
+    The same rules as the My Leviton app. A breaker on an LDATA hub has an
+    update when updateAvailability says UPDATE_AVAILABLE, to updateVersion. A
+    breaker on an LWHEM has one when the panel has downloaded a newer build of
+    any of its firmware images than the breaker runs; updateAvailability stays
+    UP_TO_DATE there. The third value names each image that would change.
+    """
+    if ldata:
+        installed = fields.get("firmwareVersionSiLabs") or firmware or None
+        available = fields.get("updateVersion") or None
+        if fields.get("updateAvailability") != "UPDATE_AVAILABLE" or available == installed:
+            available = None
+        return installed, available, None
+
+    pending = []
+    for name, installed_key, downloaded_key in _BREAKER_FIRMWARE_IMAGES:
+        running = _breaker_firmware_build(fields.get(installed_key))
+        staged = _breaker_firmware_build(fields.get(downloaded_key))
+        if running is not None and staged is not None and running < staged:
+            pending.append((name, fields[installed_key], fields[downloaded_key]))
+    if not pending:
+        return firmware or None, None, None
+    _name, installed, available = pending[0]
+    summary = ", ".join(f"{name} {old} → {new}" for name, old, new in pending)
+    return installed, available, summary
+
+
+def _apply_breaker_firmware(breaker: dict, raw: dict) -> None:
+    """Merge a raw record's firmware fields into a breaker and re-check it."""
+    fields = dict(breaker.get("firmware_fields") or {})
+    fields.update({key: raw[key] for key in BREAKER_FIRMWARE_FIELDS if key in raw})
+    breaker["firmware_fields"] = fields
+    (
+        breaker["installed_firmware"],
+        breaker["available_firmware"],
+        breaker["firmware_update_summary"],
+    ) = _breaker_firmware_versions(
+        fields, ldata=breaker.get("panel_type") == "LDATA", firmware=breaker.get("firmware")
+    )
+
+
 class TwoFactorRequired(Exception):
     """Raised when 2FA code is required."""
 
@@ -1675,7 +1746,9 @@ class LDATAService:
         for raw_key, cached_key in metadata_fields.items():
             if raw.get(raw_key) is not None:
                 existing[cached_key] = raw[raw_key]
-        
+        if "firmwareVersionMeter" in raw or any(key in raw for key in BREAKER_FIRMWARE_FIELDS):
+            _apply_breaker_firmware(existing, raw)
+
         # Capture energy counters (hardware-measured, not yet exposed as sensors)
         if "energyConsumption" in raw or "energyConsumption2" in raw:
             cached_ec1 = existing.get("consumption1", 0)
@@ -2269,6 +2342,8 @@ class LDATAService:
                         breaker_data["serialNumber"] = breaker["serialNumber"]
                         breaker_data["hardware"] = breaker["hwVersion"]
                         breaker_data["firmware"] = breaker["firmwareVersionMeter"]
+                        breaker_data["panel_type"] = panel_data["panel_type"]
+                        _apply_breaker_firmware(breaker_data, breaker)
                         if breaker["canRemoteOn"] is not None:
                             breaker_data["canRemoteOn"] = breaker["canRemoteOn"]
                         else:
@@ -2402,6 +2477,14 @@ class LDATAService:
                                 totalPower += float(breaker_power)
                         except (ValueError, TypeError):
                             totalPower += 0
+                    elif breaker.get("lsbmaId") or breaker.get("lsbmaId2"):
+                        # A standard breaker metered by Metering Accessories
+                        # (model LSBMA). Leviton keeps it as a NONE-2 record
+                        # that names its two accessories; the accessories are
+                        # in this list as breakers of their own, and they are
+                        # what is metered, so this record adds nothing. It is
+                        # not unmonitored either.
+                        continue
                     else:
                         # Physically present but non-smart ("dumb") breaker —
                         # model NONE-1/NONE-2 with no monitoring/control data

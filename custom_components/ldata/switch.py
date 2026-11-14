@@ -28,7 +28,7 @@ from .const import (
     POWER_ON,
 )
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
-from .ldata_base_entity import add_entities_grouped_by_panel, is_breaker_on
+from .ldata_base_entity import add_entities_grouped_by_panel, is_breaker_on, is_metering_accessory
 from .ldata_entity import LDATAEntity
 from .ldata_service import LDATAAuthError
 
@@ -52,6 +52,10 @@ async def async_setup_entry(
         switches = []
         for breaker_id in entry.data["breakers"]:
             breaker_data = entry.data["breakers"][breaker_id]
+            # A Metering Accessory only meters a standard breaker; there is
+            # no power to switch (its Blink LED below still identifies it).
+            if is_metering_accessory(breaker_data):
+                continue
             switches.append(LDATASwitch(entry, breaker_data))
         add_entities_grouped_by_panel(config_entry, async_add_entities, switches)
 
