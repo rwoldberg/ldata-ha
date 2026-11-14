@@ -1,33 +1,43 @@
 {
     "config": {
+        "abort": {
+            "already_configured": "Le compte est déjà configuré",
+            "reauth_successful": "Ré-authentification réussie"
+        },
+        "error": {
+            "cannot_connect": "Impossible de se connecter",
+            "invalid_auth": "Authentification invalide",
+            "invalid_2fa": "Code à deux facteurs invalide, veuillez réessayer",
+            "no_residence_selected": "Sélectionnez au moins une résidence pour continuer",
+            "unknown": "Erreur inattendue"
+        },
         "step": {
             "user": {
                 "data": {
                     "username": "Nom d'utilisateur my.leviton.com",
                     "password": "Mot de passe my.leviton.com",
-                    "three_phase": "Service réseau 120/208V (Appartement/Copropriété)",
-                    "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
-                    "allow_led_blink": "Autoriser l'identification"
+                    "three_phase": "Alimentation 120/208V sur réseau triphasé (appartement/copropriété)",
+                    "allow_breaker_control": "Autoriser la commande des disjoncteurs",
+                    "allow_led_blink": "Autoriser l'identification",
+                    "enable_decora": "Activer les appareils Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Afficher le panneau électrique dans la barre latérale"
                 },
                 "title": "Configurer LDATA"
             },
             "2fa": {
                 "title": "Authentification à deux facteurs",
-                "description": "Un code d'authentification à deux facteurs est requis pour {username}. Veuillez vérifier votre application d'authentification ou votre e-mail et saisir le code ci-dessous.",
+                "description": "Un code d'authentification à deux facteurs est requis pour {username}. Veuillez consulter votre application d'authentification ou vos courriels, puis saisir le code ci-dessous.",
                 "data": {
                     "2fa_code": "Code d'authentification"
                 }
+            },
+            "residence": {
+                "title": "Sélection des résidences",
+                "description": "Votre compte a accès à plusieurs résidences. Sélectionnez celle ou celles à configurer : chacune devient une entrée distincte de l'intégration LDATA, de sorte que leurs panneaux et leurs disjoncteurs restent bien séparés.",
+                "data": {
+                    "residences": "Résidences"
+                }
             }
-        },
-        "error": {
-            "cannot_connect": "Impossible de se connecter",
-            "invalid_auth": "Authentification invalide",
-            "unknown": "Erreur inconnue",
-            "invalid_2fa": "Code à deux facteurs invalide. Veuillez réessayer."
-        },
-        "abort": {
-            "already_configured": "L'appareil est déjà configuré",
-            "reauth_successful": "Ré-authentification réussie"
         }
     },
     "options": {
@@ -35,34 +45,296 @@
             "init": {
                 "title": "Options Leviton LDATA",
                 "data": {
-                    "three_phase": "Service réseau 120/208V (Appartement/Copropriété)",
-                    "allow_breaker_control": "Autoriser le contrôle des disjoncteurs",
+                    "three_phase": "Alimentation 120/208V sur réseau triphasé (appartement/copropriété)",
+                    "allow_breaker_control": "Autoriser la commande des disjoncteurs",
                     "allow_led_blink": "Autoriser l'identification",
-                    "gap_handling": "Gestion des interruptions (ancien firmware uniquement)",
-                    "gap_threshold": "Seuil d'interruption (mins)",
-                    "ha_inform_rate": "Taux d'information HA (secondes)",
-                    "log_warnings": "Journaliser les erreurs générales d'intégration",
-                    "log_data_warnings": "Journaliser les avertissements de valeurs de données (pics/réinitialisations)",
+                    "enable_decora": "Activer les appareils Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Afficher le panneau électrique dans la barre latérale",
+                    "gap_handling": "Gestion des interruptions de données (ancien micrologiciel uniquement)",
+                    "gap_threshold": "Seuil d'interruption (min)",
+                    "ha_inform_rate": "Intervalle de mise à jour HA (secondes)",
+                    "log_warnings": "Journaliser les erreurs générales de l'intégration",
+                    "log_data_warnings": "Journaliser les avertissements sur les valeurs de données (pics/réinitialisations)",
                     "log_all_raw": "Journaliser la chaîne WebSocket brute",
                     "log_parsed_data": "Journaliser toutes les données analysées",
                     "enable_specific_logging": "Activer la journalisation de champs spécifiques",
                     "log_fields": "Champs à journaliser"
                 },
                 "data_description": {
-                    "ha_inform_rate": "Fréquence de mise à jour des capteurs dans Home Assistant (2-600 secondes). Des valeurs plus basses = plus réactif mais charge système et écritures DB plus élevées.",
-                    "three_phase": "Activer uniquement si votre service est triphasé 120/208V (courant dans les appartements et copropriétés avec transformateurs partagés). Dans ce mode, les tensions des disjoncteurs bipolaires sont multipliées par √3/2 (~0,866) pour afficher la tension correcte de 208V ligne à ligne au lieu de 240V incorrect. NE PAS activer pour un service résidentiel monophasé standard 120/240V.",
-                    "allow_breaker_control": "Lorsqu'activé, HA créera des interrupteurs permettant de déclencher/réinitialiser les disjoncteurs. Lorsque désactivé, les disjoncteurs sont uniquement traités comme des capteurs.",
-                    "allow_led_blink": "Lorsqu'activé, HA créera un interrupteur par disjoncteur pour faire clignoter sa LED afin de l'identifier physiquement. Lorsque désactivé, aucune entité de contrôle LED n'est créée. Indépendant d'Autoriser le contrôle des disjoncteurs.",
-                    "gap_handling": "Repli pour anciens firmwares sans compteurs d'énergie matériels. Ignorer: plus sûr. Extrapoler: dernière puissance connue. Moyenne: compromis. Panneaux avec firmware 2.0+ utilisent des compteurs matériels et ignorent ce paramètre.",
-                    "gap_threshold": "Durée sans données avant activation de la gestion des interruptions (1-30 minutes). Uniquement pour le repli puissance×temps sur ancien firmware.",
+                    "ha_inform_rate": "Fréquence de mise à jour des capteurs dans Home Assistant (2-600 secondes). Des valeurs plus basses = plus réactif, mais davantage de charge système et d'écritures en base de données.",
+                    "three_phase": "Activez uniquement si votre alimentation est en triphasé 120/208V (fréquent dans les appartements et les copropriétés alimentés par un transformateur partagé). Dans ce mode, les tensions des disjoncteurs bipolaires sont multipliées par √3/2 (~0.866) afin d'afficher la tension correcte de 208V entre phases au lieu de la valeur erronée de 240V. N'activez PAS cette option pour une alimentation résidentielle monophasée standard en 120/240V.",
+                    "allow_breaker_control": "Lorsque cette option est activée, HA crée des entités interrupteur qui permettent de déclencher/réenclencher les disjoncteurs. Lorsqu'elle est désactivée, les disjoncteurs sont traités uniquement comme des capteurs.",
+                    "allow_led_blink": "Lorsque cette option est activée, HA crée un interrupteur par disjoncteur pour faire clignoter sa LED afin de le repérer physiquement. Lorsqu'elle est désactivée, aucune entité de commande de LED n'est créée. Indépendante de « Autoriser la commande des disjoncteurs ».",
+                    "enable_decora": "Lorsque cette option est activée, LDATA détecte aussi les interrupteurs, gradateurs, ventilateurs, prises et GFCI Decora Smart Wi-Fi de votre compte et crée leurs entités. Laissez-la désactivée si vous n'en avez pas : cela évite des appels API supplémentaires à chaque mise à jour.",
+                    "show_sidebar_panel": "Ajoute à la barre latérale de Home Assistant un élément qui ouvre une vue interactive en pleine page de votre panneau électrique. Si vous avez plusieurs entrées LDATA, cette même page affiche les panneaux électriques de toutes les entrées où cette option est activée.",
+                    "gap_handling": "Solution de repli pour les anciens micrologiciels sans compteurs d'énergie matériels. Détermine comment les capteurs d'énergie journalière des disjoncteurs gèrent les périodes sans données. Ignorer : le plus sûr. Extrapoler : suppose la dernière puissance connue. Moyenne : compromis. Les panneaux dotés du micrologiciel 2.0+ utilisent les compteurs matériels et ignorent ce paramètre.",
+                    "gap_threshold": "Durée sans données avant l'activation de la gestion des interruptions (1-30 minutes). Ne s'applique qu'au calcul de repli puissance×temps sur les anciens micrologiciels.",
                     "log_warnings": "Journaliser les plantages de l'intégration ou les erreurs Web.",
-                    "log_data_warnings": "Journaliser les avertissements d'incohérences de données de Leviton (pics/réinitialisations).",
-                    "log_all_raw": "Journaliser la chaîne WebSocket brute telle que reçue de Leviton. Avertissement: la sortie n'est pas expurgée et contiendra des jetons d'authentification et des ID d'appareils. Désactiver lorsque vous ne déboguez pas activement.",
-                    "log_parsed_data": "Journaliser tous les champs des disjoncteurs et panneaux après l'analyse de chaque mise à jour WebSocket ou REST. Utile pour vérifier les valeurs sans activer la journalisation WebSocket brute.",
-                    "enable_specific_logging": "Journaliser tout champ spécifié. Les noms de champs peuvent être trouvés en activant brièvement 'Journaliser toutes les données analysées'.",
-                    "log_fields": "Pour trouver les noms de champs, activez 'Journaliser toutes les données analysées' et consultez les journaux de Home Assistant. Saisir ci-dessus séparés par des virgules."
+                    "log_data_warnings": "Journaliser les avertissements d'incohérences dans les données de Leviton (pics/réinitialisations).",
+                    "log_all_raw": "Journaliser la chaîne WebSocket brute telle que reçue de Leviton. Avertissement : la sortie n'est pas expurgée et contiendra des jetons d'authentification et des identifiants d'appareils. Désactivez cette option lorsque vous n'êtes pas en train de déboguer.",
+                    "log_parsed_data": "Journaliser tous les champs des disjoncteurs et des panneaux après l'analyse de chaque mise à jour WebSocket ou REST. Utile pour vérifier les valeurs sans activer la journalisation WebSocket brute.",
+                    "enable_specific_logging": "Journaliser les champs indiqués. Pour connaître les noms des champs, activez brièvement « Journaliser toutes les données analysées ».",
+                    "log_fields": "Pour trouver les noms des champs, activez « Journaliser toutes les données analysées » et consultez les journaux de Home Assistant. Saisissez-les ci-dessus, séparés par des virgules."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Panneaux secondaires",
+                        "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Deux panneaux électriques ne peuvent pas s'alimenter l'un l'autre. Vérifiez les choix sous Panneaux secondaires."
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Ignorer — Ne pas cumuler d'énergie pendant les interruptions",
+                "extrapolate": "Extrapoler — Supposer que la dernière puissance connue s'est maintenue",
+                "average": "Moyenne — Utiliser la moyenne entre la dernière puissance connue et celle à la reprise"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Pas un panneau secondaire"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Réinitialiser la référence d'un capteur d'énergie",
+            "description": "Réinitialise un capteur d'énergie LDATA bloqué. Consultez le journal de Home Assistant pour connaître la valeur avant et après la réinitialisation. Pour les capteurs de total cumulé (consommation/import), le capteur acceptera la prochaine valeur fournie par l'API. Pour les capteurs journaliers, les références sont effacées et le capteur repart des valeurs actuelles de l'API.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entité",
+                    "description": "Le capteur d'énergie LDATA à réinitialiser."
+                },
+                "value": {
+                    "name": "Nouvelle valeur en kWh (facultatif)",
+                    "description": "Impose une valeur précise en kWh au lieu d'utiliser la valeur actuelle de l'API. Laissez vide pour accepter la valeur que l'API fournira à la prochaine mise à jour."
+                },
+                "baseline": {
+                    "name": "Référence matérielle en kWh (facultatif)",
+                    "description": "Définit manuellement la référence brute du compteur matériel utilisée pour calculer les écarts des capteurs journaliers."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Réinitialiser tous les capteurs d'énergie d'un panneau",
+            "description": "Réinitialise en une seule opération tous les capteurs d'énergie, journaliers et de total cumulé, d'un panneau WHEM. À utiliser après une réinitialisation d'usine du panneau, lorsque tous les compteurs d'énergie matériels retombent à zéro en même temps. Toutes les références des capteurs journaliers sont effacées (les totaux journaliers repartent de 0) et toutes les protections des capteurs de total cumulé sont levées (chacun acceptera sans condition la prochaine valeur de l'API). Sélectionnez n'importe quel appareil appartenant au panneau : le panneau lui-même, un disjoncteur ou un CT. Consultez le journal de Home Assistant pour un récapitulatif de la réinitialisation, capteur par capteur.",
+            "fields": {
+                "device_id": {
+                    "name": "Appareil du panneau",
+                    "description": "N'importe quel appareil appartenant au panneau WHEM : le panneau, un disjoncteur ou un CT. Tous les capteurs d'énergie du panneau ainsi identifié seront réinitialisés."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Panneau électrique",
+            "empty_title": "Aucun panneau électrique à afficher",
+            "empty_body": "Cette intégration n'a encore trouvé aucun panneau LDATA ou LWHEM. Elle est peut-être encore en cours de démarrage, ou elle ne parvient pas à joindre Leviton.",
+            "fed_from": "Alimenté par {panel}",
+            "zoom": "Zoom {factor}"
+        },
+        "card": {
+            "name": {
+                "panel": "Panneau",
+                "breaker": "Disjoncteur",
+                "unmonitored_breaker": "Disjoncteur non surveillé",
+                "sub_panel": "Panneau secondaire"
+            },
+            "state": {
+                "on": "Allumé",
+                "off": "Éteint",
+                "off_remote": "Éteint à distance",
+                "tripped": "Déclenché",
+                "unavailable": "Indisponible",
+                "unknown": "Inconnu",
+                "switching": "Commutation…",
+                "switching_on": "Allumage…",
+                "switching_off": "Extinction…",
+                "not_monitored": "Non surveillé",
+                "switch_failed": "Échec de la commande"
+            },
+            "alarm": {
+                "over_current": "Surintensité",
+                "over_voltage": "Surtension",
+                "under_voltage": "Sous-tension"
+            },
+            "trip": {
+                "ground_fault": "Défaut à la terre",
+                "arc_fault": "Défaut d'arc",
+                "parallel_arc_fault": "Arc parallèle",
+                "miswire": "Neutre mal raccordé",
+                "overload": "Surcharge",
+                "short_circuit": "Court-circuit",
+                "over_current": "Surintensité"
+            },
+            "protection": {
+                "afci": "Défaut d'arc (AFCI)",
+                "gfci": "Défaut à la terre (GFCI)",
+                "dual": "Défaut d'arc et défaut à la terre (AFCI/GFCI)",
+                "gfpe": "Défaut à la terre, protection des équipements (GFPE)"
+            },
+            "raw": {
+                "manualon": "Allumé manuellement",
+                "manualoff": "Éteint manuellement",
+                "remoteon": "Allumé à distance",
+                "remoteoff": "Éteint à distance",
+                "tripped": "Déclenché",
+                "softwaretrip": "Déclenchement logiciel",
+                "upstreamoff": "Aucune tension en amont",
+                "notcommunicating": "Ne communique pas",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Charge totale",
+                "leg_1": "Phase 1",
+                "leg_2": "Phase 2",
+                "frequency": "Fréquence",
+                "today": "Ce jour",
+                "today_import": "Import du jour",
+                "cloud": "Cloud",
+                "wifi": "Wi-Fi",
+                "update": "Mise à jour",
+                "cloud_connected": "Connecté au cloud Leviton",
+                "cloud_offline": "Panneau hors ligne",
+                "cloud_unknown": "État du cloud inconnu",
+                "wifi_signal": "Signal Wi-Fi : {dbm} dBm",
+                "wifi_unknown": "Signal Wi-Fi inconnu",
+                "update_available": "Mise à jour du micrologiciel disponible (installez-la depuis l'application My Leviton)",
+                "update_current": "Micrologiciel à jour",
+                "main": "Principal",
+                "main_breaker": "Disjoncteur principal",
+                "main_breaker_dead": "Disjoncteur principal (aucune tension sur les deux phases)"
+            },
+            "label": {
+                "circuit": "Circuit {position}",
+                "circuits": "Circuits {first} et {second}",
+                "amp_rating": "{amps} ampères",
+                "feeds_sub_panel": "Alimente un panneau secondaire",
+                "feeds": "Alimente {name}",
+                "show_details": "Afficher les détails",
+                "open_sub_panel": "Ouvrir le panneau secondaire",
+                "open_sub_panel_dashboard": "Ouvrir le tableau de bord du panneau secondaire",
+                "breaker_switch": "Disjoncteur {name}"
+            },
+            "action": {
+                "turn_on": "Allumer",
+                "turn_off": "Éteindre",
+                "turn_on_name": "Allumer {name}",
+                "turn_off_name": "Éteindre {name}",
+                "cancel": "Annuler",
+                "close": "Fermer",
+                "got_it": "Compris",
+                "device_page": "Page de l'appareil"
+            },
+            "confirm": {
+                "turn_on_title": "Allumer {name} ?",
+                "turn_off_title": "Éteindre {name} ?",
+                "turn_on_body": "Ce circuit sera mis sous tension.",
+                "turn_off_body": "Tout ce qui est alimenté par ce circuit sera privé de courant.",
+                "gen1_off_warning": "Il s'agit d'un disjoncteur Gen 1 : une fois éteint, il ne peut être rallumé qu'à la main, sur le panneau.",
+                "blocked_title": "Impossible d'allumer {name} à distance",
+                "blocked_body": "Il s'agit d'un disjoncteur intelligent Gen 1. Il peut être éteint depuis Home Assistant, mais il doit être réenclenché à la main, sur le panneau."
+            },
+            "detail": {
+                "both_legs": "Phases 1 et 2",
+                "leg": "Phase {leg}",
+                "one_pole": "Unipolaire",
+                "two_pole": "Bipolaire",
+                "controls": "Commandes",
+                "breaker_power": "Alimentation du disjoncteur",
+                "power_on_hint": "Allumé : le courant passe",
+                "power_tripped_hint": "Déclenché : vérifiez le circuit avant de réenclencher",
+                "power_remote_off_hint": "Éteint à distance",
+                "gen1_note": "Disjoncteur Gen 1 : il peut être éteint à distance, mais il doit être réenclenché à la main, sur le panneau.",
+                "control_disabled": "La commande à distance est désactivée. Activez {option} dans les options de l'intégration LDATA pour commander les disjoncteurs depuis Home Assistant.",
+                "option_breaker_control": "Autoriser la commande des disjoncteurs",
+                "identify": "Identifier",
+                "identify_hint": "Faire clignoter la LED de ce disjoncteur pour le repérer dans le panneau",
+                "blink_led": "Faire clignoter la LED",
+                "identify_disabled": "Activez {option} dans les options de l'intégration LDATA pour faire clignoter la LED d'un disjoncteur d'ici.",
+                "option_identify": "Autoriser l'identification",
+                "live": "En direct",
+                "power": "Puissance",
+                "current": "Courant",
+                "load": "Charge",
+                "energy": "Énergie",
+                "today": "Aujourd'hui",
+                "today_import": "Importée aujourd'hui",
+                "lifetime": "Total",
+                "lifetime_import": "Importée au total",
+                "protection": "Protection",
+                "protection_type": "Type de protection",
+                "operational_state": "État de fonctionnement",
+                "diagnostics": "Diagnostic",
+                "breaker_state": "État du disjoncteur",
+                "second_pole": "Second pôle",
+                "remote_state": "État à distance",
+                "previous_state": "État précédent",
+                "change_reason": "Motif du dernier changement",
+                "circuit_type": "Type de circuit",
+                "critical": "Circuit critique",
+                "locked": "Verrouillé",
+                "meter_chip": "Puce de mesure",
+                "bluetooth": "Signal Bluetooth",
+                "device": "Appareil",
+                "model": "Modèle",
+                "rating": "Courant nominal",
+                "remote_reset": "Réenclenchement à distance",
+                "firmware": "Micrologiciel",
+                "hardware": "Matériel",
+                "serial": "Numéro de série",
+                "status": "État",
+                "other_entities": "Autres entités",
+                "yes": "Oui",
+                "no": "Non",
+                "ok": "OK",
+                "fault": "Défaut",
+                "alarm": "Alarme",
+                "not_set": "Non défini",
+                "remote_reset_yes": "Pris en charge (Gen 2)",
+                "remote_reset_no": "Non pris en charge (Gen 1)",
+                "standard_breaker": "Il s'agit d'un disjoncteur standard (non intelligent). Leviton ne transmet ni état ni mesure pour ce disjoncteur : il n'y a donc rien à commander ni à surveiller ici.",
+                "standard_breaker_hint": "S'il alimente un panneau secondaire doté de son propre hub LWHEM ou LDATA, choisissez ce disjoncteur pour ce panneau sous Panneaux secondaires, dans les options de l'intégration LDATA. La charge en direct du panneau secondaire s'affiche alors sur ce disjoncteur."
+            },
+            "setup": {
+                "choose_title": "Choisissez votre panneau",
+                "choose_body": "Indiquez dans {option} l'appareil correspondant à votre panneau LDATA ou LWHEM (Paramètres → Appareils et services → Appareils → votre panneau).",
+                "empty_title": "Aucun disjoncteur trouvé pour ce panneau",
+                "check_devices": "Liste des appareils accessible à la carte",
+                "check_entities": "Liste des entités accessible à la carte",
+                "check_device_id": "ID de l'appareil configuré",
+                "check_panel_found": "Appareil du panneau trouvé",
+                "check_total_devices": "Appareils détectés",
+                "check_linked_any": "Appareils liés à un panneau",
+                "check_linked_this": "Appareils liés à ce panneau",
+                "check_breakers": "Disjoncteurs ayant une entité Status",
+                "empty_help": "Si l'appareil du panneau est introuvable, copiez l'ID de l'appareil depuis la page d'appareil du panneau lui-même, et non depuis celle d'un disjoncteur. S'il est trouvé mais que rien n'y est lié, mettez à jour l'intégration LDATA et redémarrez Home Assistant ; un simple rechargement ne suffit pas."
+            }
+        },
+        "editor": {
+            "card_name": "Carte du panneau LDATA",
+            "card_description": "Une vue réaliste et interactive de votre panneau électrique Leviton.",
+            "panel": "Panneau",
+            "panel_help": "Choisissez le panneau (le hub LDATA ou LWHEM), et non un disjoncteur. Les liens vers les panneaux secondaires se définissent dans les options de l'intégration LDATA.",
+            "title": "Titre (facultatif)",
+            "show_power": "Afficher les watts et les ampères en direct",
+            "show_alarms": "Signaler les alarmes",
+            "toggle": "Commander les disjoncteurs depuis le panneau",
+            "confirm": "Demander confirmation avant d'allumer ou d'éteindre",
+            "show_panel_info": "Afficher les mesures du panneau",
+            "appearance": "Éclairage",
+            "appearance_auto": "Suivre le thème",
+            "appearance_light": "Lumineux",
+            "appearance_dark": "Tamisé",
+            "main_breaker": "Courant nominal du disjoncteur principal (facultatif)",
+            "main_breaker_help": "Leviton ne transmet aucune donnée sur le disjoncteur principal. Laissez vide pour un panneau sans disjoncteur principal (à cosses principales)."
         }
     }
 }

@@ -1,0 +1,340 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "La cuenta ya está configurada",
+            "reauth_successful": "La autenticación se volvió a realizar correctamente"
+        },
+        "error": {
+            "cannot_connect": "No se pudo conectar",
+            "invalid_auth": "Autenticación no válida",
+            "invalid_2fa": "Código de dos factores no válido, inténtalo de nuevo",
+            "no_residence_selected": "Selecciona al menos una vivienda para continuar",
+            "unknown": "Error inesperado"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Nombre de usuario de my.leviton.com",
+                    "password": "Contraseña de my.leviton.com",
+                    "three_phase": "Suministro trifásico de 120/208V (apartamento/piso)",
+                    "allow_breaker_control": "Permitir el control de los magnetotérmicos",
+                    "allow_led_blink": "Permitir identificar",
+                    "enable_decora": "Habilitar los dispositivos Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Mostrar el cuadro eléctrico en la barra lateral"
+                },
+                "title": "Configurar LDATA"
+            },
+            "2fa": {
+                "title": "Autenticación de dos factores",
+                "description": "Se necesita un código de autenticación de dos factores para {username}. Consulta tu aplicación de autenticación o tu correo electrónico e introduce el código a continuación.",
+                "data": {
+                    "2fa_code": "Código de autenticación"
+                }
+            },
+            "residence": {
+                "title": "Seleccionar viviendas",
+                "description": "Tu cuenta tiene acceso a más de una vivienda. Selecciona las que quieras configurar: cada una se convertirá en una entrada independiente de la integración LDATA, de modo que sus cuadros y magnetotérmicos queden bien separados.",
+                "data": {
+                    "residences": "Viviendas"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opciones de Leviton LDATA",
+                "data": {
+                    "three_phase": "Suministro trifásico de 120/208V (apartamento/piso)",
+                    "allow_breaker_control": "Permitir el control de los magnetotérmicos",
+                    "allow_led_blink": "Permitir identificar",
+                    "enable_decora": "Habilitar los dispositivos Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Mostrar el cuadro eléctrico en la barra lateral",
+                    "gap_handling": "Tratamiento de huecos de datos (solo firmware antiguo)",
+                    "gap_threshold": "Umbral de hueco de datos (min)",
+                    "ha_inform_rate": "Intervalo de actualización de HA (segundos)",
+                    "log_warnings": "Registrar errores generales de la integración",
+                    "log_data_warnings": "Registrar advertencias sobre los valores de los datos (picos/reinicios)",
+                    "log_all_raw": "Registrar la cadena WebSocket sin procesar",
+                    "log_parsed_data": "Registrar todos los datos analizados",
+                    "enable_specific_logging": "Habilitar el registro de campos específicos",
+                    "log_fields": "Campos que se registrarán"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Cada cuánto se actualizan los sensores en Home Assistant (2-600 segundos). Valores más bajos = respuesta más rápida, pero mayor carga del sistema y más escrituras en la base de datos.",
+                    "three_phase": "Habilita esta opción solo si tu suministro es trifásico de 120/208V (habitual en apartamentos y pisos con transformadores compartidos de la compañía eléctrica). En este modo, las tensiones de los magnetotérmicos de dos polos se multiplican por √3/2 (~0.866) para indicar la tensión correcta entre fases, 208V, en lugar del valor incorrecto de 240V. NO la habilites con el suministro residencial monofásico estándar de 120/240V.",
+                    "allow_breaker_control": "Si está habilitada, HA creará entidades de interruptor que te permiten disparar y rearmar los magnetotérmicos. Si está deshabilitada, los magnetotérmicos solo se tratan como sensores.",
+                    "allow_led_blink": "Si está habilitada, HA creará una entidad de interruptor por cada magnetotérmico para hacer parpadear su LED y poder identificarlo físicamente. Si está deshabilitada, no se crean entidades de control del LED. Es independiente de «Permitir el control de los magnetotérmicos».",
+                    "enable_decora": "Si está habilitada, LDATA también detectará los interruptores, reguladores de luz, ventiladores, enchufes y GFCI Decora Smart Wi-Fi de tu cuenta y creará sus entidades. Déjala deshabilitada si no tienes ninguno: así se evitan llamadas adicionales a la API en cada actualización.",
+                    "show_sidebar_panel": "Añade a la barra lateral de Home Assistant un elemento que abre una vista interactiva a página completa de tu cuadro eléctrico. Si tienes más de una entrada de LDATA, la misma página muestra los cuadros de todas las entradas que tengan esta opción activada.",
+                    "gap_handling": "Solución de reserva para firmware antiguo sin contadores de energía por hardware. Determina cómo tratan los sensores de energía diaria de los magnetotérmicos los huecos en los que no se reciben datos. Omitir: lo más seguro. Extrapolar: se supone la última potencia conocida. Promediar: solución intermedia. Los cuadros con firmware 2.0+ usan contadores por hardware e ignoran este ajuste.",
+                    "gap_threshold": "Tiempo sin datos tras el cual se activa el tratamiento de huecos (1-30 minutos). Solo se aplica al cálculo de reserva (potencia×tiempo) en firmware antiguo.",
+                    "log_warnings": "Registra los fallos de la integración o los errores web.",
+                    "log_data_warnings": "Registra advertencias sobre incoherencias en los datos de Leviton (picos/reinicios).",
+                    "log_all_raw": "Registra la cadena WebSocket sin procesar tal como se recibe de Leviton. Advertencia: la salida no oculta ningún dato y contendrá tokens de autenticación e ID de dispositivos. Deshabilita esta opción cuando no estés depurando activamente.",
+                    "log_parsed_data": "Registra todos los campos de los magnetotérmicos y del cuadro tras analizar cada actualización de WebSocket o REST. Resulta útil para comprobar valores sin habilitar el registro de WebSocket sin procesar.",
+                    "enable_specific_logging": "Registra los campos que especifiques. Puedes encontrar los nombres de los campos habilitando brevemente «Registrar todos los datos analizados».",
+                    "log_fields": "Para encontrar los nombres de los campos, habilita «Registrar todos los datos analizados» y consulta los registros de Home Assistant. Introdúcelos arriba separados por comas."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Subcuadros",
+                        "description": "Si un cuadro eléctrico se alimenta desde un magnetotérmico de otro cuadro, elige ese magnetotérmico junto a su nombre. Ese magnetotérmico mostrará entonces la carga en tiempo real del subcuadro y permitirá ir a él."
+                    }
+                }
+            }
+        },
+        "error": {
+            "sub_panel_loop": "Dos cuadros eléctricos no pueden alimentarse entre sí. Revisa las opciones elegidas en Subcuadros."
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Omitir: no acumular energía durante los huecos",
+                "extrapolate": "Extrapolar: suponer que se mantuvo la última potencia conocida",
+                "average": "Promediar: usar la media entre la última potencia y la de recuperación"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "No es un subcuadro"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Restablecer el valor de referencia del sensor de energía",
+            "description": "Restablece un sensor de energía de LDATA que se ha quedado bloqueado. Consulta en el registro de Home Assistant el valor actual antes y después del restablecimiento. En los sensores de total acumulado (consumo/importación), el sensor aceptará la siguiente lectura de la API. En los sensores diarios, se borran los valores de referencia y el sensor se vuelve a establecer a partir de los valores actuales de la API.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entidad",
+                    "description": "El sensor de energía de LDATA que se va a restablecer."
+                },
+                "value": {
+                    "name": "Nuevo valor en kWh (opcional)",
+                    "description": "Fuerza un valor concreto en kWh en lugar de usar la lectura actual de la API. Déjalo en blanco para aceptar lo que indique la API en la siguiente actualización."
+                },
+                "baseline": {
+                    "name": "Valor de referencia del hardware en kWh (opcional)",
+                    "description": "Establece manualmente el valor de referencia del contador sin procesar del hardware que se usa para calcular las diferencias en los sensores diarios."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Restablecer todos los sensores de energía del cuadro",
+            "description": "Restablece en una sola operación todos los sensores de energía diarios y de total acumulado de un cuadro WHEM. Utiliza esta acción después de restablecer el cuadro a los valores de fábrica, cuando todos los contadores de energía del hardware vuelven a cero a la vez. Se borran los valores de referencia de todos los sensores diarios (los totales diarios vuelven a empezar desde 0) y se liberan las protecciones de todos los sensores de total acumulado (cada uno aceptará sin condiciones la siguiente lectura de la API). Selecciona cualquier dispositivo que pertenezca al cuadro: el propio cuadro, un magnetotérmico o un CT. Consulta en el registro de Home Assistant el resumen del restablecimiento de cada sensor.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo del cuadro",
+                    "description": "Cualquier dispositivo que pertenezca al cuadro WHEM: el cuadro, un magnetotérmico o un CT. Se restablecerán todos los sensores de energía del cuadro correspondiente."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Cuadro eléctrico",
+            "empty_title": "No hay cuadros eléctricos que mostrar",
+            "empty_body": "Esta integración aún no ha encontrado ningún cuadro LDATA o LWHEM. Puede que todavía se esté iniciando o que no consiga conectar con Leviton.",
+            "fed_from": "Alimentado desde {panel}",
+            "zoom": "Ampliación {factor}"
+        },
+        "card": {
+            "name": {
+                "panel": "Cuadro eléctrico",
+                "breaker": "Magnetotérmico",
+                "unmonitored_breaker": "Magnetotérmico sin monitorizar",
+                "sub_panel": "Subcuadro"
+            },
+            "state": {
+                "on": "Encendido",
+                "off": "Apagado",
+                "off_remote": "Apagado (remoto)",
+                "tripped": "Disparado",
+                "unavailable": "No disponible",
+                "unknown": "Desconocido",
+                "switching": "Cambiando…",
+                "switching_on": "Encendiendo…",
+                "switching_off": "Apagando…",
+                "not_monitored": "Sin monitorizar",
+                "switch_failed": "No se pudo accionar"
+            },
+            "alarm": {
+                "over_current": "Sobreintensidad",
+                "over_voltage": "Sobretensión",
+                "under_voltage": "Subtensión"
+            },
+            "trip": {
+                "ground_fault": "Fallo a tierra",
+                "arc_fault": "Fallo de arco",
+                "parallel_arc_fault": "Arco en paralelo",
+                "miswire": "Error de neutro",
+                "overload": "Sobrecarga",
+                "short_circuit": "Cortocircuito",
+                "over_current": "Sobreintensidad"
+            },
+            "protection": {
+                "afci": "Fallo de arco (AFCI)",
+                "gfci": "Fallo a tierra (GFCI)",
+                "dual": "Fallo de arco y fallo a tierra (AFCI/GFCI)",
+                "gfpe": "Fallo a tierra, protección de equipos (GFPE)"
+            },
+            "raw": {
+                "manualon": "Encendido manual",
+                "manualoff": "Apagado manual",
+                "remoteon": "Encendido remoto",
+                "remoteoff": "Apagado remoto",
+                "tripped": "Disparado",
+                "softwaretrip": "Disparo por software",
+                "upstreamoff": "Sin alimentación aguas arriba",
+                "notcommunicating": "Sin comunicación",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Carga del cuadro",
+                "leg_1": "Fase 1",
+                "leg_2": "Fase 2",
+                "frequency": "Frecuencia",
+                "today": "Hoy",
+                "today_import": "Importación hoy",
+                "cloud": "Nube",
+                "wifi": "Wi-Fi",
+                "update": "Firmware",
+                "cloud_connected": "Conectado a la nube de Leviton",
+                "cloud_offline": "Cuadro sin conexión",
+                "cloud_unknown": "Estado de la nube desconocido",
+                "wifi_signal": "Señal Wi-Fi: {dbm} dBm",
+                "wifi_unknown": "Señal Wi-Fi desconocida",
+                "update_available": "Actualización de firmware disponible (instálala en la aplicación My Leviton)",
+                "update_current": "Firmware actualizado",
+                "main": "General",
+                "main_breaker": "Interruptor general",
+                "main_breaker_dead": "Interruptor general (sin tensión en ninguna fase)"
+            },
+            "label": {
+                "circuit": "Circuito {position}",
+                "circuits": "Circuitos {first} y {second}",
+                "amp_rating": "{amps} amperios",
+                "feeds_sub_panel": "Alimenta un subcuadro",
+                "feeds": "Alimenta a {name}",
+                "show_details": "Mostrar detalles",
+                "open_sub_panel": "Abrir subcuadro",
+                "open_sub_panel_dashboard": "Abrir el panel de control del subcuadro",
+                "breaker_switch": "Magnetotérmico {name}"
+            },
+            "action": {
+                "turn_on": "Encender",
+                "turn_off": "Apagar",
+                "turn_on_name": "Encender {name}",
+                "turn_off_name": "Apagar {name}",
+                "cancel": "Cancelar",
+                "close": "Cerrar",
+                "got_it": "Entendido",
+                "device_page": "Ver dispositivo"
+            },
+            "confirm": {
+                "turn_on_title": "¿Encender {name}?",
+                "turn_off_title": "¿Apagar {name}?",
+                "turn_on_body": "Este circuito quedará con tensión.",
+                "turn_off_body": "Todo lo que esté conectado a este circuito se quedará sin corriente.",
+                "gen1_off_warning": "Este magnetotérmico es Gen 1: una vez apagado, solo se puede volver a encender a mano en el cuadro.",
+                "blocked_title": "{name} no se puede encender de forma remota",
+                "blocked_body": "Este es un magnetotérmico inteligente Gen 1. Se puede apagar desde Home Assistant, pero hay que rearmarlo a mano en el cuadro."
+            },
+            "detail": {
+                "both_legs": "Ambas fases",
+                "leg": "Fase {leg}",
+                "one_pole": "1 polo",
+                "two_pole": "2 polos",
+                "controls": "Controles",
+                "breaker_power": "Encendido del magnetotérmico",
+                "power_on_hint": "Encendido: el circuito tiene corriente",
+                "power_tripped_hint": "Disparado: revisa el circuito antes de rearmarlo",
+                "power_remote_off_hint": "Apagado de forma remota",
+                "gen1_note": "Magnetotérmico Gen 1: se puede apagar de forma remota, pero hay que rearmarlo a mano en el cuadro.",
+                "control_disabled": "El control remoto está desactivado. Activa {option} en las opciones de la integración LDATA para accionar los magnetotérmicos desde Home Assistant.",
+                "option_breaker_control": "Permitir el control de los magnetotérmicos",
+                "identify": "Identificar",
+                "identify_hint": "Haz parpadear el LED de este magnetotérmico para localizarlo en el cuadro",
+                "blink_led": "Hacer parpadear el LED",
+                "identify_disabled": "Activa {option} en las opciones de la integración LDATA para hacer parpadear desde aquí el LED de un magnetotérmico.",
+                "option_identify": "Permitir identificar",
+                "live": "En tiempo real",
+                "power": "Potencia",
+                "current": "Intensidad",
+                "load": "Carga",
+                "energy": "Energía",
+                "today": "Hoy",
+                "today_import": "Hoy, importación",
+                "lifetime": "Total acumulado",
+                "lifetime_import": "Total acumulado, importación",
+                "protection": "Protección",
+                "protection_type": "Tipo de protección",
+                "operational_state": "Estado operativo",
+                "diagnostics": "Diagnóstico",
+                "breaker_state": "Estado del magnetotérmico",
+                "second_pole": "Segundo polo",
+                "remote_state": "Estado remoto",
+                "previous_state": "Estado anterior",
+                "change_reason": "Motivo del último cambio",
+                "circuit_type": "Tipo de circuito",
+                "critical": "Circuito crítico",
+                "locked": "Bloqueado",
+                "meter_chip": "Chip de medición",
+                "bluetooth": "Señal Bluetooth",
+                "device": "Dispositivo",
+                "model": "Modelo",
+                "rating": "Calibre",
+                "remote_reset": "Rearme remoto",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Número de serie",
+                "status": "Estado",
+                "other_entities": "Otras entidades",
+                "yes": "Sí",
+                "no": "No",
+                "ok": "OK",
+                "fault": "Fallo",
+                "alarm": "Alarma",
+                "not_set": "Sin definir",
+                "remote_reset_yes": "Compatible (Gen 2)",
+                "remote_reset_no": "No compatible (Gen 1)",
+                "standard_breaker": "Este es un magnetotérmico estándar (no inteligente). Leviton no informa de su estado ni de sus lecturas, así que aquí no hay nada que controlar ni monitorizar.",
+                "standard_breaker_hint": "Si alimenta un subcuadro que tiene su propio hub LWHEM o LDATA, elige este magnetotérmico para ese cuadro en Subcuadros, en las opciones de la integración LDATA. La carga en tiempo real del subcuadro se mostrará entonces en este magnetotérmico."
+            },
+            "setup": {
+                "choose_title": "Elige tu cuadro eléctrico",
+                "choose_body": "Indica en {option} el dispositivo de tu cuadro LDATA o LWHEM (Configuración → Dispositivos y servicios → Dispositivos → tu cuadro).",
+                "empty_title": "No se han encontrado magnetotérmicos para este cuadro",
+                "check_devices": "Lista de dispositivos disponible para la tarjeta",
+                "check_entities": "Lista de entidades disponible para la tarjeta",
+                "check_device_id": "ID de dispositivo configurado",
+                "check_panel_found": "Dispositivo del cuadro encontrado",
+                "check_total_devices": "Dispositivos detectados",
+                "check_linked_any": "Dispositivos vinculados a algún cuadro",
+                "check_linked_this": "Dispositivos vinculados a este cuadro",
+                "check_breakers": "Magnetotérmicos con una entidad «Status»",
+                "empty_help": "Si no se encuentra el dispositivo del cuadro, copia el ID de dispositivo desde la página de dispositivo del propio cuadro, no desde la de un magnetotérmico. Si se encuentra pero no tiene nada vinculado, actualiza la integración LDATA y reinicia Home Assistant; no basta con recargarla."
+            }
+        },
+        "editor": {
+            "card_name": "Tarjeta de cuadro LDATA",
+            "card_description": "Una vista realista e interactiva de tu cuadro eléctrico Leviton.",
+            "panel": "Cuadro eléctrico",
+            "panel_help": "Elige el cuadro (el hub LDATA o LWHEM), no un magnetotérmico. Los vínculos con subcuadros se definen en las opciones de la integración LDATA.",
+            "title": "Título (opcional)",
+            "show_power": "Mostrar vatios y amperios en tiempo real",
+            "show_alarms": "Resaltar las alarmas",
+            "toggle": "Accionar los magnetotérmicos desde el cuadro",
+            "confirm": "Pedir confirmación antes de accionar",
+            "show_panel_info": "Mostrar las lecturas del cuadro",
+            "appearance": "Iluminación",
+            "appearance_auto": "Según el tema",
+            "appearance_light": "Intensa",
+            "appearance_dark": "Tenue",
+            "main_breaker": "Calibre del interruptor general (opcional)",
+            "main_breaker_help": "Leviton no informa del interruptor general. Déjalo vacío si el cuadro no tiene interruptor general."
+        }
+    }
+}

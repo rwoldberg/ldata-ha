@@ -1,0 +1,340 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Konto ist bereits konfiguriert",
+            "reauth_successful": "Die erneute Authentifizierung war erfolgreich"
+        },
+        "error": {
+            "cannot_connect": "Verbindung fehlgeschlagen",
+            "invalid_auth": "Ungültige Authentifizierung",
+            "invalid_2fa": "Ungültiger 2FA-Code, bitte versuche es erneut",
+            "no_residence_selected": "Wähle mindestens einen Wohnsitz aus, um fortzufahren",
+            "unknown": "Unerwarteter Fehler"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Benutzername für my.leviton.com",
+                    "password": "Passwort für my.leviton.com",
+                    "three_phase": "120/208V-Drehstromnetz (Miet-/Eigentumswohnung)",
+                    "allow_breaker_control": "Steuerung der Sicherungen erlauben",
+                    "allow_led_blink": "Identifizieren erlauben",
+                    "enable_decora": "Decora Smart Wi-Fi-Geräte einbinden",
+                    "show_sidebar_panel": "Sicherungskasten in der Seitenleiste anzeigen"
+                },
+                "title": "LDATA konfigurieren"
+            },
+            "2fa": {
+                "title": "Zwei-Faktor-Authentifizierung",
+                "description": "Für {username} ist ein Zwei-Faktor-Authentifizierungscode erforderlich. Sieh in deiner Authentifizierungs-App oder in deinen E-Mails nach und gib den Code unten ein.",
+                "data": {
+                    "2fa_code": "Authentifizierungscode"
+                }
+            },
+            "residence": {
+                "title": "Wohnsitz(e) auswählen",
+                "description": "Dein Konto hat Zugriff auf mehr als einen Wohnsitz. Wähle aus, welche du einrichten möchtest – jeder ausgewählte Wohnsitz wird zu einem eigenen LDATA-Integrationseintrag, sodass Sicherungskästen und Sicherungen sauber getrennt bleiben.",
+                "data": {
+                    "residences": "Wohnsitze"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Optionen für Leviton LDATA",
+                "data": {
+                    "three_phase": "120/208V-Drehstromnetz (Miet-/Eigentumswohnung)",
+                    "allow_breaker_control": "Steuerung der Sicherungen erlauben",
+                    "allow_led_blink": "Identifizieren erlauben",
+                    "enable_decora": "Decora Smart Wi-Fi-Geräte einbinden",
+                    "show_sidebar_panel": "Sicherungskasten in der Seitenleiste anzeigen",
+                    "gap_handling": "Umgang mit Datenlücken (nur ältere Firmware)",
+                    "gap_threshold": "Schwellenwert für Datenlücken (Minuten)",
+                    "ha_inform_rate": "HA-Aktualisierungsintervall (Sekunden)",
+                    "log_warnings": "Allgemeine Integrationsfehler protokollieren",
+                    "log_data_warnings": "Warnungen zu Datenwerten protokollieren (Ausreißer/Resets)",
+                    "log_all_raw": "WebSocket-Rohdaten protokollieren",
+                    "log_parsed_data": "Alle geparsten Daten protokollieren",
+                    "enable_specific_logging": "Protokollierung bestimmter Felder aktivieren",
+                    "log_fields": "Zu protokollierende Felder"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Wie oft die Sensoren in Home Assistant aktualisiert werden (2-600 Sekunden). Niedrigere Werte = schnellere Reaktion, aber höhere Systemlast und mehr Schreibvorgänge in der Datenbank.",
+                    "three_phase": "Nur aktivieren, wenn du an ein 120/208V-Drehstromnetz angeschlossen bist (üblich in Miet- und Eigentumswohnungen mit gemeinsam genutzten Transformatoren des Netzbetreibers). In diesem Modus werden die Spannungen 2-poliger Sicherungen mit √3/2 (~0.866) multipliziert, damit die korrekte Spannung von 208V zwischen den Phasen statt der falschen 240V gemeldet wird. NICHT aktivieren bei einem üblichen einphasigen 120/240V-Hausanschluss.",
+                    "allow_breaker_control": "Wenn aktiviert, erstellt HA Schalter-Entitäten, mit denen du Sicherungen auslösen und wieder einschalten kannst. Wenn deaktiviert, werden Sicherungen nur als Sensoren behandelt.",
+                    "allow_led_blink": "Wenn aktiviert, erstellt HA pro Sicherung einen Schalter, der ihre LED blinken lässt, damit du sie im Sicherungskasten findest. Wenn deaktiviert, werden keine Entitäten zur LED-Steuerung erstellt. Unabhängig von „Steuerung der Sicherungen erlauben“.",
+                    "enable_decora": "Wenn aktiviert, erkennt LDATA auch Schalter, Dimmer, Ventilatoren, Steckdosen und GFCIs der Reihe Decora Smart Wi-Fi in deinem Konto und erstellt Entitäten dafür. Lass die Option deaktiviert, wenn du keine solchen Geräte hast – das vermeidet zusätzliche API-Aufrufe bei jeder Aktualisierung.",
+                    "show_sidebar_panel": "Fügt der Seitenleiste von Home Assistant einen Menüpunkt hinzu, der eine seitenfüllende, interaktive Ansicht deines Sicherungskastens öffnet. Wenn du mehr als einen LDATA-Eintrag hast, zeigt dieselbe Seite die Sicherungskästen aller Einträge, bei denen diese Option aktiviert ist.",
+                    "gap_handling": "Ausweichlösung für ältere Firmware ohne Hardware-Energiezähler. Legt fest, wie die Tages-Energiesensoren der Sicherungen mit Lücken umgehen, in denen keine Daten empfangen werden. Überspringen: am sichersten. Extrapolieren: letzte bekannte Leistung annehmen. Durchschnitt: Kompromiss. Sicherungskästen mit Firmware 2.0+ nutzen Hardware-Zähler und ignorieren diese Einstellung.",
+                    "gap_threshold": "Zeit ohne Daten, nach der der Umgang mit Datenlücken greift (1-30 Minuten). Gilt nur für die Ausweichberechnung Leistung×Zeit bei älterer Firmware.",
+                    "log_warnings": "Protokolliert Abstürze der Integration und Web-Fehler.",
+                    "log_data_warnings": "Protokolliert Warnungen zu inkonsistenten Daten von Leviton (Ausreißer/Resets).",
+                    "log_all_raw": "Protokolliert die WebSocket-Rohdaten so, wie sie von Leviton empfangen werden. Warnung: Die Ausgabe ist ungefiltert und enthält Authentifizierungs-Token und Geräte-IDs. Deaktiviere die Option, wenn du nicht gerade aktiv Fehler suchst.",
+                    "log_parsed_data": "Protokolliert alle Felder von Sicherungen und Sicherungskasten nach dem Parsen jeder WebSocket- oder REST-Aktualisierung. Nützlich, um Werte zu prüfen, ohne die Protokollierung der WebSocket-Rohdaten zu aktivieren.",
+                    "enable_specific_logging": "Protokolliert die angegebenen Felder. Die Feldnamen findest du, indem du kurz „Alle geparsten Daten protokollieren“ aktivierst.",
+                    "log_fields": "Um Feldnamen zu finden, aktiviere „Alle geparsten Daten protokollieren“ und sieh in den Protokollen von Home Assistant nach. Trage die Felder oben durch Kommas getrennt ein."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Unterverteilungen",
+                        "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr."
+                    }
+                }
+            }
+        },
+        "error": {
+            "sub_panel_loop": "Zwei Sicherungskästen können sich nicht gegenseitig versorgen. Prüfe die Auswahl unter Unterverteilungen."
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Überspringen – Während Datenlücken keine Energie aufsummieren",
+                "extrapolate": "Extrapolieren – Annehmen, dass die letzte bekannte Leistung weiter anlag",
+                "average": "Durchschnitt – Mittelwert aus der letzten Leistung und der Leistung nach der Lücke verwenden"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Keine Unterverteilung"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Basiswert eines Energiesensors zurücksetzen",
+            "description": "Setzt einen hängenden LDATA-Energiesensor zurück. Den aktuellen Wert vor und nach dem Zurücksetzen findest du im Protokoll von Home Assistant. Gesamtsensoren (Verbrauch/Einspeisung) übernehmen den nächsten API-Messwert. Bei Tagessensoren werden die Basiswerte gelöscht und der Sensor baut sich aus den aktuellen API-Werten neu auf.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entität",
+                    "description": "Der LDATA-Energiesensor, der zurückgesetzt werden soll."
+                },
+                "value": {
+                    "name": "Neuer Wert in kWh (optional)",
+                    "description": "Erzwingt einen bestimmten kWh-Wert, statt den aktuellen API-Messwert zu verwenden. Leer lassen, um zu übernehmen, was die API bei der nächsten Aktualisierung meldet."
+                },
+                "baseline": {
+                    "name": "Hardware-Basiswert in kWh (optional)",
+                    "description": "Legt den Basiswert des Hardware-Rohzählers manuell fest, der bei Tagessensoren für die Differenzberechnung verwendet wird."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Alle Energiesensoren eines Sicherungskastens zurücksetzen",
+            "description": "Setzt alle Tages- und Gesamt-Energiesensoren eines Sicherungskastens mit WHEM in einem Schritt zurück. Verwende dies, nachdem der Sicherungskasten auf Werkseinstellungen zurückgesetzt wurde und alle Hardware-Energiezähler gleichzeitig auf null gefallen sind. Die Basiswerte aller Tagessensoren werden gelöscht (die Tageswerte beginnen wieder bei 0) und die Sperren aller Gesamtsensoren werden aufgehoben (jeder übernimmt den nächsten API-Messwert ohne Prüfung). Wähle ein beliebiges Gerät aus, das zum Sicherungskasten gehört – den Sicherungskasten selbst, eine Sicherung oder einen CT. Eine Zusammenfassung des Zurücksetzens pro Sensor findest du im Protokoll von Home Assistant.",
+            "fields": {
+                "device_id": {
+                    "name": "Gerät des Sicherungskastens",
+                    "description": "Ein beliebiges Gerät, das zum Sicherungskasten mit WHEM gehört – der Sicherungskasten, eine Sicherung oder ein CT. Alle Energiesensoren des so ermittelten Sicherungskastens werden zurückgesetzt."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Sicherungskasten",
+            "empty_title": "Keine Sicherungskästen vorhanden",
+            "empty_body": "Diese Integration hat noch keinen Sicherungskasten mit LDATA oder LWHEM gefunden. Möglicherweise startet sie noch, oder sie kann Leviton nicht erreichen.",
+            "fed_from": "Versorgt von {panel}",
+            "zoom": "Vergrößerung {factor}"
+        },
+        "card": {
+            "name": {
+                "panel": "Sicherungskasten",
+                "breaker": "Sicherung",
+                "unmonitored_breaker": "Nicht überwachte Sicherung",
+                "sub_panel": "Unterverteilung"
+            },
+            "state": {
+                "on": "Ein",
+                "off": "Aus",
+                "off_remote": "Aus (Fernzugriff)",
+                "tripped": "Ausgelöst",
+                "unavailable": "Nicht verfügbar",
+                "unknown": "Unbekannt",
+                "switching": "Wird geschaltet…",
+                "switching_on": "Wird eingeschaltet…",
+                "switching_off": "Wird ausgeschaltet…",
+                "not_monitored": "Nicht überwacht",
+                "switch_failed": "Schalten fehlgeschlagen"
+            },
+            "alarm": {
+                "over_current": "Überstrom",
+                "over_voltage": "Überspannung",
+                "under_voltage": "Unterspannung"
+            },
+            "trip": {
+                "ground_fault": "Fehlerstrom",
+                "arc_fault": "Fehlerlichtbogen",
+                "parallel_arc_fault": "Paralleler Lichtbogen",
+                "miswire": "Neutralleiterfehler",
+                "overload": "Überlast",
+                "short_circuit": "Kurzschluss",
+                "over_current": "Überstrom"
+            },
+            "protection": {
+                "afci": "Fehlerlichtbogen (AFCI)",
+                "gfci": "Fehlerstrom (GFCI)",
+                "dual": "Fehlerlichtbogen und Fehlerstrom (AFCI/GFCI)",
+                "gfpe": "Fehlerstrom, Geräteschutz (GFPE)"
+            },
+            "raw": {
+                "manualon": "Ein (manuell)",
+                "manualoff": "Aus (manuell)",
+                "remoteon": "Ein (Fernzugriff)",
+                "remoteoff": "Aus (Fernzugriff)",
+                "tripped": "Ausgelöst",
+                "softwaretrip": "Ausgelöst (Software)",
+                "upstreamoff": "Zuleitung spannungslos",
+                "notcommunicating": "Keine Kommunikation",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Gesamtlast",
+                "leg_1": "Phase 1",
+                "leg_2": "Phase 2",
+                "frequency": "Frequenz",
+                "today": "Heute",
+                "today_import": "Einspeisung heute",
+                "cloud": "Cloud",
+                "wifi": "Wi-Fi",
+                "update": "Update",
+                "cloud_connected": "Mit der Leviton-Cloud verbunden",
+                "cloud_offline": "Sicherungskasten offline",
+                "cloud_unknown": "Cloud-Status unbekannt",
+                "wifi_signal": "Wi-Fi-Signal: {dbm} dBm",
+                "wifi_unknown": "Wi-Fi-Signal unbekannt",
+                "update_available": "Firmware-Update verfügbar (in der My Leviton-App installieren)",
+                "update_current": "Firmware ist aktuell",
+                "main": "Haupt",
+                "main_breaker": "Hauptsicherung",
+                "main_breaker_dead": "Hauptsicherung (beide Phasen ohne Spannung)"
+            },
+            "label": {
+                "circuit": "Stromkreis {position}",
+                "circuits": "Stromkreise {first} und {second}",
+                "amp_rating": "{amps} Ampere",
+                "feeds_sub_panel": "Versorgt eine Unterverteilung",
+                "feeds": "Versorgt {name}",
+                "show_details": "Details anzeigen",
+                "open_sub_panel": "Unterverteilung öffnen",
+                "open_sub_panel_dashboard": "Dashboard der Unterverteilung öffnen",
+                "breaker_switch": "Sicherung {name}"
+            },
+            "action": {
+                "turn_on": "Einschalten",
+                "turn_off": "Ausschalten",
+                "turn_on_name": "{name} einschalten",
+                "turn_off_name": "{name} ausschalten",
+                "cancel": "Abbrechen",
+                "close": "Schließen",
+                "got_it": "Verstanden",
+                "device_page": "Geräteseite"
+            },
+            "confirm": {
+                "turn_on_title": "{name} einschalten?",
+                "turn_off_title": "{name} ausschalten?",
+                "turn_on_body": "Dieser Stromkreis wird unter Spannung gesetzt.",
+                "turn_off_body": "Alles an diesem Stromkreis wird stromlos.",
+                "gen1_off_warning": "Dies ist eine Gen 1-Sicherung: Ist sie einmal aus, lässt sie sich nur von Hand am Sicherungskasten wieder einschalten.",
+                "blocked_title": "{name} lässt sich nicht per Fernzugriff einschalten",
+                "blocked_body": "Dies ist eine smarte Gen 1-Sicherung. Sie kann über Home Assistant ausgeschaltet werden, muss aber von Hand am Sicherungskasten wieder eingeschaltet werden."
+            },
+            "detail": {
+                "both_legs": "Beide Phasen",
+                "leg": "Phase {leg}",
+                "one_pole": "1-polig",
+                "two_pole": "2-polig",
+                "controls": "Steuerung",
+                "breaker_power": "Sicherung schalten",
+                "power_on_hint": "Ein: Strom fließt",
+                "power_tripped_hint": "Ausgelöst: Prüfe den Stromkreis, bevor du die Sicherung wieder einschaltest",
+                "power_remote_off_hint": "Per Fernzugriff ausgeschaltet",
+                "gen1_note": "Gen 1-Sicherung: Sie kann per Fernzugriff ausgeschaltet werden, muss aber von Hand am Sicherungskasten wieder eingeschaltet werden.",
+                "control_disabled": "Die Fernsteuerung ist deaktiviert. Aktiviere {option} in den Optionen der LDATA-Integration, um Sicherungen über Home Assistant zu schalten.",
+                "option_breaker_control": "Steuerung der Sicherungen erlauben",
+                "identify": "Identifizieren",
+                "identify_hint": "Lässt die LED dieser Sicherung blinken, damit du sie im Sicherungskasten findest",
+                "blink_led": "LED blinken lassen",
+                "identify_disabled": "Aktiviere {option} in den Optionen der LDATA-Integration, um die LED einer Sicherung von hier aus blinken zu lassen.",
+                "option_identify": "Identifizieren erlauben",
+                "live": "Live",
+                "power": "Leistung",
+                "current": "Stromstärke",
+                "load": "Auslastung",
+                "energy": "Energie",
+                "today": "Heute",
+                "today_import": "Heute, Einspeisung",
+                "lifetime": "Gesamt",
+                "lifetime_import": "Gesamt, Einspeisung",
+                "protection": "Schutz",
+                "protection_type": "Schutztyp",
+                "operational_state": "Betriebszustand",
+                "diagnostics": "Diagnose",
+                "breaker_state": "Zustand der Sicherung",
+                "second_pole": "Zweiter Pol",
+                "remote_state": "Zustand der Fernsteuerung",
+                "previous_state": "Vorheriger Zustand",
+                "change_reason": "Grund der letzten Änderung",
+                "circuit_type": "Stromkreistyp",
+                "critical": "Kritischer Stromkreis",
+                "locked": "Gesperrt",
+                "meter_chip": "Messchip",
+                "bluetooth": "Bluetooth-Signal",
+                "device": "Gerät",
+                "model": "Modell",
+                "rating": "Nennstrom",
+                "remote_reset": "Ferneinschaltung",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Seriennummer",
+                "status": "Status",
+                "other_entities": "Weitere Entitäten",
+                "yes": "Ja",
+                "no": "Nein",
+                "ok": "OK",
+                "fault": "Störung",
+                "alarm": "Alarm",
+                "not_set": "Nicht festgelegt",
+                "remote_reset_yes": "Unterstützt (Gen 2)",
+                "remote_reset_no": "Nicht unterstützt (Gen 1)",
+                "standard_breaker": "Dies ist eine herkömmliche (nicht smarte) Sicherung. Leviton meldet dafür weder Zustand noch Messwerte, daher gibt es hier nichts zu steuern oder zu überwachen.",
+                "standard_breaker_hint": "Falls sie eine Unterverteilung mit eigenem LWHEM- oder LDATA-Hub versorgt, wähle diese Sicherung für sie unter Unterverteilungen in den Optionen der LDATA-Integration aus. Die Live-Last der Unterverteilung wird dann an dieser Sicherung angezeigt."
+            },
+            "setup": {
+                "choose_title": "Wähle deinen Sicherungskasten",
+                "choose_body": "Setze {option} auf das Gerät deines Sicherungskastens mit LDATA oder LWHEM (Einstellungen → Geräte & Dienste → Geräte → dein Sicherungskasten).",
+                "empty_title": "Keine Sicherungen für diesen Sicherungskasten gefunden",
+                "check_devices": "Geräteliste für die Karte verfügbar",
+                "check_entities": "Entitätenliste für die Karte verfügbar",
+                "check_device_id": "Konfigurierte Geräte-ID",
+                "check_panel_found": "Gerät des Sicherungskastens gefunden",
+                "check_total_devices": "Gefundene Geräte",
+                "check_linked_any": "Mit einem Sicherungskasten verknüpfte Geräte",
+                "check_linked_this": "Mit diesem Sicherungskasten verknüpfte Geräte",
+                "check_breakers": "Sicherungen mit einer Status-Entität",
+                "empty_help": "Wenn das Gerät des Sicherungskastens nicht gefunden wird, kopiere die Geräte-ID von der Geräteseite des Sicherungskastens selbst, nicht von der einer Sicherung. Wenn es gefunden wird, aber nichts damit verknüpft ist, aktualisiere die LDATA-Integration und starte Home Assistant neu; ein Neuladen reicht nicht aus."
+            }
+        },
+        "editor": {
+            "card_name": "LDATA-Sicherungskasten-Karte",
+            "card_description": "Eine realistische, interaktive Ansicht deines Leviton-Sicherungskastens.",
+            "panel": "Sicherungskasten",
+            "panel_help": "Wähle den Sicherungskasten (den LDATA- oder LWHEM-Hub), keine Sicherung. Verknüpfungen zu Unterverteilungen werden in den Optionen der LDATA-Integration festgelegt.",
+            "title": "Titel (optional)",
+            "show_power": "Live-Werte in Watt und Ampere anzeigen",
+            "show_alarms": "Alarme kennzeichnen",
+            "toggle": "Sicherungen am Sicherungskasten schalten",
+            "confirm": "Vor dem Schalten nachfragen",
+            "show_panel_info": "Messwerte des Sicherungskastens anzeigen",
+            "appearance": "Beleuchtung",
+            "appearance_auto": "Dem Design folgen",
+            "appearance_light": "Hell",
+            "appearance_dark": "Gedimmt",
+            "main_breaker": "Nennstrom der Hauptsicherung (optional)",
+            "main_breaker_help": "Leviton meldet die Hauptsicherung nicht. Leer lassen bei einem Sicherungskasten ohne Hauptsicherung."
+        }
+    }
+}

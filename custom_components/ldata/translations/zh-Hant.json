@@ -1,0 +1,340 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "帳號已經設定完成",
+            "reauth_successful": "重新認證成功"
+        },
+        "error": {
+            "cannot_connect": "連線失敗",
+            "invalid_auth": "身份驗證無效",
+            "invalid_2fa": "雙重認證碼無效，請再試一次",
+            "no_residence_selected": "請至少選擇一個住家才能繼續",
+            "unknown": "未預期錯誤"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "my.leviton.com 使用者名稱",
+                    "password": "my.leviton.com 密碼",
+                    "three_phase": "120/208V 三相供電（公寓／大廈）",
+                    "allow_breaker_control": "允許控制斷路器",
+                    "allow_led_blink": "允許識別斷路器",
+                    "enable_decora": "啟用 Decora Smart Wi-Fi 裝置",
+                    "show_sidebar_panel": "於側邊欄顯示配電箱"
+                },
+                "title": "設定 LDATA"
+            },
+            "2fa": {
+                "title": "雙重認證",
+                "description": "{username} 需要雙重認證碼。請查看您的驗證器應用程式或電子郵件，並在下方輸入認證碼。",
+                "data": {
+                    "2fa_code": "認證碼"
+                }
+            },
+            "residence": {
+                "title": "選擇住家",
+                "description": "您的帳號可存取多個住家。請選擇要設定的住家；選取的每個住家都會成為各自獨立的 LDATA 整合條目，彼此的配電箱與斷路器不會混在一起。",
+                "data": {
+                    "residences": "住家"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Leviton LDATA 選項",
+                "data": {
+                    "three_phase": "120/208V 三相供電（公寓／大廈）",
+                    "allow_breaker_control": "允許控制斷路器",
+                    "allow_led_blink": "允許識別斷路器",
+                    "enable_decora": "啟用 Decora Smart Wi-Fi 裝置",
+                    "show_sidebar_panel": "於側邊欄顯示配電箱",
+                    "gap_handling": "資料中斷處理（僅限舊版韌體）",
+                    "gap_threshold": "資料中斷臨界值（分鐘）",
+                    "ha_inform_rate": "HA 更新間隔（秒）",
+                    "log_warnings": "記錄整合的一般錯誤",
+                    "log_data_warnings": "記錄資料數值警告（突增／重置）",
+                    "log_all_raw": "記錄原始 WebSocket 字串",
+                    "log_parsed_data": "記錄所有已解析資料",
+                    "enable_specific_logging": "啟用特定欄位記錄",
+                    "log_fields": "要記錄的欄位"
+                },
+                "data_description": {
+                    "ha_inform_rate": "在 Home Assistant 中更新感測器的間隔（2-600 秒）。數值越小反應越即時，但系統負載與資料庫寫入次數也越高。",
+                    "three_phase": "僅在您的供電為 120/208V 三相時啟用（常見於共用電力公司變壓器的公寓與大廈）。在此模式下，雙極斷路器的電壓會乘以 √3/2（約 0.866），以回報正確的 208V 線間電壓，而非錯誤的 240V。標準的 120/240V 單相住宅供電切勿啟用。",
+                    "allow_breaker_control": "啟用後，HA 會建立開關實體，讓您可以將斷路器跳脫或復歸。停用時，斷路器僅作為感測器使用。",
+                    "allow_led_blink": "啟用後，HA 會為每個斷路器建立一個開關，用來讓其 LED 閃爍，方便在配電箱中找到該斷路器。停用時，不會建立任何 LED 控制實體。此選項與「允許控制斷路器」互不影響。",
+                    "enable_decora": "啟用後，LDATA 也會探索您帳號中的 Decora Smart Wi-Fi 開關、調光器、風扇、插座與 GFCI，並為其建立實體。若您沒有這類裝置，請保持停用，以避免每次更新時產生額外的 API 呼叫。",
+                    "show_sidebar_panel": "在 Home Assistant 側邊欄新增一個項目，可開啟配電箱的全頁互動式畫面。若您有多個 LDATA 條目，同一個頁面會顯示所有已開啟此選項之條目的配電箱。",
+                    "gap_handling": "供沒有硬體電能計數器的舊版韌體使用的備援機制。設定斷路器的每日電能感測器在未收到資料時如何處理中斷期間。略過：最安全。外推：假設維持最後已知的功率。平均：折衷做法。韌體 2.0+ 的配電箱使用硬體計數器，會忽略此設定。",
+                    "gap_threshold": "持續多久未收到資料後啟動資料中斷處理（1-30 分鐘）。僅適用於舊版韌體的「功率×時間」備援計算。",
+                    "log_warnings": "記錄整合當機或網路錯誤。",
+                    "log_data_warnings": "記錄 Leviton 資料不一致的警告（突增／重置）。",
+                    "log_all_raw": "記錄從 Leviton 收到的原始 WebSocket 字串。警告：輸出內容不會遮蔽敏感資訊，會包含認證權杖與裝置 ID。未進行除錯時請停用。",
+                    "log_parsed_data": "每次解析 WebSocket 或 REST 更新後，記錄斷路器與配電箱的所有欄位。不必啟用原始 WebSocket 記錄，即可核對數值。",
+                    "enable_specific_logging": "記錄指定的欄位。暫時啟用「記錄所有已解析資料」即可查到欄位名稱。",
+                    "log_fields": "若要查詢欄位名稱，請啟用「記錄所有已解析資料」並查看 Home Assistant 日誌。請在上方輸入欄位名稱，並以逗號分隔。"
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "分電箱",
+                        "description": "若某個配電箱由另一個配電箱中的斷路器供電，請在其名稱旁選擇該斷路器。之後該斷路器會顯示分電箱的即時負載，並可由此前往該分電箱。"
+                    }
+                }
+            }
+        },
+        "error": {
+            "sub_panel_loop": "兩個配電箱不能互相供電。請檢查「分電箱」下的選擇。"
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "略過：資料中斷期間不累計電能",
+                "extrapolate": "外推：假設中斷期間維持最後已知的功率",
+                "average": "平均：取中斷前與恢復後功率的平均值"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "不是分電箱"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "重置電能感測器基準線",
+            "description": "重置卡住的 LDATA 電能感測器。請查看 Home Assistant 日誌，確認重置前後的目前數值。若為累計感測器（消耗／輸入），感測器會接受下一次的 API 讀數。若為每日感測器，則會清除基準線，並依目前的 API 數值重新建立。",
+            "fields": {
+                "entity_id": {
+                    "name": "實體",
+                    "description": "要重置的 LDATA 電能感測器。"
+                },
+                "value": {
+                    "name": "新數值（kWh，選填）",
+                    "description": "強制使用指定的 kWh 數值，而非目前的 API 讀數。保留空白則接受 API 於下次更新時回報的數值。"
+                },
+                "baseline": {
+                    "name": "硬體基準線（kWh，選填）",
+                    "description": "手動設定原始硬體計數器的基準線，用於每日感測器的差值計算。"
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "重置配電箱的所有電能感測器",
+            "description": "一次重置某個 WHEM 配電箱的所有每日與累計電能感測器。請在配電箱恢復原廠設定後使用，此時所有硬體電能計數器會同時歸零。所有每日感測器的基準線都會清除（每日總量從 0 重新開始），所有累計感測器的保護機制也會解除（各感測器會無條件接受下一次的 API 讀數）。請選擇屬於該配電箱的任一裝置：配電箱本身、斷路器或 CT。請查看 Home Assistant 日誌中各感測器的重置摘要。",
+            "fields": {
+                "device_id": {
+                    "name": "配電箱裝置",
+                    "description": "屬於該 WHEM 配電箱的任一裝置：配電箱、斷路器或 CT。所對應配電箱的所有電能感測器都會重置。"
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "配電箱",
+            "empty_title": "沒有可顯示的配電箱",
+            "empty_body": "此整合尚未找到 LDATA 或 LWHEM 配電箱。可能仍在啟動中，或無法連線至 Leviton。",
+            "fed_from": "由「{panel}」供電",
+            "zoom": "縮放 {factor}"
+        },
+        "card": {
+            "name": {
+                "panel": "配電箱",
+                "breaker": "斷路器",
+                "unmonitored_breaker": "未監控的斷路器",
+                "sub_panel": "分電箱"
+            },
+            "state": {
+                "on": "開啟",
+                "off": "關閉",
+                "off_remote": "遠端關閉",
+                "tripped": "已跳脫",
+                "unavailable": "不可用",
+                "unknown": "未知",
+                "switching": "切換中…",
+                "switching_on": "開啟中…",
+                "switching_off": "關閉中…",
+                "not_monitored": "未監控",
+                "switch_failed": "切換失敗"
+            },
+            "alarm": {
+                "over_current": "過電流",
+                "over_voltage": "過電壓",
+                "under_voltage": "低電壓"
+            },
+            "trip": {
+                "ground_fault": "接地故障",
+                "arc_fault": "電弧故障",
+                "parallel_arc_fault": "並聯電弧故障",
+                "miswire": "中性線接線錯誤",
+                "overload": "過載",
+                "short_circuit": "短路",
+                "over_current": "過電流"
+            },
+            "protection": {
+                "afci": "電弧故障（AFCI）",
+                "gfci": "接地故障（GFCI）",
+                "dual": "電弧故障與接地故障（AFCI/GFCI）",
+                "gfpe": "接地故障，設備保護（GFPE）"
+            },
+            "raw": {
+                "manualon": "手動開啟",
+                "manualoff": "手動關閉",
+                "remoteon": "遠端開啟",
+                "remoteoff": "遠端關閉",
+                "tripped": "已跳脫",
+                "softwaretrip": "軟體跳脫",
+                "upstreamoff": "上游斷電",
+                "notcommunicating": "通訊中斷",
+                "normal": "正常"
+            },
+            "meter": {
+                "panel_load": "配電箱負載",
+                "leg_1": "火線 1",
+                "leg_2": "火線 2",
+                "frequency": "頻率",
+                "today": "本日",
+                "today_import": "本日輸入",
+                "cloud": "雲端",
+                "wifi": "Wi-Fi",
+                "update": "更新",
+                "cloud_connected": "已連線至 Leviton 雲端",
+                "cloud_offline": "配電箱離線",
+                "cloud_unknown": "雲端狀態未知",
+                "wifi_signal": "Wi-Fi 訊號：{dbm} dBm",
+                "wifi_unknown": "Wi-Fi 訊號未知",
+                "update_available": "有可用的韌體更新（請在 My Leviton 應用程式中安裝）",
+                "update_current": "韌體已是最新版本",
+                "main": "總開關",
+                "main_breaker": "總開關",
+                "main_breaker_dead": "總開關（兩條火線皆無電壓）"
+            },
+            "label": {
+                "circuit": "迴路 {position}",
+                "circuits": "迴路 {first} 與 {second}",
+                "amp_rating": "{amps} 安培",
+                "feeds_sub_panel": "供電至分電箱",
+                "feeds": "供電至「{name}」",
+                "show_details": "顯示詳細資訊",
+                "open_sub_panel": "檢視分電箱",
+                "open_sub_panel_dashboard": "開啟分電箱儀表板",
+                "breaker_switch": "{name} 斷路器"
+            },
+            "action": {
+                "turn_on": "開啟電源",
+                "turn_off": "關閉電源",
+                "turn_on_name": "開啟「{name}」",
+                "turn_off_name": "關閉「{name}」",
+                "cancel": "取消",
+                "close": "關閉",
+                "got_it": "知道了",
+                "device_page": "裝置頁面"
+            },
+            "confirm": {
+                "turn_on_title": "要開啟「{name}」嗎？",
+                "turn_off_title": "要關閉「{name}」嗎？",
+                "turn_on_body": "此迴路將會通電。",
+                "turn_off_body": "此迴路上的所有用電設備都會斷電。",
+                "gen1_off_warning": "這是 Gen 1 斷路器：關閉後，只能到配電箱前手動重新開啟。",
+                "blocked_title": "無法遠端開啟「{name}」",
+                "blocked_body": "這是 Gen 1 智慧斷路器。可以從 Home Assistant 將其關閉，但必須到配電箱前手動復歸。"
+            },
+            "detail": {
+                "both_legs": "兩條火線",
+                "leg": "火線 {leg}",
+                "one_pole": "單極",
+                "two_pole": "雙極",
+                "controls": "控制",
+                "breaker_power": "斷路器電源",
+                "power_on_hint": "開啟：供電中",
+                "power_tripped_hint": "已跳脫：復歸前請先檢查迴路",
+                "power_remote_off_hint": "已從遠端關閉",
+                "gen1_note": "Gen 1 斷路器：可以遠端關閉，但必須到配電箱前手動復歸。",
+                "control_disabled": "遠端控制已關閉。若要從 Home Assistant 控制斷路器，請在 LDATA 整合選項中開啟「{option}」。",
+                "option_breaker_control": "允許控制斷路器",
+                "identify": "識別",
+                "identify_hint": "讓此斷路器的 LED 閃爍，方便在配電箱中找到它",
+                "blink_led": "LED 閃爍",
+                "identify_disabled": "若要在這裡讓斷路器的 LED 閃爍，請在 LDATA 整合選項中開啟「{option}」。",
+                "option_identify": "允許識別斷路器",
+                "live": "即時資料",
+                "power": "功率",
+                "current": "電流",
+                "load": "負載",
+                "energy": "電能",
+                "today": "本日",
+                "today_import": "本日輸入",
+                "lifetime": "累計",
+                "lifetime_import": "累計輸入",
+                "protection": "保護",
+                "protection_type": "保護類型",
+                "operational_state": "運作狀態",
+                "diagnostics": "診斷",
+                "breaker_state": "斷路器狀態",
+                "second_pole": "第二極",
+                "remote_state": "遠端狀態",
+                "previous_state": "先前狀態",
+                "change_reason": "上次變更原因",
+                "circuit_type": "迴路類型",
+                "critical": "關鍵迴路",
+                "locked": "鎖定",
+                "meter_chip": "計量晶片",
+                "bluetooth": "Bluetooth 訊號",
+                "device": "裝置",
+                "model": "型號",
+                "rating": "額定電流",
+                "remote_reset": "遠端復歸",
+                "firmware": "韌體",
+                "hardware": "硬體",
+                "serial": "序號",
+                "status": "狀態",
+                "other_entities": "其他實體",
+                "yes": "是",
+                "no": "否",
+                "ok": "正常",
+                "fault": "故障",
+                "alarm": "警報",
+                "not_set": "未設定",
+                "remote_reset_yes": "支援（Gen 2）",
+                "remote_reset_no": "不支援（Gen 1）",
+                "standard_breaker": "這是一般（非智慧型）斷路器。Leviton 不會回報其狀態或讀數，因此這裡沒有可控制或監控的項目。",
+                "standard_breaker_hint": "若它供電給本身裝有 LWHEM 或 LDATA 集線器的分電箱，請在 LDATA 整合選項的「分電箱」中為該配電箱選擇此斷路器。之後此斷路器上會顯示該分電箱的即時負載。"
+            },
+            "setup": {
+                "choose_title": "選擇您的配電箱",
+                "choose_body": "請將 {option} 設為您的 LDATA 或 LWHEM 配電箱裝置（設定 → 裝置與服務 → 裝置 → 您的配電箱）。",
+                "empty_title": "找不到此配電箱的斷路器",
+                "check_devices": "面板可取得裝置列表",
+                "check_entities": "面板可取得實體列表",
+                "check_device_id": "已設定的裝置 ID",
+                "check_panel_found": "找到配電箱裝置",
+                "check_total_devices": "找到的裝置",
+                "check_linked_any": "已連結至任一配電箱的裝置",
+                "check_linked_this": "已連結至此配電箱的裝置",
+                "check_breakers": "具有 Status 實體的斷路器",
+                "empty_help": "若找不到配電箱裝置，請從配電箱本身的裝置頁面複製裝置 ID，而不是從斷路器的裝置頁面複製。若已找到配電箱裝置，但沒有任何裝置與其連結，請更新 LDATA 整合並重新啟動 Home Assistant；只重新載入是不夠的。"
+            }
+        },
+        "editor": {
+            "card_name": "LDATA 配電箱面板",
+            "card_description": "以擬真、可互動的方式呈現您的 Leviton 配電箱。",
+            "panel": "配電箱",
+            "panel_help": "請選擇配電箱（LDATA 或 LWHEM 集線器），而非斷路器。分電箱的連結需在 LDATA 整合選項中設定。",
+            "title": "標題（選填）",
+            "show_power": "顯示即時功率與電流",
+            "show_alarms": "標示警報",
+            "toggle": "在配電箱圖上直接切換斷路器開關",
+            "confirm": "切換前先確認",
+            "show_panel_info": "顯示配電箱讀數",
+            "appearance": "光線",
+            "appearance_auto": "跟隨主題",
+            "appearance_light": "明亮",
+            "appearance_dark": "昏暗",
+            "main_breaker": "總開關額定電流（選填）",
+            "main_breaker_help": "Leviton 不會回報總開關的資訊。若配電箱沒有總開關，請保留空白。"
+        }
+    }
+}

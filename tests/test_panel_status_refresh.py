@@ -49,6 +49,14 @@ def test_refresh_panel_status_unchanged_returns_false() -> None:
     assert service.status_data is before
 
 
+def test_refresh_panel_status_synchronizing_hub_stays_connected() -> None:
+    service = _service({"LDATA": [{"id": "LDATA-1", "model": "DAU", "status": "SYNCHRONIZING", "connected": False}]})
+    before = service.status_data
+
+    assert service.refresh_panel_status() is False
+    assert service.status_data is before
+
+
 def test_refresh_panel_status_only_queries_known_panel_types() -> None:
     service = _service({"LDATA": [{"id": "LDATA-1", "connected": True}]})
 

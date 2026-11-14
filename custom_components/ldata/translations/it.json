@@ -1,0 +1,340 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "L'account è già configurato",
+            "reauth_successful": "La riautenticazione è avvenuta con successo"
+        },
+        "error": {
+            "cannot_connect": "Impossibile connettersi",
+            "invalid_auth": "Autenticazione non valida",
+            "invalid_2fa": "Codice a due fattori non valido, riprova",
+            "no_residence_selected": "Seleziona almeno un'abitazione per continuare",
+            "unknown": "Errore imprevisto"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Nome utente my.leviton.com",
+                    "password": "Password my.leviton.com",
+                    "three_phase": "Fornitura 120/208V da rete trifase (appartamento/condominio)",
+                    "allow_breaker_control": "Consenti il comando degli interruttori",
+                    "allow_led_blink": "Consenti l'identificazione",
+                    "enable_decora": "Abilita i dispositivi Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Mostra il quadro elettrico nella barra laterale"
+                },
+                "title": "Configura LDATA"
+            },
+            "2fa": {
+                "title": "Autenticazione a due fattori",
+                "description": "Per {username} è richiesto un codice di autenticazione a due fattori. Controlla la tua app di autenticazione o la tua email e inserisci il codice qui sotto.",
+                "data": {
+                    "2fa_code": "Codice di autenticazione"
+                }
+            },
+            "residence": {
+                "title": "Seleziona le abitazioni",
+                "description": "Il tuo account ha accesso a più abitazioni. Seleziona quelle da configurare: ognuna diventa una voce distinta dell'integrazione LDATA, così i rispettivi quadri e interruttori restano ben separati.",
+                "data": {
+                    "residences": "Abitazioni"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opzioni Leviton LDATA",
+                "data": {
+                    "three_phase": "Fornitura 120/208V da rete trifase (appartamento/condominio)",
+                    "allow_breaker_control": "Consenti il comando degli interruttori",
+                    "allow_led_blink": "Consenti l'identificazione",
+                    "enable_decora": "Abilita i dispositivi Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Mostra il quadro elettrico nella barra laterale",
+                    "gap_handling": "Gestione delle lacune nei dati (solo firmware meno recenti)",
+                    "gap_threshold": "Soglia delle lacune (min)",
+                    "ha_inform_rate": "Intervallo di aggiornamento di HA (secondi)",
+                    "log_warnings": "Registra gli errori generali dell'integrazione",
+                    "log_data_warnings": "Registra gli avvisi sui valori dei dati (picchi/azzeramenti)",
+                    "log_all_raw": "Registra la stringa WebSocket grezza",
+                    "log_parsed_data": "Registra tutti i dati analizzati",
+                    "enable_specific_logging": "Abilita la registrazione di campi specifici",
+                    "log_fields": "Campi da registrare"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Frequenza di aggiornamento dei sensori in Home Assistant (2-600 secondi). Valori più bassi = maggiore reattività, ma più carico di sistema e più scritture sul database.",
+                    "three_phase": "Abilita solo se la tua fornitura è trifase 120/208V (comune in appartamenti e condomini alimentati da un trasformatore condiviso). In questa modalità le tensioni degli interruttori bipolari vengono moltiplicate per √3/2 (~0.866) per riportare la tensione corretta di 208V tra fase e fase anziché il valore errato di 240V. NON abilitare per una normale fornitura residenziale monofase 120/240V.",
+                    "allow_breaker_control": "Se abilitata, HA crea entità interruttore (switch) che ti consentono di far scattare/riarmare gli interruttori del quadro. Se disabilitata, gli interruttori del quadro vengono trattati solo come sensori.",
+                    "allow_led_blink": "Se abilitata, HA crea per ogni interruttore del quadro un'entità interruttore (switch) che ne fa lampeggiare il LED per individuarlo fisicamente. Se disabilitata, non viene creata alcuna entità di comando del LED. Indipendente da \"Consenti il comando degli interruttori\".",
+                    "enable_decora": "Se abilitata, LDATA rileva anche interruttori da parete, dimmer, ventilatori, prese e GFCI Decora Smart Wi-Fi presenti nel tuo account e ne crea le entità. Lasciala disabilitata se non ne hai: eviterai chiamate API aggiuntive a ogni aggiornamento.",
+                    "show_sidebar_panel": "Aggiunge alla barra laterale di Home Assistant un elemento che apre una vista interattiva a tutta pagina del tuo quadro elettrico. Se hai più di una voce LDATA, la stessa pagina mostra i quadri elettrici di tutte le voci in cui questa opzione è attiva.",
+                    "gap_handling": "Soluzione di ripiego per i firmware meno recenti privi di contatori di energia hardware. Stabilisce come i sensori di energia giornaliera degli interruttori gestiscono i periodi in cui non arrivano dati. Salta: l'opzione più sicura. Estrapola: presume l'ultima potenza nota. Media: compromesso. I quadri con firmware 2.0+ usano i contatori hardware e ignorano questa impostazione.",
+                    "gap_threshold": "Tempo senza dati prima che si attivi la gestione delle lacune (1-30 minuti). Si applica solo al calcolo di ripiego potenza×tempo sui firmware meno recenti.",
+                    "log_warnings": "Registra gli arresti anomali dell'integrazione o gli errori web.",
+                    "log_data_warnings": "Registra gli avvisi relativi a incoerenze nei dati provenienti da Leviton (picchi/azzeramenti).",
+                    "log_all_raw": "Registra la stringa WebSocket grezza così come viene ricevuta da Leviton. Attenzione: l'output non è oscurato e conterrà token di autenticazione e ID dei dispositivi. Disabilita quando non stai eseguendo il debug.",
+                    "log_parsed_data": "Registra tutti i campi di interruttori e quadri dopo l'analisi di ogni aggiornamento WebSocket o REST. Utile per verificare i valori senza abilitare la registrazione WebSocket grezza.",
+                    "enable_specific_logging": "Registra i campi specificati. Per trovare i nomi dei campi, abilita brevemente \"Registra tutti i dati analizzati\".",
+                    "log_fields": "Per trovare i nomi dei campi, abilita \"Registra tutti i dati analizzati\" e controlla i registri di Home Assistant. Inseriscili qui sopra separati da virgole."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Sottoquadri",
+                        "description": "Se un quadro elettrico è alimentato da un interruttore di un altro quadro, scegli quell'interruttore accanto al suo nome. L'interruttore mostrerà quindi il carico in tempo reale del sottoquadro e permetterà di aprirlo."
+                    }
+                }
+            }
+        },
+        "error": {
+            "sub_panel_loop": "Due quadri elettrici non possono alimentarsi a vicenda. Controlla le scelte in Sottoquadri."
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Salta — Non accumulare energia durante le lacune",
+                "extrapolate": "Estrapola — Presumi che l'ultima potenza nota sia rimasta invariata",
+                "average": "Media — Usa la media tra l'ultima potenza nota e quella alla ripresa"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Non è un sottoquadro"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Reimposta il riferimento di un sensore di energia",
+            "description": "Reimposta un sensore di energia LDATA bloccato. Controlla nel registro di Home Assistant il valore corrente prima e dopo la reimpostazione. Per i sensori del totale complessivo (consumo/importazione), il sensore accetterà la prossima lettura dell'API. Per i sensori giornalieri, i riferimenti vengono cancellati e il sensore riparte dai valori correnti dell'API.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entità",
+                    "description": "Il sensore di energia LDATA da reimpostare."
+                },
+                "value": {
+                    "name": "Nuovo valore in kWh (facoltativo)",
+                    "description": "Forza un valore specifico in kWh invece di usare la lettura corrente dell'API. Lascia vuoto per accettare il valore che l'API riporterà al prossimo aggiornamento."
+                },
+                "baseline": {
+                    "name": "Riferimento hardware in kWh (facoltativo)",
+                    "description": "Imposta manualmente il riferimento grezzo del contatore hardware usato per calcolare le differenze nei sensori giornalieri."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Reimposta tutti i sensori di energia di un quadro",
+            "description": "Reimposta in un'unica operazione tutti i sensori di energia, giornalieri e del totale complessivo, di un quadro WHEM. Da usare dopo un ripristino delle impostazioni di fabbrica del quadro, quando tutti i contatori di energia hardware tornano a zero contemporaneamente. Tutti i riferimenti dei sensori giornalieri vengono cancellati (i totali giornalieri ripartono da 0) e tutte le protezioni dei sensori del totale complessivo vengono rimosse (ognuno accetterà senza condizioni la prossima lettura dell'API). Seleziona un qualsiasi dispositivo appartenente al quadro: il quadro stesso, un interruttore o un CT. Controlla nel registro di Home Assistant il riepilogo della reimpostazione, sensore per sensore.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispositivo del quadro",
+                    "description": "Un qualsiasi dispositivo appartenente al quadro WHEM: il quadro, un interruttore o un CT. Verranno reimpostati tutti i sensori di energia del quadro così individuato."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Quadro elettrico",
+            "empty_title": "Nessun quadro elettrico da mostrare",
+            "empty_body": "Questa integrazione non ha ancora trovato un quadro LDATA o LWHEM. Potrebbe essere ancora in fase di avvio oppure non riuscire a raggiungere Leviton.",
+            "fed_from": "Alimentato da {panel}",
+            "zoom": "Zoom {factor}"
+        },
+        "card": {
+            "name": {
+                "panel": "Quadro",
+                "breaker": "Interruttore",
+                "unmonitored_breaker": "Interruttore non monitorato",
+                "sub_panel": "Sottoquadro"
+            },
+            "state": {
+                "on": "Acceso",
+                "off": "Spento",
+                "off_remote": "Spento da remoto",
+                "tripped": "Scattato",
+                "unavailable": "Non disponibile",
+                "unknown": "Sconosciuto",
+                "switching": "Commutazione…",
+                "switching_on": "Accensione…",
+                "switching_off": "Spegnimento…",
+                "not_monitored": "Non monitorato",
+                "switch_failed": "Comando non riuscito"
+            },
+            "alarm": {
+                "over_current": "Sovracorrente",
+                "over_voltage": "Sovratensione",
+                "under_voltage": "Sottotensione"
+            },
+            "trip": {
+                "ground_fault": "Guasto a terra",
+                "arc_fault": "Guasto d'arco",
+                "parallel_arc_fault": "Arco in parallelo",
+                "miswire": "Neutro mal collegato",
+                "overload": "Sovraccarico",
+                "short_circuit": "Cortocircuito",
+                "over_current": "Sovracorrente"
+            },
+            "protection": {
+                "afci": "Guasto d'arco (AFCI)",
+                "gfci": "Guasto a terra (GFCI)",
+                "dual": "Guasto d'arco e guasto a terra (AFCI/GFCI)",
+                "gfpe": "Guasto a terra, protezione delle apparecchiature (GFPE)"
+            },
+            "raw": {
+                "manualon": "Acceso manualmente",
+                "manualoff": "Spento manualmente",
+                "remoteon": "Acceso da remoto",
+                "remoteoff": "Spento da remoto",
+                "tripped": "Scattato",
+                "softwaretrip": "Scatto via software",
+                "upstreamoff": "Nessuna tensione a monte",
+                "notcommunicating": "Non comunica",
+                "normal": "Normale"
+            },
+            "meter": {
+                "panel_load": "Carico totale",
+                "leg_1": "Fase 1",
+                "leg_2": "Fase 2",
+                "frequency": "Frequenza",
+                "today": "Oggi",
+                "today_import": "Importata oggi",
+                "cloud": "Cloud",
+                "wifi": "Wi-Fi",
+                "update": "Firmware",
+                "cloud_connected": "Connesso al cloud Leviton",
+                "cloud_offline": "Quadro non in linea",
+                "cloud_unknown": "Stato del cloud sconosciuto",
+                "wifi_signal": "Segnale Wi-Fi: {dbm} dBm",
+                "wifi_unknown": "Segnale Wi-Fi sconosciuto",
+                "update_available": "Aggiornamento firmware disponibile (installalo dall'app My Leviton)",
+                "update_current": "Firmware aggiornato",
+                "main": "Generale",
+                "main_breaker": "Interruttore generale",
+                "main_breaker_dead": "Interruttore generale (tensione assente su entrambe le fasi)"
+            },
+            "label": {
+                "circuit": "Circuito {position}",
+                "circuits": "Circuiti {first} e {second}",
+                "amp_rating": "{amps} ampere",
+                "feeds_sub_panel": "Alimenta un sottoquadro",
+                "feeds": "Alimenta {name}",
+                "show_details": "Mostra dettagli",
+                "open_sub_panel": "Apri il sottoquadro",
+                "open_sub_panel_dashboard": "Apri la plancia del sottoquadro",
+                "breaker_switch": "Interruttore {name}"
+            },
+            "action": {
+                "turn_on": "Accendi",
+                "turn_off": "Spegni",
+                "turn_on_name": "Accendi {name}",
+                "turn_off_name": "Spegni {name}",
+                "cancel": "Annulla",
+                "close": "Chiudi",
+                "got_it": "Ho capito",
+                "device_page": "Pagina dispositivo"
+            },
+            "confirm": {
+                "turn_on_title": "Accendere {name}?",
+                "turn_off_title": "Spegnere {name}?",
+                "turn_on_body": "Questo circuito verrà alimentato.",
+                "turn_off_body": "Tutto ciò che è collegato a questo circuito resterà senza corrente.",
+                "gen1_off_warning": "Questo è un interruttore Gen 1: una volta spento, potrà essere riacceso solo a mano dal quadro.",
+                "blocked_title": "Impossibile accendere {name} da remoto",
+                "blocked_body": "Questo è un interruttore smart Gen 1. Può essere spento da Home Assistant, ma deve essere riarmato a mano dal quadro."
+            },
+            "detail": {
+                "both_legs": "Fasi 1 e 2",
+                "leg": "Fase {leg}",
+                "one_pole": "Unipolare",
+                "two_pole": "Bipolare",
+                "controls": "Comandi",
+                "breaker_power": "Alimentazione dell'interruttore",
+                "power_on_hint": "Acceso: la corrente passa",
+                "power_tripped_hint": "Scattato: controlla il circuito prima di riarmare l'interruttore",
+                "power_remote_off_hint": "Spento da remoto",
+                "gen1_note": "Interruttore Gen 1: può essere spento da remoto, ma deve essere riarmato a mano dal quadro.",
+                "control_disabled": "Il comando da remoto è disattivato. Abilita {option} nelle opzioni dell'integrazione LDATA per comandare gli interruttori da Home Assistant.",
+                "option_breaker_control": "Consenti il comando degli interruttori",
+                "identify": "Identifica",
+                "identify_hint": "Fai lampeggiare il LED di questo interruttore per trovarlo nel quadro",
+                "blink_led": "Fai lampeggiare il LED",
+                "identify_disabled": "Abilita {option} nelle opzioni dell'integrazione LDATA per far lampeggiare da qui il LED di un interruttore.",
+                "option_identify": "Consenti l'identificazione",
+                "live": "In tempo reale",
+                "power": "Potenza",
+                "current": "Corrente",
+                "load": "Carico",
+                "energy": "Energia",
+                "today": "Oggi",
+                "today_import": "Importata oggi",
+                "lifetime": "Totale",
+                "lifetime_import": "Importata in totale",
+                "protection": "Protezione",
+                "protection_type": "Tipo di protezione",
+                "operational_state": "Stato operativo",
+                "diagnostics": "Diagnostica",
+                "breaker_state": "Stato dell'interruttore",
+                "second_pole": "Secondo polo",
+                "remote_state": "Stato remoto",
+                "previous_state": "Stato precedente",
+                "change_reason": "Motivo dell'ultimo cambiamento",
+                "circuit_type": "Tipo di circuito",
+                "critical": "Circuito critico",
+                "locked": "Bloccato",
+                "meter_chip": "Chip di misura",
+                "bluetooth": "Segnale Bluetooth",
+                "device": "Dispositivo",
+                "model": "Modello",
+                "rating": "Corrente nominale",
+                "remote_reset": "Riarmo da remoto",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Numero di serie",
+                "status": "Stato",
+                "other_entities": "Altre entità",
+                "yes": "Sì",
+                "no": "No",
+                "ok": "OK",
+                "fault": "Guasto",
+                "alarm": "Allarme",
+                "not_set": "Non impostato",
+                "remote_reset_yes": "Supportato (Gen 2)",
+                "remote_reset_no": "Non supportato (Gen 1)",
+                "standard_breaker": "Questo è un interruttore standard (non smart). Leviton non ne comunica né lo stato né le letture, quindi qui non c'è nulla da comandare o monitorare.",
+                "standard_breaker_hint": "Se alimenta un sottoquadro dotato di un proprio hub LWHEM o LDATA, scegli questo interruttore per quel quadro in Sottoquadri, nelle opzioni dell'integrazione LDATA. Il carico in tempo reale del sottoquadro verrà quindi mostrato su questo interruttore."
+            },
+            "setup": {
+                "choose_title": "Scegli il tuo quadro",
+                "choose_body": "Imposta {option} sul dispositivo del tuo quadro LDATA o LWHEM (Impostazioni → Dispositivi e servizi → Dispositivi → il tuo quadro).",
+                "empty_title": "Nessun interruttore trovato per questo quadro",
+                "check_devices": "Elenco dei dispositivi disponibile per la scheda",
+                "check_entities": "Elenco delle entità disponibile per la scheda",
+                "check_device_id": "ID dispositivo configurato",
+                "check_panel_found": "Dispositivo del quadro trovato",
+                "check_total_devices": "Dispositivi rilevati",
+                "check_linked_any": "Dispositivi collegati a un quadro",
+                "check_linked_this": "Dispositivi collegati a questo quadro",
+                "check_breakers": "Interruttori con un'entità Status",
+                "empty_help": "Se il dispositivo del quadro non viene trovato, copia l'ID dispositivo dalla pagina del dispositivo del quadro stesso, non da quella di un interruttore. Se viene trovato ma non vi è collegato nulla, aggiorna l'integrazione LDATA e riavvia Home Assistant; ricaricarla non basta."
+            }
+        },
+        "editor": {
+            "card_name": "Scheda del quadro LDATA",
+            "card_description": "Una vista realistica e interattiva del tuo quadro elettrico Leviton.",
+            "panel": "Quadro",
+            "panel_help": "Scegli il quadro (l'hub LDATA o LWHEM), non un interruttore. I collegamenti ai sottoquadri si impostano nelle opzioni dell'integrazione LDATA.",
+            "title": "Titolo (facoltativo)",
+            "show_power": "Mostra watt e ampere in tempo reale",
+            "show_alarms": "Segnala gli allarmi",
+            "toggle": "Comanda gli interruttori dal quadro",
+            "confirm": "Chiedi conferma prima di accendere o spegnere",
+            "show_panel_info": "Mostra le letture del quadro",
+            "appearance": "Illuminazione",
+            "appearance_auto": "Segui il tema",
+            "appearance_light": "Luminosa",
+            "appearance_dark": "Soffusa",
+            "main_breaker": "Corrente nominale dell'interruttore generale (facoltativa)",
+            "main_breaker_help": "Leviton non comunica alcun dato sull'interruttore generale. Lascia vuoto per un quadro senza interruttore generale."
+        }
+    }
+}

@@ -1,0 +1,340 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Account is al geconfigureerd",
+            "reauth_successful": "Herauthenticatie geslaagd"
+        },
+        "error": {
+            "cannot_connect": "Kan geen verbinding maken",
+            "invalid_auth": "Ongeldige authenticatie",
+            "invalid_2fa": "Ongeldige 2FA-code, probeer het opnieuw",
+            "no_residence_selected": "Selecteer minimaal één woning om door te gaan",
+            "unknown": "Onverwachte fout"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Gebruikersnaam voor my.leviton.com",
+                    "password": "Wachtwoord voor my.leviton.com",
+                    "three_phase": "120/208V-driefasennet (huur-/koopappartement)",
+                    "allow_breaker_control": "Bediening van automaten toestaan",
+                    "allow_led_blink": "Identificeren toestaan",
+                    "enable_decora": "Decora Smart Wi-Fi-apparaten toevoegen",
+                    "show_sidebar_panel": "Groepenkast in de zijbalk tonen"
+                },
+                "title": "LDATA configureren"
+            },
+            "2fa": {
+                "title": "Tweestapsverificatie",
+                "description": "Voor {username} is een code voor tweestapsverificatie vereist. Kijk in je authenticator-app of je e-mail en voer de code hieronder in.",
+                "data": {
+                    "2fa_code": "Verificatiecode"
+                }
+            },
+            "residence": {
+                "title": "Woning(en) selecteren",
+                "description": "Je account heeft toegang tot meer dan één woning. Selecteer welke je wilt instellen – elke woning die je kiest wordt een eigen LDATA-integratie-item, zodat de groepenkasten en automaten netjes gescheiden blijven.",
+                "data": {
+                    "residences": "Woningen"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opties voor Leviton LDATA",
+                "data": {
+                    "three_phase": "120/208V-driefasennet (huur-/koopappartement)",
+                    "allow_breaker_control": "Bediening van automaten toestaan",
+                    "allow_led_blink": "Identificeren toestaan",
+                    "enable_decora": "Decora Smart Wi-Fi-apparaten toevoegen",
+                    "show_sidebar_panel": "Groepenkast in de zijbalk tonen",
+                    "gap_handling": "Afhandeling van datahiaten (alleen oudere firmware)",
+                    "gap_threshold": "Drempel voor datahiaten (minuten)",
+                    "ha_inform_rate": "HA-update-interval (seconden)",
+                    "log_warnings": "Algemene integratiefouten loggen",
+                    "log_data_warnings": "Waarschuwingen over datawaarden loggen (pieken/resets)",
+                    "log_all_raw": "Ruwe WebSocket-data loggen",
+                    "log_parsed_data": "Alle geparste data loggen",
+                    "enable_specific_logging": "Loggen van specifieke velden inschakelen",
+                    "log_fields": "Te loggen velden"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Hoe vaak de sensoren in Home Assistant worden bijgewerkt (2-600 seconden). Lagere waarden = snellere respons, maar een hogere systeembelasting en meer schrijfacties naar de database.",
+                    "three_phase": "Schakel dit alleen in als je bent aangesloten op een 120/208V-driefasennet (gebruikelijk in huur- en koopappartementen met een gedeelde transformator van de netbeheerder). In deze modus worden de spanningen van 2-polige automaten vermenigvuldigd met √3/2 (~0.866), zodat de juiste spanning van 208V tussen de fasen wordt gerapporteerd in plaats van de onjuiste 240V. Schakel dit NIET in bij een standaard eenfasige 120/240V-huisaansluiting.",
+                    "allow_breaker_control": "Als dit is ingeschakeld, maakt HA schakelaar-entiteiten aan waarmee je automaten kunt uitschakelen en weer inschakelen. Als dit is uitgeschakeld, worden automaten alleen als sensoren behandeld.",
+                    "allow_led_blink": "Als dit is ingeschakeld, maakt HA per automaat een schakelaar aan om de LED te laten knipperen, zodat je de automaat in de groepenkast kunt terugvinden. Als dit is uitgeschakeld, worden er geen entiteiten voor LED-bediening aangemaakt. Staat los van ‘Bediening van automaten toestaan’.",
+                    "enable_decora": "Als dit is ingeschakeld, ontdekt LDATA ook schakelaars, dimmers, ventilatoren, stopcontacten en GFCI’s van Decora Smart Wi-Fi in je account en maakt daar entiteiten voor aan. Laat dit uitgeschakeld als je die niet hebt – dat voorkomt extra API-aanroepen bij elke update.",
+                    "show_sidebar_panel": "Voegt een menu-item toe aan de zijbalk van Home Assistant dat een paginavullende, interactieve weergave van je groepenkast opent. Als je meer dan één LDATA-item hebt, toont dezelfde pagina de groepenkasten van elk item waarvoor dit is ingeschakeld.",
+                    "gap_handling": "Terugvaloptie voor oudere firmware zonder hardwarematige energietellers. Bepaalt hoe de dagelijkse energiesensoren van automaten omgaan met hiaten waarin geen data wordt ontvangen. Overslaan: het veiligst. Extrapoleren: ga uit van het laatst bekende vermogen. Gemiddelde: compromis. Groepenkasten met firmware 2.0+ gebruiken hardwaretellers en negeren deze instelling.",
+                    "gap_threshold": "Tijd zonder data voordat de afhandeling van datahiaten in werking treedt (1-30 minuten). Geldt alleen voor de terugvalberekening vermogen×tijd bij oudere firmware.",
+                    "log_warnings": "Logt crashes van de integratie en webfouten.",
+                    "log_data_warnings": "Logt waarschuwingen over inconsistente data van Leviton (pieken/resets).",
+                    "log_all_raw": "Logt de ruwe WebSocket-data zoals die van Leviton wordt ontvangen. Waarschuwing: de uitvoer is ongefilterd en bevat authenticatietokens en apparaat-ID’s. Schakel dit uit als je niet actief aan het debuggen bent.",
+                    "log_parsed_data": "Logt alle velden van automaten en groepenkast na het parsen van elke WebSocket- of REST-update. Handig om waarden te controleren zonder het loggen van ruwe WebSocket-data in te schakelen.",
+                    "enable_specific_logging": "Logt de opgegeven velden. Veldnamen vind je door kort ‘Alle geparste data loggen’ in te schakelen.",
+                    "log_fields": "Om veldnamen te vinden, schakel je ‘Alle geparste data loggen’ in en bekijk je de logboeken van Home Assistant. Vul ze hierboven in, gescheiden door komma’s."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Onderverdelers",
+                        "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe."
+                    }
+                }
+            }
+        },
+        "error": {
+            "sub_panel_loop": "Twee groepenkasten kunnen elkaar niet voeden. Controleer de keuzes onder Onderverdelers."
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Overslaan – Geen energie optellen tijdens hiaten",
+                "extrapolate": "Extrapoleren – Aannemen dat het laatst bekende vermogen aanhield",
+                "average": "Gemiddelde – Het gemiddelde gebruiken van het laatste vermogen en het vermogen na het hiaat"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Geen onderverdeler"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Basiswaarde van energiesensor resetten",
+            "description": "Reset een vastgelopen LDATA-energiesensor. Bekijk het logboek van Home Assistant voor de huidige waarde voor en na de reset. Totaalsensoren (verbruik/teruglevering) nemen de eerstvolgende API-meting over. Bij dagsensoren worden de basiswaarden gewist en bouwt de sensor zich opnieuw op vanuit de huidige API-waarden.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entiteit",
+                    "description": "De LDATA-energiesensor die gereset moet worden."
+                },
+                "value": {
+                    "name": "Nieuwe waarde in kWh (optioneel)",
+                    "description": "Dwingt een specifieke kWh-waarde af in plaats van de huidige API-meting te gebruiken. Laat leeg om over te nemen wat de API bij de volgende update meldt."
+                },
+                "baseline": {
+                    "name": "Hardware-basiswaarde in kWh (optioneel)",
+                    "description": "Stelt handmatig de basiswaarde van de ruwe hardwareteller in die bij dagsensoren voor de verschilberekening wordt gebruikt."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Alle energiesensoren van een groepenkast resetten",
+            "description": "Reset in één keer alle dag- en totaalsensoren voor energie van een groepenkast met WHEM. Gebruik dit na een fabrieksreset van de groepenkast, wanneer alle hardwarematige energietellers tegelijk naar nul terugvallen. De basiswaarden van alle dagsensoren worden gewist (dagtotalen beginnen weer bij 0) en de blokkering van alle totaalsensoren wordt opgeheven (elke sensor neemt de eerstvolgende API-meting zonder controle over). Selecteer een willekeurig apparaat dat bij de groepenkast hoort – de groepenkast zelf, een automaat of een CT. Bekijk het logboek van Home Assistant voor een samenvatting van de reset per sensor.",
+            "fields": {
+                "device_id": {
+                    "name": "Apparaat van de groepenkast",
+                    "description": "Een willekeurig apparaat dat bij de groepenkast met WHEM hoort – de groepenkast, een automaat of een CT. Alle energiesensoren van de bijbehorende groepenkast worden gereset."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Groepenkast",
+            "empty_title": "Geen groepenkasten om te tonen",
+            "empty_body": "Deze integratie heeft nog geen groepenkast met LDATA of LWHEM gevonden. Mogelijk is de integratie nog aan het opstarten of is Leviton niet bereikbaar.",
+            "fed_from": "Gevoed vanuit {panel}",
+            "zoom": "Zoom {factor}"
+        },
+        "card": {
+            "name": {
+                "panel": "Groepenkast",
+                "breaker": "Automaat",
+                "unmonitored_breaker": "Niet-gemonitorde automaat",
+                "sub_panel": "Onderverdeler"
+            },
+            "state": {
+                "on": "Aan",
+                "off": "Uit",
+                "off_remote": "Uit (op afstand)",
+                "tripped": "Uitgevallen",
+                "unavailable": "Niet beschikbaar",
+                "unknown": "Onbekend",
+                "switching": "Schakelt…",
+                "switching_on": "Schakelt in…",
+                "switching_off": "Schakelt uit…",
+                "not_monitored": "Niet gemonitord",
+                "switch_failed": "Schakelen mislukt"
+            },
+            "alarm": {
+                "over_current": "Overstroom",
+                "over_voltage": "Overspanning",
+                "under_voltage": "Onderspanning"
+            },
+            "trip": {
+                "ground_fault": "Aardlek",
+                "arc_fault": "Vlamboogfout",
+                "parallel_arc_fault": "Parallelle vlamboog",
+                "miswire": "Fout in nuldraad",
+                "overload": "Overbelasting",
+                "short_circuit": "Kortsluiting",
+                "over_current": "Overstroom"
+            },
+            "protection": {
+                "afci": "Vlamboogfout (AFCI)",
+                "gfci": "Aardlek (GFCI)",
+                "dual": "Vlamboogfout en aardlek (AFCI/GFCI)",
+                "gfpe": "Aardlek, beveiliging van apparatuur (GFPE)"
+            },
+            "raw": {
+                "manualon": "Aan (handmatig)",
+                "manualoff": "Uit (handmatig)",
+                "remoteon": "Aan (op afstand)",
+                "remoteoff": "Uit (op afstand)",
+                "tripped": "Uitgevallen",
+                "softwaretrip": "Uitgeschakeld (software)",
+                "upstreamoff": "Geen voeding",
+                "notcommunicating": "Geen communicatie",
+                "normal": "Normaal"
+            },
+            "meter": {
+                "panel_load": "Totale belasting",
+                "leg_1": "Fase 1",
+                "leg_2": "Fase 2",
+                "frequency": "Frequentie",
+                "today": "Vandaag",
+                "today_import": "Vandaag terug",
+                "cloud": "Cloud",
+                "wifi": "Wi-Fi",
+                "update": "Update",
+                "cloud_connected": "Verbonden met de Leviton-cloud",
+                "cloud_offline": "Groepenkast offline",
+                "cloud_unknown": "Cloudstatus onbekend",
+                "wifi_signal": "Wi-Fi-signaal: {dbm} dBm",
+                "wifi_unknown": "Wi-Fi-signaal onbekend",
+                "update_available": "Firmware-update beschikbaar (installeer deze in de My Leviton-app)",
+                "update_current": "Firmware is up-to-date",
+                "main": "Hoofd",
+                "main_breaker": "Hoofdschakelaar",
+                "main_breaker_dead": "Hoofdschakelaar (beide fasen spanningsloos)"
+            },
+            "label": {
+                "circuit": "Groep {position}",
+                "circuits": "Groepen {first} en {second}",
+                "amp_rating": "{amps} ampère",
+                "feeds_sub_panel": "Voedt een onderverdeler",
+                "feeds": "Voedt {name}",
+                "show_details": "Details tonen",
+                "open_sub_panel": "Onderverdeler openen",
+                "open_sub_panel_dashboard": "Dashboard van onderverdeler openen",
+                "breaker_switch": "Automaat {name}"
+            },
+            "action": {
+                "turn_on": "Inschakelen",
+                "turn_off": "Uitschakelen",
+                "turn_on_name": "{name} inschakelen",
+                "turn_off_name": "{name} uitschakelen",
+                "cancel": "Annuleren",
+                "close": "Sluiten",
+                "got_it": "Begrepen",
+                "device_page": "Apparaatpagina"
+            },
+            "confirm": {
+                "turn_on_title": "{name} inschakelen?",
+                "turn_off_title": "{name} uitschakelen?",
+                "turn_on_body": "Deze groep komt onder spanning te staan.",
+                "turn_off_body": "Alles op deze groep komt zonder stroom te zitten.",
+                "gen1_off_warning": "Dit is een Gen 1-automaat: als hij eenmaal uit is, kun je hem alleen met de hand in de groepenkast weer inschakelen.",
+                "blocked_title": "{name} kan niet op afstand worden ingeschakeld",
+                "blocked_body": "Dit is een slimme Gen 1-automaat. Je kunt hem vanuit Home Assistant uitschakelen, maar je moet hem met de hand in de groepenkast weer inschakelen."
+            },
+            "detail": {
+                "both_legs": "Beide fasen",
+                "leg": "Fase {leg}",
+                "one_pole": "1-polig",
+                "two_pole": "2-polig",
+                "controls": "Bediening",
+                "breaker_power": "Automaat schakelen",
+                "power_on_hint": "Aan: er loopt stroom",
+                "power_tripped_hint": "Uitgevallen: controleer de groep voordat je de automaat weer inschakelt",
+                "power_remote_off_hint": "Op afstand uitgeschakeld",
+                "gen1_note": "Gen 1-automaat: je kunt hem op afstand uitschakelen, maar je moet hem met de hand in de groepenkast weer inschakelen.",
+                "control_disabled": "Bediening op afstand staat uit. Schakel {option} in bij de opties van de LDATA-integratie om automaten vanuit Home Assistant te schakelen.",
+                "option_breaker_control": "Bediening van automaten toestaan",
+                "identify": "Identificeren",
+                "identify_hint": "Laat de LED van deze automaat knipperen om hem in de groepenkast terug te vinden",
+                "blink_led": "LED laten knipperen",
+                "identify_disabled": "Schakel {option} in bij de opties van de LDATA-integratie om de LED van een automaat vanaf hier te laten knipperen.",
+                "option_identify": "Identificeren toestaan",
+                "live": "Live",
+                "power": "Vermogen",
+                "current": "Stroom",
+                "load": "Belasting",
+                "energy": "Energie",
+                "today": "Vandaag",
+                "today_import": "Vandaag, teruglevering",
+                "lifetime": "Totaal",
+                "lifetime_import": "Totaal, teruglevering",
+                "protection": "Beveiliging",
+                "protection_type": "Type beveiliging",
+                "operational_state": "Bedrijfsstatus",
+                "diagnostics": "Diagnose",
+                "breaker_state": "Status van de automaat",
+                "second_pole": "Tweede pool",
+                "remote_state": "Status bediening op afstand",
+                "previous_state": "Vorige status",
+                "change_reason": "Reden van laatste wijziging",
+                "circuit_type": "Type groep",
+                "critical": "Kritieke groep",
+                "locked": "Vergrendeld",
+                "meter_chip": "Meetchip",
+                "bluetooth": "Bluetooth-signaal",
+                "device": "Apparaat",
+                "model": "Model",
+                "rating": "Nominale stroom",
+                "remote_reset": "Inschakelen op afstand",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Serienummer",
+                "status": "Status",
+                "other_entities": "Overige entiteiten",
+                "yes": "Ja",
+                "no": "Nee",
+                "ok": "OK",
+                "fault": "Storing",
+                "alarm": "Alarm",
+                "not_set": "Niet ingesteld",
+                "remote_reset_yes": "Ondersteund (Gen 2)",
+                "remote_reset_no": "Niet ondersteund (Gen 1)",
+                "standard_breaker": "Dit is een standaard (niet-slimme) automaat. Leviton geeft hiervoor geen status of meetwaarden door, dus valt er hier niets te bedienen of te monitoren.",
+                "standard_breaker_hint": "Als hij een onderverdeler voedt met een eigen LWHEM- of LDATA-hub, kies deze automaat dan voor die kast onder Onderverdelers bij de opties van de LDATA-integratie. De actuele belasting van de onderverdeler wordt daarna bij deze automaat getoond."
+            },
+            "setup": {
+                "choose_title": "Kies je groepenkast",
+                "choose_body": "Stel {option} in op het apparaat van je groepenkast met LDATA of LWHEM (Instellingen → Apparaten en diensten → Apparaten → je groepenkast).",
+                "empty_title": "Geen automaten gevonden voor deze groepenkast",
+                "check_devices": "Apparatenlijst beschikbaar voor de kaart",
+                "check_entities": "Entiteitenlijst beschikbaar voor de kaart",
+                "check_device_id": "Geconfigureerd apparaat-ID",
+                "check_panel_found": "Apparaat van de groepenkast gevonden",
+                "check_total_devices": "Gevonden apparaten",
+                "check_linked_any": "Apparaten gekoppeld aan een groepenkast",
+                "check_linked_this": "Apparaten gekoppeld aan deze groepenkast",
+                "check_breakers": "Automaten met een Status-entiteit",
+                "empty_help": "Als het apparaat van de groepenkast niet wordt gevonden, kopieer dan het apparaat-ID van de apparaatpagina van de groepenkast zelf, niet van die van een automaat. Als het wel wordt gevonden maar er niets aan gekoppeld is, werk dan de LDATA-integratie bij en herstart Home Assistant; herladen is niet genoeg."
+            }
+        },
+        "editor": {
+            "card_name": "LDATA-groepenkastkaart",
+            "card_description": "Een realistische, interactieve weergave van je Leviton-groepenkast.",
+            "panel": "Groepenkast",
+            "panel_help": "Kies de groepenkast (de LDATA- of LWHEM-hub), niet een automaat. Koppelingen met onderverdelers stel je in bij de opties van de LDATA-integratie.",
+            "title": "Titel (optioneel)",
+            "show_power": "Actuele watt- en ampèrewaarden tonen",
+            "show_alarms": "Alarmen markeren",
+            "toggle": "Automaten schakelen vanuit de groepenkast",
+            "confirm": "Bevestiging vragen voor het schakelen",
+            "show_panel_info": "Meetwaarden van de groepenkast tonen",
+            "appearance": "Verlichting",
+            "appearance_auto": "Thema volgen",
+            "appearance_light": "Helder",
+            "appearance_dark": "Gedimd",
+            "main_breaker": "Nominale stroom hoofdschakelaar (optioneel)",
+            "main_breaker_help": "Leviton geeft de hoofdschakelaar niet door. Laat leeg voor een groepenkast zonder hoofdschakelaar."
+        }
+    }
+}

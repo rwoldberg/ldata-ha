@@ -1,0 +1,340 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Contul a fost configurat deja",
+            "reauth_successful": "Reautentificarea s-a realizat cu succes"
+        },
+        "error": {
+            "cannot_connect": "Conectarea a eșuat",
+            "invalid_auth": "Autentificare nevalidă",
+            "invalid_2fa": "Cod de autentificare cu doi factori nevalid. Încearcă din nou.",
+            "no_residence_selected": "Selectează cel puțin o locuință pentru a continua",
+            "unknown": "Eroare neașteptată"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Utilizator my.leviton.com",
+                    "password": "Parolă my.leviton.com",
+                    "three_phase": "Alimentare din rețea 120/208V (apartament/bloc)",
+                    "allow_breaker_control": "Permite controlul disjunctoarelor",
+                    "allow_led_blink": "Permite identificarea",
+                    "enable_decora": "Activează dispozitivele Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Afișează tabloul electric în bara laterală"
+                },
+                "title": "Configurare LDATA"
+            },
+            "2fa": {
+                "title": "Autentificare cu doi factori",
+                "description": "Este necesar un cod de autentificare cu doi factori pentru {username}. Verifică aplicația de autentificare sau e-mailul și introdu codul mai jos.",
+                "data": {
+                    "2fa_code": "Cod de autentificare"
+                }
+            },
+            "residence": {
+                "title": "Selectează locuințele",
+                "description": "Contul tău are acces la mai multe locuințe. Selectează-le pe cele pe care vrei să le configurezi — fiecare locuință aleasă devine o intrare separată a integrării LDATA, astfel încât tablourile și disjunctoarele lor rămân clar separate.",
+                "data": {
+                    "residences": "Locuințe"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Opțiuni Leviton LDATA",
+                "data": {
+                    "three_phase": "Alimentare din rețea 120/208V (apartament/bloc)",
+                    "allow_breaker_control": "Permite controlul disjunctoarelor",
+                    "allow_led_blink": "Permite identificarea",
+                    "enable_decora": "Activează dispozitivele Decora Smart Wi-Fi",
+                    "show_sidebar_panel": "Afișează tabloul electric în bara laterală",
+                    "gap_handling": "Tratarea golurilor de date (doar firmware mai vechi)",
+                    "gap_threshold": "Prag pentru goluri de date (min)",
+                    "ha_inform_rate": "Interval de actualizare HA (secunde)",
+                    "log_warnings": "Jurnalizează erorile generale ale integrării",
+                    "log_data_warnings": "Jurnalizează avertismentele privind valorile datelor (vârfuri/resetări)",
+                    "log_all_raw": "Jurnalizează șirul WebSocket brut",
+                    "log_parsed_data": "Jurnalizează toate datele interpretate",
+                    "enable_specific_logging": "Activează jurnalizarea anumitor câmpuri",
+                    "log_fields": "Câmpuri de jurnalizat"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Cât de des sunt actualizați senzorii în Home Assistant (2-600 de secunde). Valori mai mici = reacție mai rapidă, dar încărcare mai mare a sistemului și mai multe scrieri în baza de date.",
+                    "three_phase": "Activează doar dacă alimentarea ta este trifazată, de 120/208V (frecventă în apartamente și blocuri cu transformatoare de distribuție comune). În acest mod, tensiunile disjunctoarelor bipolare sunt înmulțite cu √3/2 (~0.866) pentru a raporta tensiunea corectă de 208V între faze, în locul valorii incorecte de 240V. NU activa pentru alimentarea rezidențială monofazată standard, de 120/240V.",
+                    "allow_breaker_control": "Când este activată, HA creează entități de tip comutator care îți permit să declanșezi/rearmezi disjunctoarele. Când este dezactivată, disjunctoarele sunt tratate doar ca senzori.",
+                    "allow_led_blink": "Când este activată, HA creează câte un comutator pentru fiecare disjunctor, care îi face LED-ul să clipească pentru identificare fizică. Când este dezactivată, nu se creează entități de control al LED-ului. Independentă de „Permite controlul disjunctoarelor”.",
+                    "enable_decora": "Când este activată, LDATA descoperă și creează entități și pentru întrerupătoarele, variatoarele de lumină, ventilatoarele, prizele și dispozitivele GFCI Decora Smart Wi-Fi din contul tău. Las-o dezactivată dacă nu ai astfel de dispozitive — se evită apeluri API suplimentare la fiecare actualizare.",
+                    "show_sidebar_panel": "Adaugă în bara laterală din Home Assistant un element care deschide o vizualizare interactivă, pe toată pagina, a tabloului tău electric. Dacă ai mai multe intrări LDATA, aceeași pagină afișează tablourile electrice ale tuturor intrărilor care au această opțiune activată.",
+                    "gap_handling": "Soluție de rezervă pentru firmware mai vechi, fără contoare de energie hardware. Stabilește cum tratează senzorii de energie zilnică ai disjunctoarelor golurile în care nu se primesc date. Omite: cel mai sigur. Extrapolează: presupune ultima putere cunoscută. Medie: compromis. Tablourile cu firmware 2.0+ folosesc contoarele hardware și ignoră această setare.",
+                    "gap_threshold": "Timpul fără date după care se activează tratarea golurilor (1-30 de minute). Se aplică doar soluției de rezervă putere×timp, pe firmware mai vechi.",
+                    "log_warnings": "Jurnalizează căderile integrării sau erorile web.",
+                    "log_data_warnings": "Jurnalizează avertismentele privind inconsecvențele din datele Leviton (vârfuri/resetări).",
+                    "log_all_raw": "Jurnalizează șirul WebSocket brut, așa cum este primit de la Leviton. Avertisment: datele sensibile nu sunt ascunse, iar jurnalul va conține tokenuri de autentificare și ID-uri de dispozitive. Dezactivează când nu depanezi activ.",
+                    "log_parsed_data": "Jurnalizează toate câmpurile disjunctoarelor și ale tablourilor după interpretarea fiecărei actualizări WebSocket sau REST. Util pentru verificarea valorilor fără a activa jurnalizarea WebSocket brută.",
+                    "enable_specific_logging": "Jurnalizează orice câmp specificat. Numele câmpurilor pot fi aflate activând pentru scurt timp „Jurnalizează toate datele interpretate”.",
+                    "log_fields": "Pentru a afla numele câmpurilor, activează „Jurnalizează toate datele interpretate” și verifică jurnalele Home Assistant. Introdu-le mai sus, separate prin virgulă."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Tablouri secundare",
+                        "description": "Dacă un tablou electric este alimentat dintr-un disjunctor al altui tablou, alege acel disjunctor în dreptul numelui său. Disjunctorul va afișa apoi sarcina în timp real a tabloului secundar și va permite deschiderea acestuia."
+                    }
+                }
+            }
+        },
+        "error": {
+            "sub_panel_loop": "Două tablouri electrice nu se pot alimenta unul pe celălalt. Verifică alegerile de la Tablouri secundare."
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Omite — nu se acumulează energie în timpul golurilor de date",
+                "extrapolate": "Extrapolează — se presupune că ultima putere cunoscută s-a menținut",
+                "average": "Medie — se folosește media dintre ultima putere și cea de la reluare"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Nu este tablou secundar"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Resetează referința senzorului de energie",
+            "description": "Resetează un senzor de energie LDATA blocat. Verifică în jurnalul Home Assistant valoarea curentă dinainte și de după resetare. În cazul senzorilor de energie totală (consum/import), senzorul va accepta următoarea citire de la API. În cazul senzorilor zilnici, referințele sunt șterse și senzorul se restabilește pornind de la valorile curente din API.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entitate",
+                    "description": "Senzorul de energie LDATA care va fi resetat."
+                },
+                "value": {
+                    "name": "Valoare nouă în kWh (opțional)",
+                    "description": "Forțează o anumită valoare în kWh, în loc să se folosească citirea curentă din API. Lasă necompletat pentru a accepta ce raportează API-ul la următoarea actualizare."
+                },
+                "baseline": {
+                    "name": "Referință hardware în kWh (opțional)",
+                    "description": "Setează manual referința brută a contorului hardware, folosită la calculul diferențelor pentru senzorii zilnici."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Resetează toți senzorii de energie ai tabloului",
+            "description": "Resetează într-o singură operațiune toți senzorii de energie zilnică și totală ai unui tablou WHEM. Folosește această acțiune după o resetare la setările din fabrică a tabloului, când toate contoarele hardware de energie revin simultan la zero. Toate referințele senzorilor zilnici sunt șterse (totalurile zilnice repornesc de la 0) și toate protecțiile senzorilor de energie totală sunt ridicate (fiecare va accepta necondiționat următoarea citire de la API). Selectează orice dispozitiv care aparține tabloului — tabloul însuși, un disjunctor sau un CT. Verifică jurnalul Home Assistant pentru un rezumat al resetării pentru fiecare senzor.",
+            "fields": {
+                "device_id": {
+                    "name": "Dispozitivul tabloului",
+                    "description": "Orice dispozitiv care aparține tabloului WHEM — tabloul, un disjunctor sau un CT. Toți senzorii de energie ai tabloului identificat vor fi resetați."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Tablou electric",
+            "empty_title": "Niciun tablou electric de afișat",
+            "empty_body": "Această integrare nu a găsit încă niciun tablou LDATA sau LWHEM. Este posibil să fie încă în curs de pornire sau să nu poată contacta Leviton.",
+            "fed_from": "Alimentat din {panel}",
+            "zoom": "Mărire {factor}"
+        },
+        "card": {
+            "name": {
+                "panel": "Tablou",
+                "breaker": "Disjunctor",
+                "unmonitored_breaker": "Disjunctor nemonitorizat",
+                "sub_panel": "Tablou secundar"
+            },
+            "state": {
+                "on": "Pornit",
+                "off": "Oprit",
+                "off_remote": "Oprit la distanță",
+                "tripped": "Declanșat",
+                "unavailable": "Indisponibil",
+                "unknown": "Necunoscut",
+                "switching": "Se comută…",
+                "switching_on": "Se pornește…",
+                "switching_off": "Se oprește…",
+                "not_monitored": "Nemonitorizat",
+                "switch_failed": "Comutare eșuată"
+            },
+            "alarm": {
+                "over_current": "Supracurent",
+                "over_voltage": "Supratensiune",
+                "under_voltage": "Subtensiune"
+            },
+            "trip": {
+                "ground_fault": "Punere la pământ",
+                "arc_fault": "Defect de arc",
+                "parallel_arc_fault": "Arc paralel",
+                "miswire": "Nul conectat greșit",
+                "overload": "Suprasarcină",
+                "short_circuit": "Scurtcircuit",
+                "over_current": "Supracurent"
+            },
+            "protection": {
+                "afci": "Arc electric (AFCI)",
+                "gfci": "Punere la pământ (GFCI)",
+                "dual": "Arc electric și punere la pământ (AFCI/GFCI)",
+                "gfpe": "Punere la pământ, protecția echipamentelor (GFPE)"
+            },
+            "raw": {
+                "manualon": "Pornit manual",
+                "manualoff": "Oprit manual",
+                "remoteon": "Pornit de la distanță",
+                "remoteoff": "Oprit de la distanță",
+                "tripped": "Declanșat",
+                "softwaretrip": "Declanșare software",
+                "upstreamoff": "Fără alimentare din amonte",
+                "notcommunicating": "Nu comunică",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Sarcină tablou",
+                "leg_1": "Faza 1",
+                "leg_2": "Faza 2",
+                "frequency": "Frecvență",
+                "today": "Astăzi",
+                "today_import": "Import astăzi",
+                "cloud": "Cloud",
+                "wifi": "Wi-Fi",
+                "update": "Actualizare",
+                "cloud_connected": "Conectat la cloudul Leviton",
+                "cloud_offline": "Tablou offline",
+                "cloud_unknown": "Stare cloud necunoscută",
+                "wifi_signal": "Semnal Wi-Fi: {dbm} dBm",
+                "wifi_unknown": "Semnal Wi-Fi necunoscut",
+                "update_available": "Actualizare de firmware disponibilă (instaleaz-o din aplicația My Leviton)",
+                "update_current": "Firmware la zi",
+                "main": "General",
+                "main_breaker": "Disjunctor general",
+                "main_breaker_dead": "Disjunctor general (fără tensiune pe nicio fază)"
+            },
+            "label": {
+                "circuit": "Circuitul {position}",
+                "circuits": "Circuitele {first} și {second}",
+                "amp_rating": "{amps} A",
+                "feeds_sub_panel": "Alimentează un tablou secundar",
+                "feeds": "Alimentează {name}",
+                "show_details": "Afișează detaliile",
+                "open_sub_panel": "Deschide tabloul secundar",
+                "open_sub_panel_dashboard": "Deschide panoul de bord al tabloului secundar",
+                "breaker_switch": "Disjunctor {name}"
+            },
+            "action": {
+                "turn_on": "Pornește",
+                "turn_off": "Oprește",
+                "turn_on_name": "Pornește {name}",
+                "turn_off_name": "Oprește {name}",
+                "cancel": "Anulează",
+                "close": "Închide",
+                "got_it": "Am înțeles",
+                "device_page": "Pagină dispozitiv"
+            },
+            "confirm": {
+                "turn_on_title": "Pornești {name}?",
+                "turn_off_title": "Oprești {name}?",
+                "turn_on_body": "Acest circuit va fi pus sub tensiune.",
+                "turn_off_body": "Tot ce este alimentat de acest circuit va rămâne fără curent.",
+                "gen1_off_warning": "Acesta este un disjunctor Gen 1: odată oprit, poate fi repornit doar manual, de la tablou.",
+                "blocked_title": "Nu se poate porni {name} de la distanță",
+                "blocked_body": "Acesta este un disjunctor inteligent Gen 1. Poate fi oprit din Home Assistant, dar trebuie rearmat manual, de la tablou."
+            },
+            "detail": {
+                "both_legs": "Ambele faze",
+                "leg": "Faza {leg}",
+                "one_pole": "Monopolar",
+                "two_pole": "Bipolar",
+                "controls": "Comenzi",
+                "breaker_power": "Pornire/oprire disjunctor",
+                "power_on_hint": "Pornit: circuitul este alimentat",
+                "power_tripped_hint": "Declanșat: verifică circuitul înainte de a-l rearma",
+                "power_remote_off_hint": "Oprit de la distanță",
+                "gen1_note": "Disjunctor Gen 1: poate fi oprit de la distanță, dar trebuie rearmat manual, de la tablou.",
+                "control_disabled": "Controlul de la distanță este dezactivat. Activează {option} în opțiunile integrării LDATA pentru a porni și opri disjunctoarele din Home Assistant.",
+                "option_breaker_control": "Permite controlul disjunctoarelor",
+                "identify": "Identificare",
+                "identify_hint": "Face LED-ul acestui disjunctor să clipească, pentru a-l găsi în tablou",
+                "blink_led": "Clipire LED",
+                "identify_disabled": "Activează {option} în opțiunile integrării LDATA pentru a face LED-ul unui disjunctor să clipească de aici.",
+                "option_identify": "Permite identificarea",
+                "live": "În timp real",
+                "power": "Putere",
+                "current": "Curent",
+                "load": "Sarcină",
+                "energy": "Energie",
+                "today": "Astăzi",
+                "today_import": "Astăzi, import",
+                "lifetime": "Total",
+                "lifetime_import": "Total, import",
+                "protection": "Protecție",
+                "protection_type": "Tip de protecție",
+                "operational_state": "Stare de funcționare",
+                "diagnostics": "Diagnostic",
+                "breaker_state": "Starea disjunctorului",
+                "second_pole": "Al doilea pol",
+                "remote_state": "Stare comandă la distanță",
+                "previous_state": "Stare anterioară",
+                "change_reason": "Motivul ultimei schimbări",
+                "circuit_type": "Tip de circuit",
+                "critical": "Circuit critic",
+                "locked": "Blocat",
+                "meter_chip": "Cip de măsurare",
+                "bluetooth": "Semnal Bluetooth",
+                "device": "Dispozitiv",
+                "model": "Model",
+                "rating": "Curent nominal",
+                "remote_reset": "Rearmare de la distanță",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Număr de serie",
+                "status": "Stare",
+                "other_entities": "Alte entități",
+                "yes": "Da",
+                "no": "Nu",
+                "ok": "OK",
+                "fault": "Defect",
+                "alarm": "Alarmă",
+                "not_set": "Nesetat",
+                "remote_reset_yes": "Disponibilă (Gen 2)",
+                "remote_reset_no": "Indisponibilă (Gen 1)",
+                "standard_breaker": "Acesta este un disjunctor standard (neinteligent). Leviton nu raportează nicio stare și nicio măsurătoare pentru el, așa că aici nu este nimic de controlat sau de monitorizat.",
+                "standard_breaker_hint": "Dacă alimentează un tablou secundar care are propriul hub LWHEM sau LDATA, alege acest disjunctor pentru acel tablou la Tablouri secundare, în opțiunile integrării LDATA. Sarcina în timp real a tabloului secundar va fi afișată apoi pe acest disjunctor."
+            },
+            "setup": {
+                "choose_title": "Alege tabloul",
+                "choose_body": "Setează {option} la dispozitivul tabloului tău LDATA sau LWHEM (Configurare → Dispozitive și servicii → Dispozitive → tabloul tău).",
+                "empty_title": "Nu s-a găsit niciun disjunctor pentru acest tablou",
+                "check_devices": "Lista de dispozitive disponibilă pentru card",
+                "check_entities": "Lista de entități disponibilă pentru card",
+                "check_device_id": "ID de dispozitiv configurat",
+                "check_panel_found": "Dispozitivul tabloului a fost găsit",
+                "check_total_devices": "Dispozitive detectate",
+                "check_linked_any": "Dispozitive asociate cu un tablou (oricare)",
+                "check_linked_this": "Dispozitive asociate cu acest tablou",
+                "check_breakers": "Disjunctoare cu o entitate Status",
+                "empty_help": "Dacă dispozitivul tabloului nu este găsit, copiază ID-ul dispozitivului de pe pagina de dispozitiv a tabloului, nu de pe cea a unui disjunctor. Dacă este găsit, dar nimic nu este asociat cu el, actualizează integrarea LDATA și repornește Home Assistant; o reîncărcare nu este suficientă."
+            }
+        },
+        "editor": {
+            "card_name": "Card tablou LDATA",
+            "card_description": "O vizualizare realistă și interactivă a tabloului tău electric Leviton.",
+            "panel": "Tablou",
+            "panel_help": "Alege tabloul (hubul LDATA sau LWHEM), nu un disjunctor. Legăturile cu tablourile secundare se definesc în opțiunile integrării LDATA.",
+            "title": "Titlu (opțional)",
+            "show_power": "Afișează wații și amperii în timp real",
+            "show_alarms": "Semnalează alarmele",
+            "toggle": "Pornește și oprește disjunctoarele din tablou",
+            "confirm": "Întreabă înainte de comutare",
+            "show_panel_info": "Afișează măsurătorile tabloului",
+            "appearance": "Iluminare",
+            "appearance_auto": "Urmează tema",
+            "appearance_light": "Puternică",
+            "appearance_dark": "Redusă",
+            "main_breaker": "Curentul nominal al disjunctorului general (opțional)",
+            "main_breaker_help": "Leviton nu raportează disjunctorul general. Lasă necompletat pentru un tablou fără disjunctor general."
+        }
+    }
+}

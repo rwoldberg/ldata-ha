@@ -1,6 +1,7 @@
 """Defines a binary sensor for an LDATA entity."""
 
 import logging
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -8,6 +9,7 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -15,6 +17,7 @@ from .const import DECORA_MODELS_GFCI, DOMAIN, ENABLE_DECORA, ENABLE_DECORA_DEFA
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 from .ldata_base_entity import add_entities_grouped_by_panel, find_panel, is_breaker_on
 from .ldata_entity import LDATAEntity
+from .sub_panels import feeds_of, panel_device
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -202,7 +205,26 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         attributes["orientation"] = self.panel_data.get("orientation", 0)
         attributes["panel_size"] = self.panel_data.get("panel_size")
         attributes["dumb_breakers"] = self.panel_data.get("dumb_breakers", [])
+        attributes["sub_panels"] = self._sub_panels()
         return attributes
+
+    def _sub_panels(self) -> list[dict[str, Any]]:
+        """Return this panel's breakers that feed another load center.
+
+        Set by the user in the integration's options (see sub_panels.py). The
+        panel card reads it here, as it does dumb_breakers, to show a
+        sub-panel's load on the breaker that feeds it.
+        """
+        entry = getattr(self.coordinator, "config_entry", None)
+        if self.hass is None or entry is None:
+            return []
+        dev_reg = dr.async_get(self.hass)
+        linked = []
+        for position, sub_id in feeds_of(entry.options, self.panel_data.get("id")):
+            device = panel_device(dev_reg, entry, sub_id)
+            if device is not None:
+                linked.append({"position": position, "device_id": device.id})
+        return linked
 
 
 # ── Panel alarm sensors ──────────────────────────────────────────────

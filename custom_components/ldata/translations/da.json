@@ -1,0 +1,340 @@
+{
+    "config": {
+        "abort": {
+            "already_configured": "Kontoen er allerede konfigureret",
+            "reauth_successful": "Genautentificering lykkedes"
+        },
+        "error": {
+            "cannot_connect": "Forbindelse mislykkedes",
+            "invalid_auth": "Ugyldig godkendelse",
+            "invalid_2fa": "Ugyldig tofaktorkode, prøv igen",
+            "no_residence_selected": "Vælg mindst én bolig for at fortsætte",
+            "unknown": "Uventet fejl"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "username": "Brugernavn til my.leviton.com",
+                    "password": "Adgangskode til my.leviton.com",
+                    "three_phase": "120/208V-forsyning fra trefaset net (lejlighed/ejerlejlighed)",
+                    "allow_breaker_control": "Tillad styring af automatsikringer",
+                    "allow_led_blink": "Tillad identifikation",
+                    "enable_decora": "Aktivér Decora Smart Wi-Fi-enheder",
+                    "show_sidebar_panel": "Vis eltavlen i sidepanelet"
+                },
+                "title": "Konfigurér LDATA"
+            },
+            "2fa": {
+                "title": "Tofaktorgodkendelse",
+                "description": "Der kræves en tofaktorkode for {username}. Tjek din godkendelsesapp eller e-mail, og indtast koden nedenfor.",
+                "data": {
+                    "2fa_code": "Godkendelseskode"
+                }
+            },
+            "residence": {
+                "title": "Vælg bolig(er)",
+                "description": "Din konto har adgang til mere end én bolig. Vælg, hvilke(n) du vil konfigurere – hver bolig, du vælger, bliver sit eget separate LDATA-integrationsemne, så deres eltavler og automatsikringer holdes tydeligt adskilt.",
+                "data": {
+                    "residences": "Boliger"
+                }
+            }
+        }
+    },
+    "options": {
+        "step": {
+            "init": {
+                "title": "Indstillinger for Leviton LDATA",
+                "data": {
+                    "three_phase": "120/208V-forsyning fra trefaset net (lejlighed/ejerlejlighed)",
+                    "allow_breaker_control": "Tillad styring af automatsikringer",
+                    "allow_led_blink": "Tillad identifikation",
+                    "enable_decora": "Aktivér Decora Smart Wi-Fi-enheder",
+                    "show_sidebar_panel": "Vis eltavlen i sidepanelet",
+                    "gap_handling": "Håndtering af datahuller (kun ældre firmware)",
+                    "gap_threshold": "Tærskel for datahuller (minutter)",
+                    "ha_inform_rate": "Opdateringsinterval for HA (sekunder)",
+                    "log_warnings": "Log generelle integrationsfejl",
+                    "log_data_warnings": "Log advarsler om dataværdier (spidser/nulstillinger)",
+                    "log_all_raw": "Log rå WebSocket-streng",
+                    "log_parsed_data": "Log alle fortolkede data",
+                    "enable_specific_logging": "Aktivér logning af bestemte felter",
+                    "log_fields": "Felter, der skal logges"
+                },
+                "data_description": {
+                    "ha_inform_rate": "Hvor ofte sensorerne opdateres i Home Assistant (2-600 sekunder). Lavere værdier = hurtigere respons, men højere systembelastning og flere databaseskrivninger.",
+                    "three_phase": "Aktivér kun, hvis din elforsyning er 120/208V trefaset (almindeligt i lejligheder og ejerlejligheder med fælles transformer). I denne tilstand ganges spændingen for topolede automatsikringer med √3/2 (~0.866), så den korrekte spænding mellem faserne på 208V rapporteres i stedet for de forkerte 240V. Aktivér IKKE ved almindelig enfaset 120/240V-boligforsyning.",
+                    "allow_breaker_control": "Når dette er aktiveret, opretter HA kontaktentiteter, som lader dig udløse automatsikringer og slå dem til igen. Når det er deaktiveret, behandles automatsikringerne kun som sensorer.",
+                    "allow_led_blink": "Når dette er aktiveret, opretter HA en kontaktentitet pr. automatsikring, der får dens LED til at blinke, så du kan finde den i eltavlen. Når det er deaktiveret, oprettes der ingen entiteter til LED-styring. Uafhængig af ”Tillad styring af automatsikringer”.",
+                    "enable_decora": "Når dette er aktiveret, finder LDATA også Decora Smart Wi-Fi-afbrydere, lysdæmpere, ventilatorer, stikkontakter og GFCI-fejlstrømsafbrydere på din konto og opretter entiteter for dem. Lad det være deaktiveret, hvis du ikke har nogen – så undgås ekstra API-kald ved hver opdatering.",
+                    "show_sidebar_panel": "Tilføjer et punkt i Home Assistants sidepanel, som åbner en interaktiv helsidevisning af din eltavle. Hvis du har mere end ét LDATA-emne, viser den samme side eltavlerne for alle emner, hvor dette er slået til.",
+                    "gap_handling": "Reserveløsning til ældre firmware uden energitællere i hardwaren. Bestemmer, hvordan automatsikringernes daglige energisensorer håndterer huller, når der ikke modtages data. Spring over: sikrest. Ekstrapolér: antag sidst kendte effekt. Gennemsnit: et kompromis. Eltavler med firmware 2.0+ bruger hardwaretællere og ignorerer denne indstilling.",
+                    "gap_threshold": "Tid uden data, før håndteringen af datahuller træder i kraft (1-30 minutter). Gælder kun reserveberegningen effekt×tid på ældre firmware.",
+                    "log_warnings": "Log nedbrud i integrationen eller webfejl.",
+                    "log_data_warnings": "Log advarsler om uoverensstemmelser i data fra Leviton (spidser/nulstillinger).",
+                    "log_all_raw": "Log den rå WebSocket-streng, præcis som den modtages fra Leviton. Advarsel: Outputtet er ucensureret og indeholder godkendelsestokens og enheds-ID'er. Deaktivér, når du ikke aktivt fejlsøger.",
+                    "log_parsed_data": "Log alle felter for automatsikringer og eltavle efter fortolkningen af hver WebSocket- eller REST-opdatering. Nyttigt til at kontrollere værdier uden at aktivere logning af rå WebSocket-data.",
+                    "enable_specific_logging": "Log et hvilket som helst angivet felt. Feltnavnene kan findes ved kortvarigt at aktivere ”Log alle fortolkede data”.",
+                    "log_fields": "Du finder feltnavnene ved at aktivere ”Log alle fortolkede data” og kigge i Home Assistants logfiler. Indtast dem ovenfor adskilt af kommaer."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Undertavler",
+                        "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen."
+                    }
+                }
+            }
+        },
+        "error": {
+            "sub_panel_loop": "To eltavler kan ikke forsyne hinanden. Kontrollér valgene under Undertavler."
+        }
+    },
+    "selector": {
+        "gap_handling": {
+            "options": {
+                "skip": "Spring over – medregn ikke energi under datahuller",
+                "extrapolate": "Ekstrapolér – antag, at den sidst kendte effekt fortsatte",
+                "average": "Gennemsnit – brug gennemsnittet af effekten før og efter hullet"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Ikke en undertavle"
+            }
+        }
+    },
+    "services": {
+        "reset_energy_baseline": {
+            "name": "Nulstil energisensorens basisværdi",
+            "description": "Nulstil en LDATA-energisensor, der har sat sig fast. Tjek Home Assistants log for den aktuelle værdi før og efter nulstillingen. For sensorer med samlet energi (forbrug/import) accepterer sensoren den næste API-aflæsning. For daglige sensorer ryddes basisværdierne, og sensoren starter forfra ud fra de aktuelle API-værdier.",
+            "fields": {
+                "entity_id": {
+                    "name": "Entitet",
+                    "description": "Den LDATA-energisensor, der skal nulstilles."
+                },
+                "value": {
+                    "name": "Ny værdi i kWh (valgfri)",
+                    "description": "Gennemtving en bestemt kWh-værdi i stedet for at bruge den aktuelle API-aflæsning. Lad feltet stå tomt for at acceptere det, API'et rapporterer ved næste opdatering."
+                },
+                "baseline": {
+                    "name": "Hardware-basisværdi i kWh (valgfri)",
+                    "description": "Angiv manuelt basisværdien for den rå hardwaretæller, som bruges til deltaberegninger for daglige sensorer."
+                }
+            }
+        },
+        "reset_panel_energy": {
+            "name": "Nulstil alle eltavlens energisensorer",
+            "description": "Nulstil alle daglige og samlede energisensorer for en WHEM-eltavle i én handling. Brug dette efter en fabriksnulstilling af eltavlen, hvor alle energitællere i hardwaren falder til nul på samme tid. Basisværdierne for alle daglige sensorer ryddes (dagstotalerne starter forfra fra 0), og alle spærringer på sensorerne med samlet energi ophæves (hver sensor accepterer den næste API-aflæsning uden betingelser). Vælg en hvilken som helst enhed, der hører til eltavlen – selve eltavlen, en automatsikring eller en CT. Tjek Home Assistants log for en oversigt over nulstillingen pr. sensor.",
+            "fields": {
+                "device_id": {
+                    "name": "Eltavlens enhed",
+                    "description": "En hvilken som helst enhed, der hører til WHEM-eltavlen – eltavlen, en automatsikring eller en CT. Alle energisensorer for den eltavle, enheden hører til, nulstilles."
+                }
+            }
+        }
+    },
+    "config_panel": {
+        "sidebar": {
+            "title": "Eltavle",
+            "empty_title": "Ingen eltavler at vise",
+            "empty_body": "Integrationen har endnu ikke fundet en LDATA- eller LWHEM-eltavle. Måske er den stadig ved at starte, eller også kan den ikke få forbindelse til Leviton.",
+            "fed_from": "Forsynes fra {panel}",
+            "zoom": "Forstørrelse {factor}"
+        },
+        "card": {
+            "name": {
+                "panel": "Eltavle",
+                "breaker": "Automatsikring",
+                "unmonitored_breaker": "Uovervåget automatsikring",
+                "sub_panel": "Undertavle"
+            },
+            "state": {
+                "on": "Til",
+                "off": "Fra",
+                "off_remote": "Fra (fjernstyret)",
+                "tripped": "Udløst",
+                "unavailable": "Utilgængelig",
+                "unknown": "Ukendt",
+                "switching": "Skifter…",
+                "switching_on": "Slår til…",
+                "switching_off": "Slår fra…",
+                "not_monitored": "Overvåges ikke",
+                "switch_failed": "Kunne ikke skifte"
+            },
+            "alarm": {
+                "over_current": "Overstrøm",
+                "over_voltage": "Overspænding",
+                "under_voltage": "Underspænding"
+            },
+            "trip": {
+                "ground_fault": "Jordfejl",
+                "arc_fault": "Lysbuefejl",
+                "parallel_arc_fault": "Parallel lysbuefejl",
+                "miswire": "Fejl på nulleder",
+                "overload": "Overbelastning",
+                "short_circuit": "Kortslutning",
+                "over_current": "Overstrøm"
+            },
+            "protection": {
+                "afci": "Lysbuefejl (AFCI)",
+                "gfci": "Jordfejl (GFCI)",
+                "dual": "Lysbuefejl og jordfejl (AFCI/GFCI)",
+                "gfpe": "Jordfejl, beskyttelse af udstyr (GFPE)"
+            },
+            "raw": {
+                "manualon": "Manuelt til",
+                "manualoff": "Manuelt fra",
+                "remoteon": "Fjernstyret til",
+                "remoteoff": "Fjernstyret fra",
+                "tripped": "Udløst",
+                "softwaretrip": "Udløst af software",
+                "upstreamoff": "Ingen forsyning opstrøms",
+                "notcommunicating": "Kommunikerer ikke",
+                "normal": "Normal"
+            },
+            "meter": {
+                "panel_load": "Total belastning",
+                "leg_1": "Fase 1",
+                "leg_2": "Fase 2",
+                "frequency": "Frekvens",
+                "today": "I dag",
+                "today_import": "Import i dag",
+                "cloud": "Sky",
+                "wifi": "Wi-Fi",
+                "update": "Opdatering",
+                "cloud_connected": "Forbundet til Levitons sky",
+                "cloud_offline": "Eltavlen er offline",
+                "cloud_unknown": "Skystatus ukendt",
+                "wifi_signal": "Wi-Fi-signal: {dbm} dBm",
+                "wifi_unknown": "Wi-Fi-signal ukendt",
+                "update_available": "Firmwareopdatering tilgængelig (installér den i appen My Leviton)",
+                "update_current": "Firmwaren er opdateret",
+                "main": "Hoved",
+                "main_breaker": "Hovedafbryder",
+                "main_breaker_dead": "Hovedafbryder (ingen spænding på nogen af faserne)"
+            },
+            "label": {
+                "circuit": "Gruppe {position}",
+                "circuits": "Gruppe {first} og {second}",
+                "amp_rating": "{amps} ampere",
+                "feeds_sub_panel": "Forsyner en undertavle",
+                "feeds": "Forsyner {name}",
+                "show_details": "Vis detaljer",
+                "open_sub_panel": "Åbn undertavlen",
+                "open_sub_panel_dashboard": "Åbn undertavlens betjeningspanel",
+                "breaker_switch": "Automatsikring {name}"
+            },
+            "action": {
+                "turn_on": "Slå til",
+                "turn_off": "Slå fra",
+                "turn_on_name": "Slå {name} til",
+                "turn_off_name": "Slå {name} fra",
+                "cancel": "Annullér",
+                "close": "Luk",
+                "got_it": "Forstået",
+                "device_page": "Enhedsside"
+            },
+            "confirm": {
+                "turn_on_title": "Slå {name} til?",
+                "turn_off_title": "Slå {name} fra?",
+                "turn_on_body": "Denne gruppe bliver sat under spænding.",
+                "turn_off_body": "Alt på denne gruppe mister strømmen.",
+                "gen1_off_warning": "Dette er en Gen 1-automatsikring: Når den først er slået fra, kan den kun slås til igen manuelt på eltavlen.",
+                "blocked_title": "{name} kan ikke slås til via fjernstyring",
+                "blocked_body": "Dette er en smart Gen 1-automatsikring. Den kan slås fra via Home Assistant, men skal slås til igen manuelt på eltavlen."
+            },
+            "detail": {
+                "both_legs": "Begge faser",
+                "leg": "Fase {leg}",
+                "one_pole": "1-polet",
+                "two_pole": "2-polet",
+                "controls": "Betjening",
+                "breaker_power": "Automatsikring til/fra",
+                "power_on_hint": "Til: Der er strøm på gruppen",
+                "power_tripped_hint": "Udløst: Tjek gruppen, før du slår den til igen",
+                "power_remote_off_hint": "Slået fra via fjernstyring",
+                "gen1_note": "Gen 1-automatsikring: Den kan slås fra via fjernstyring, men skal slås til igen manuelt på eltavlen.",
+                "control_disabled": "Fjernstyring er slået fra. Aktivér {option} i LDATA-integrationens indstillinger for at slå automatsikringer til og fra via Home Assistant.",
+                "option_breaker_control": "Tillad styring af automatsikringer",
+                "identify": "Identificér",
+                "identify_hint": "Få automatsikringens LED til at blinke, så du kan finde den i eltavlen",
+                "blink_led": "Blink med LED'en",
+                "identify_disabled": "Aktivér {option} i LDATA-integrationens indstillinger for at få en automatsikrings LED til at blinke herfra.",
+                "option_identify": "Tillad identifikation",
+                "live": "Lige nu",
+                "power": "Effekt",
+                "current": "Strøm",
+                "load": "Belastning",
+                "energy": "Energi",
+                "today": "I dag",
+                "today_import": "I dag, import",
+                "lifetime": "I alt",
+                "lifetime_import": "I alt, import",
+                "protection": "Beskyttelse",
+                "protection_type": "Beskyttelsestype",
+                "operational_state": "Driftstilstand",
+                "diagnostics": "Diagnostik",
+                "breaker_state": "Automatsikringens tilstand",
+                "second_pole": "Anden pol",
+                "remote_state": "Fjerntilstand",
+                "previous_state": "Forrige tilstand",
+                "change_reason": "Årsag til seneste ændring",
+                "circuit_type": "Gruppetype",
+                "critical": "Kritisk gruppe",
+                "locked": "Låst",
+                "meter_chip": "Målechip",
+                "bluetooth": "Bluetooth-signal",
+                "device": "Enhed",
+                "model": "Model",
+                "rating": "Mærkestrøm",
+                "remote_reset": "Fjernindkobling",
+                "firmware": "Firmware",
+                "hardware": "Hardware",
+                "serial": "Serienummer",
+                "status": "Status",
+                "other_entities": "Øvrige entiteter",
+                "yes": "Ja",
+                "no": "Nej",
+                "ok": "OK",
+                "fault": "Fejl",
+                "alarm": "Alarm",
+                "not_set": "Ikke angivet",
+                "remote_reset_yes": "Understøttet (Gen 2)",
+                "remote_reset_no": "Ikke understøttet (Gen 1)",
+                "standard_breaker": "Dette er en almindelig automatsikring (ikke smart). Leviton rapporterer hverken tilstand eller målinger for den, så der er intet at styre eller overvåge her.",
+                "standard_breaker_hint": "Hvis den forsyner en undertavle med sin egen LWHEM- eller LDATA-hub, skal du vælge denne automatsikring for den tavle under Undertavler i LDATA-integrationens indstillinger. Derefter vises undertavlens aktuelle belastning på denne automatsikring."
+            },
+            "setup": {
+                "choose_title": "Vælg din eltavle",
+                "choose_body": "Sæt {option} til enheden for din LDATA- eller LWHEM-eltavle (Indstillinger → Enheder & tjenester → Enheder → din eltavle).",
+                "empty_title": "Ingen automatsikringer fundet for denne eltavle",
+                "check_devices": "Enhedslisten er tilgængelig for kortet",
+                "check_entities": "Entitetslisten er tilgængelig for kortet",
+                "check_device_id": "Konfigureret enheds-ID",
+                "check_panel_found": "Eltavlens enhed fundet",
+                "check_total_devices": "Fundne enheder",
+                "check_linked_any": "Enheder knyttet til en eltavle",
+                "check_linked_this": "Enheder knyttet til denne eltavle",
+                "check_breakers": "Automatsikringer med en Status-entitet",
+                "empty_help": "Hvis eltavlens enhed ikke bliver fundet, skal du kopiere enheds-ID'et fra eltavlens egen enhedsside, ikke fra en automatsikrings. Hvis den bliver fundet, men intet er knyttet til den, skal du opdatere LDATA-integrationen og genstarte Home Assistant; det er ikke nok at genindlæse."
+            }
+        },
+        "editor": {
+            "card_name": "LDATA-eltavlekort",
+            "card_description": "En realistisk, interaktiv visning af din Leviton-eltavle.",
+            "panel": "Eltavle",
+            "panel_help": "Vælg eltavlen (LDATA- eller LWHEM-hubben), ikke en automatsikring. Forbindelser til undertavler angives i LDATA-integrationens indstillinger.",
+            "title": "Titel (valgfri)",
+            "show_power": "Vis watt og ampere i realtid",
+            "show_alarms": "Markér alarmer",
+            "toggle": "Slå automatsikringer til og fra direkte i eltavlen",
+            "confirm": "Spørg, før noget slås til eller fra",
+            "show_panel_info": "Vis eltavlens målinger",
+            "appearance": "Belysning",
+            "appearance_auto": "Følg tema",
+            "appearance_light": "Lys",
+            "appearance_dark": "Dæmpet",
+            "main_breaker": "Hovedafbryderens mærkestrøm (valgfri)",
+            "main_breaker_help": "Leviton rapporterer ikke hovedafbryderen. Lad feltet stå tomt for en eltavle uden hovedafbryder."
+        }
+    }
+}

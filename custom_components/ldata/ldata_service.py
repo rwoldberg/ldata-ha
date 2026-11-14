@@ -1275,9 +1275,11 @@ class LDATAService:
     def _is_panel_connected(self, panel: dict) -> bool:
         """Return whether a panel should be treated as connected.
 
-        DAU models report status="READY" instead of connected=True.
+        DAU models report status="READY" instead of connected=True. A hub that
+        is "SYNCHRONIZING" is online too; Leviton's app only shows NOT_READY
+        as disconnected.
         """
-        if panel.get("model") == "DAU" and panel.get("status") == "READY":
+        if panel.get("model") == "DAU" and panel.get("status") in ("READY", "SYNCHRONIZING"):
             return True
         return bool(panel.get("connected", False))
 
