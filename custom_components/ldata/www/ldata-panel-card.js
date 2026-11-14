@@ -219,12 +219,22 @@ const numOrNull = (v) => {
 };
 
 // "ManualON" -> "Manual on", "OverCurrent" -> "Over current"
+// "GFCIErrorPhase2Failed" -> "GFCI error phase 2 failed": Leviton's own names
+// for states this card has no wording for, split into words.
+const RAW_ACRONYMS = /^(AFCI|GFCI|AFCI\/GFCI|GFPE|LVST|SCR|ST|[A-Z])$/;
 const prettyRaw = (v) => {
   if (v == null || v === "") return "—";
-  const s = String(v)
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
+  const words = String(v)
+    .replace(/AFCIGFCI/g, "AFCI/GFCI")
+    .replace(/(AFCI|GFCI|GFPE|LVST|SCR)(?=[A-Z])/g, "$1 ")
+    .replace(/([a-z])([A-Z0-9])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .replace(/(\d)([A-Za-z])/g, "$1 $2")
     .replace(/_/g, " ")
-    .toLowerCase();
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => (RAW_ACRONYMS.test(word) ? word : word.toLowerCase()));
+  const s = words.join(" ");
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
@@ -244,25 +254,32 @@ const PROTECTION = {
 // those are the faces there is artwork for.
 const FACES = { 1: "sagd", 2: "sg" };
 
-function protectionOf(model) {
+// A breaker's hardware version names the same thing ("AFCI-01", "AFGF-01",
+// "GFPE-01"; "MTR-010" for a standard one). Used when the model is not a
+// catalog number this card can read.
+const HARDWARE = { AFCI: "A", AFGF: "D", GFCI: "G", GFPE: "E" };
+
+function protectionOf(model, hardware) {
   const found = /^LB\d{3}-?([A-Z0-9])S/i.exec(String(model || "").trim());
-  return (found && PROTECTION[found[1].toUpperCase()]) || null;
+  if (found) return PROTECTION[found[1].toUpperCase()] || null;
+  const kind = /^(AFCI|AFGF|GFCI|GFPE)\b/i.exec(String(hardware || "").trim());
+  return kind ? PROTECTION[HARDWARE[kind[1].toUpperCase()]] : null;
 }
 
-// Why a breaker tripped, from Leviton's state names (GFCIFault,
-// AFCISerialArc15AFault, AFCIParallelFault, AFCIMiswire, OverloadTrip,
-// ShortCircuitTrip, OverCurrentTripPhase1, ...). The last two columns are
-// what the "AF" and "GF" LEDs do for it in Leviton's handle and LED table:
-// solid, blinking once a second, or blinking every three seconds. The first
-// match wins, so the narrower names come first.
+// Why a breaker tripped. These are the trip states of Leviton's own app (its
+// breakerCurrentState list), matched whole so that nothing else is taken for
+// one: the operational states of a failing breaker have AFCI and GFCI in
+// their names too. The last two columns are what the "AF" and "GF" LEDs do
+// for it in Leviton's handle and LED table: solid, blinking once a second,
+// or blinking every three seconds.
 const TRIP_CAUSES = [
-  [/miswire/i, "miswire", "off", "slow"],
-  [/parallel/i, "parallel_arc_fault", "blink", "off"],
-  [/afci|arc/i, "arc_fault", "on", "off"],
-  [/gfci|gfpe|ground/i, "ground_fault", "off", "on"],
-  [/overload/i, "overload", "off", "off"],
-  [/short/i, "short_circuit", "off", "off"],
-  [/over.?current/i, "over_current", "off", "off"],
+  [/^AFCIMiswire$/i, "miswire", "off", "slow"],
+  [/^AFCIParallelFault$/i, "parallel_arc_fault", "blink", "off"],
+  [/^AFCISerialArc\d+AFault$/i, "arc_fault", "on", "off"],
+  [/^GFCIFault$/i, "ground_fault", "off", "on"],
+  [/^OverloadTrip$/i, "overload", "off", "off"],
+  [/^ShortCircuitTrip$/i, "short_circuit", "off", "off"],
+  [/^OverCurrentTripPhase\d$/i, "over_current", "off", "off"],
 ];
 
 function tripCause(value) {
@@ -271,7 +288,17 @@ function tripCause(value) {
   return null;
 }
 
-const isTripState = (value) => /trip/i.test(value == null ? "" : String(value)) || !!tripCause(value);
+// Leviton's own app shows every one of these as tripped, UpstreamFault too.
+const isTripState = (value) => /trip|^UpstreamFault$/i.test(value == null ? "" : String(value)) || !!tripCause(value);
+
+// The breaker's electronics failed their self-test (operational state
+// AFCISelfTestFailure, AFCIGFCISelfTestFailure, GFCISelfTestFailureWithLVST):
+// its cause LEDs flash fast and it has to be replaced.
+const isSelfTestFailure = (value) => /SelfTestFailure/i.test(value == null ? "" : String(value));
+// Operational states that are not a problem. Leviton's app treats UNDEFINED
+// like Normal.
+const OP_FINE = ["normal", "undefined", "unknown", "unavailable", ""];
+const opIsFine = (value) => OP_FINE.includes(String(value == null ? "" : value).toLowerCase());
 
 // Material Design Icons (Apache 2.0) — inlined so the card has no runtime
 // dependency on HA's icon set being loaded.
@@ -1219,7 +1246,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       if (!Number.isFinite(position) || taken.has(position)) continue;
       taken.add(position);
       const poles = Number(a.poles) === 2 ? 2 : 1;
-      const protection = protectionOf(a.model);
+      const protection = protectionOf(a.model, a.hardware);
       // The face to draw: the protected one where there is artwork for it.
       const face = protection && FACES[poles].includes(protection.face) ? protection.face : "s";
       slots.push({
@@ -1409,9 +1436,11 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     s.led = vis === "pending" || s.blinkOn ? "blink" : vis === "remote-off" ? "on" : "off";
     // The cause LEDs are fed from the line side: they stay lit after a trip.
     const lit = available && tripped && cause;
+    const op = available && r.operationalState && st[r.operationalState] ? st[r.operationalState].state : null;
+    const selfTest = isSelfTestFailure(op);
     s.cause = lit ? cause.key : null;
-    s.ledAf = lit && s.hasAf ? cause.af : "off";
-    s.ledGf = lit && s.hasGf ? cause.gf : "off";
+    s.ledAf = !s.hasAf ? "off" : selfTest ? "fast" : lit ? cause.af : "off";
+    s.ledGf = !s.hasGf ? "off" : selfTest ? "fast" : lit ? cause.gf : "off";
     s.watts = cfg.show_power ? this._num(r.watts) : null;
     s.amps = cfg.show_power ? this._num(r.amps) : null;
 
@@ -1420,8 +1449,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       if (r.overCurrent && st[r.overCurrent] && st[r.overCurrent].state === "on") alarms.push(this._t("card.alarm.over_current"));
       if (r.overVoltage && st[r.overVoltage] && st[r.overVoltage].state === "on") alarms.push(this._t("card.alarm.over_voltage"));
       if (r.underVoltage && st[r.underVoltage] && st[r.underVoltage].state === "on") alarms.push(this._t("card.alarm.under_voltage"));
-      const op = r.operationalState && st[r.operationalState] ? st[r.operationalState].state : null;
-      if (op && !["Normal", "unknown", "unavailable", ""].includes(op)) alarms.push(this._raw(op));
+      if (op && !opIsFine(op)) alarms.push(this._raw(op));
     }
     s.alarms = alarms;
 
@@ -2501,7 +2529,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         tone = stateObj.state === "on" ? "bad" : stateObj.state === "off" ? "good" : "";
       } else if (def.kind === "opstate") {
         text = this._raw(stateObj.state);
-        tone = stateObj.state === "Normal" ? "good" : "bad";
+        tone = stateObj.state === "Normal" ? "good" : opIsFine(stateObj.state) ? "" : "bad";
       } else if (def.kind === "raw") {
         text = this._raw(stateObj.state);
         tone = isTripState(stateObj.state) ? "bad" : "";
@@ -2867,6 +2895,8 @@ button { font: inherit; }
 [data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf { animation: ldp-blink 1s steps(1, end) infinite; }
 /* A miswired neutral: one flash every three seconds. */
 [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf { animation: ldp-blink-slow 3s steps(1, end) infinite; }
+/* A failed self-test: both flash five times a second. */
+[data-af="fast"] > .led--af, [data-gf="fast"] > .led--gf { animation: ldp-blink 0.2s steps(1, end) infinite; }
 @keyframes ldp-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
 @keyframes ldp-blink-slow { 0% { opacity: 1; } 17% { opacity: 0; } }
 
@@ -2988,7 +3018,8 @@ button { font: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   [data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf,
-  [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf, .lbl[data-vis="pending"] .lbl-sub { animation: none; opacity: 1; }
+  [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf, [data-af="fast"] > .led--af, [data-gf="fast"] > .led--gf,
+  .lbl[data-vis="pending"] .lbl-sub { animation: none; opacity: 1; }
   .lbl-bar i { transition: none; }
 }
 
