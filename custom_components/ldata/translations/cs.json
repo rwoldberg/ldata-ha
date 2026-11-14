@@ -137,7 +137,8 @@
             "title": "Rozvaděč",
             "empty_title": "Žádné rozvaděče k zobrazení",
             "empty_body": "Integrace zatím nenašla žádný rozvaděč LDATA ani LWHEM. Možná se teprve spouští, nebo se nemůže spojit se službou Leviton.",
-            "fed_from": "Napájeno z: {panel}"
+            "fed_from": "Napájeno z: {panel}",
+            "zoom": "Přiblížení {factor}"
         },
         "card": {
             "name": {

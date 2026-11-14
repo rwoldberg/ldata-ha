@@ -137,7 +137,8 @@
             "title": "Elcentral",
             "empty_title": "Inga elcentraler att visa",
             "empty_body": "Integrationen har inte hittat någon LDATA- eller LWHEM-elcentral ännu. Den kanske fortfarande startar, eller så når den inte Leviton.",
-            "fed_from": "Matas från {panel}"
+            "fed_from": "Matas från {panel}",
+            "zoom": "Förstoring {factor}"
         },
         "card": {
             "name": {

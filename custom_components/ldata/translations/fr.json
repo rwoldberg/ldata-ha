@@ -137,7 +137,8 @@
             "title": "Panneau électrique",
             "empty_title": "Aucun panneau électrique à afficher",
             "empty_body": "Cette intégration n'a encore trouvé aucun panneau LDATA ou LWHEM. Elle est peut-être encore en cours de démarrage, ou elle ne parvient pas à joindre Leviton.",
-            "fed_from": "Alimenté par {panel}"
+            "fed_from": "Alimenté par {panel}",
+            "zoom": "Zoom {factor}"
         },
         "card": {
             "name": {

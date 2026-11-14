@@ -137,7 +137,8 @@
             "title": "Eltavle",
             "empty_title": "Ingen eltavler at vise",
             "empty_body": "Integrationen har endnu ikke fundet en LDATA- eller LWHEM-eltavle. Måske er den stadig ved at starte, eller også kan den ikke få forbindelse til Leviton.",
-            "fed_from": "Forsynes fra {panel}"
+            "fed_from": "Forsynes fra {panel}",
+            "zoom": "Forstørrelse {factor}"
         },
         "card": {
             "name": {

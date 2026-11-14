@@ -137,7 +137,8 @@
       "title": "Load Center",
       "empty_title": "No load centers to show",
       "empty_body": "This integration has not found an LDATA or LWHEM panel yet. It may still be starting, or it may be unable to reach Leviton.",
-      "fed_from": "Fed from {panel}"
+      "fed_from": "Fed from {panel}",
+      "zoom": "Zoom {factor}"
     },
     "card": {
       "name": {

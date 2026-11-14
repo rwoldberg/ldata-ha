@@ -137,7 +137,8 @@
             "title": "Quadro de distribuição",
             "empty_title": "Nenhum quadro de distribuição para mostrar",
             "empty_body": "Esta integração ainda não encontrou nenhum quadro LDATA ou LWHEM. Ela pode ainda estar iniciando ou pode não estar conseguindo se comunicar com a Leviton.",
-            "fed_from": "Alimentado por {panel}"
+            "fed_from": "Alimentado por {panel}",
+            "zoom": "Zoom {factor}"
         },
         "card": {
             "name": {

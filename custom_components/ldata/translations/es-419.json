@@ -137,7 +137,8 @@
             "title": "Centro de carga",
             "empty_title": "No hay centros de carga para mostrar",
             "empty_body": "Esta integración aún no ha encontrado ningún centro de carga LDATA o LWHEM. Es posible que todavía se esté iniciando o que no pueda conectarse con Leviton.",
-            "fed_from": "Alimentado desde {panel}"
+            "fed_from": "Alimentado desde {panel}",
+            "zoom": "Ampliación {factor}"
         },
         "card": {
             "name": {

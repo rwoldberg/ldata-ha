@@ -137,7 +137,8 @@
             "title": "Sähkökeskus",
             "empty_title": "Ei näytettäviä sähkökeskuksia",
             "empty_body": "Integraatio ei ole vielä löytänyt LDATA- tai LWHEM-sähkökeskusta. Se voi olla vielä käynnistymässä, tai se ei saa yhteyttä Levitoniin.",
-            "fed_from": "Syöttö keskuksesta {panel}"
+            "fed_from": "Syöttö keskuksesta {panel}",
+            "zoom": "Suurennus {factor}"
         },
         "card": {
             "name": {

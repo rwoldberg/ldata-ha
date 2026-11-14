@@ -137,7 +137,8 @@
             "title": "Elosztótábla",
             "empty_title": "Nincs megjeleníthető elosztótábla",
             "empty_body": "Az integráció még nem talált LDATA vagy LWHEM elosztótáblát. Lehet, hogy még indul, vagy nem éri el a Levitont.",
-            "fed_from": "Táplálás innen: {panel}"
+            "fed_from": "Táplálás innen: {panel}",
+            "zoom": "Nagyítás {factor}"
         },
         "card": {
             "name": {

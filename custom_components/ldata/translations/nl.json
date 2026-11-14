@@ -137,7 +137,8 @@
             "title": "Groepenkast",
             "empty_title": "Geen groepenkasten om te tonen",
             "empty_body": "Deze integratie heeft nog geen groepenkast met LDATA of LWHEM gevonden. Mogelijk is de integratie nog aan het opstarten of is Leviton niet bereikbaar.",
-            "fed_from": "Gevoed vanuit {panel}"
+            "fed_from": "Gevoed vanuit {panel}",
+            "zoom": "Zoom {factor}"
         },
         "card": {
             "name": {

@@ -137,7 +137,8 @@
             "title": "Tablou electric",
             "empty_title": "Niciun tablou electric de afișat",
             "empty_body": "Această integrare nu a găsit încă niciun tablou LDATA sau LWHEM. Este posibil să fie încă în curs de pornire sau să nu poată contacta Leviton.",
-            "fed_from": "Alimentat din {panel}"
+            "fed_from": "Alimentat din {panel}",
+            "zoom": "Mărire {factor}"
         },
         "card": {
             "name": {

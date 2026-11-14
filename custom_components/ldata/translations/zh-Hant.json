@@ -137,7 +137,8 @@
             "title": "配電箱",
             "empty_title": "沒有可顯示的配電箱",
             "empty_body": "此整合尚未找到 LDATA 或 LWHEM 配電箱。可能仍在啟動中，或無法連線至 Leviton。",
-            "fed_from": "由「{panel}」供電"
+            "fed_from": "由「{panel}」供電",
+            "zoom": "縮放 {factor}"
         },
         "card": {
             "name": {

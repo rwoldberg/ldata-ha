@@ -137,7 +137,8 @@
             "title": "Sikringsskap",
             "empty_title": "Ingen sikringsskap å vise",
             "empty_body": "Integrasjonen har ikke funnet noe LDATA- eller LWHEM-sikringsskap ennå. Den holder kanskje fortsatt på å starte, eller så får den ikke kontakt med Leviton.",
-            "fed_from": "Forsynes fra {panel}"
+            "fed_from": "Forsynes fra {panel}",
+            "zoom": "Forstørrelse {factor}"
         },
         "card": {
             "name": {

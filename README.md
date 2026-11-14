@@ -67,7 +67,7 @@ Features:
 - Click a breaker's rocker to switch it. The card asks for confirmation first and shows the breaker as switching until Leviton confirms the change. Needs **Allow Breaker Control** in the integration options.
 - Click a label, or anywhere else on a breaker, for its detail sheet: on/off control, Identify (Blink LED), live power, current and load, today's and lifetime energy, every alarm, the raw breaker state and last change reason, Bluetooth signal, model, firmware and serial number. Each row opens Home Assistant's own dialog (with history) for that entity, and **Device page** goes to the breaker's device.
 - Gen1 breakers can be tripped remotely but not reset remotely — trying to turn one on explains that instead of sending a command that would do nothing.
-- Above the door, the cover shows the panel's load, each leg's voltage and current, line frequency, today's energy and your CT clamps (e.g. Grid, Solar), with pilot lights for the cloud connection, Wi-Fi signal, and a firmware update when one is available.
+- Above the door, the cover shows the panel's load, each leg's voltage and current, line frequency, today's energy and your CT clamps (e.g. Grid, Solar), with pilot lights for the cloud connection, Wi-Fi signal, and a firmware update when one is available. While the panel is offline the cover says so, and each breaker is shown where it last was.
 - Knows your sub-panels once you say which breaker feeds each one (see [Sub-panels](#sub-panels)): the feeding breaker shows the sub-panel's live Watts/Amps, and clicking it opens the sub-panel.
 - Follows your theme: with a dark theme the panel is shown under dimmer lighting.
 - Speaks your language: the card's texts follow the language set in your Home Assistant profile (see [Languages](#languages)).
@@ -246,6 +246,7 @@ It is **off by default**. Turn it on with **Show the load center in the sidebar*
 
 - The tabs are in name order, with a sub-panel right after the load center that feeds it (see [Sub-panels](#sub-panels)). Breakers are switched, and their details opened, exactly as on the dashboard card.
 - Clicking a breaker that feeds a sub-panel opens that sub-panel's tab, and the sub-panel's page has a **Fed from** link back. Each tab has its own address (`/ldata/<device id>`), so the browser's back button works and a wall tablet can be left on one load center.
+- On a phone, where Home Assistant doesn't allow pinch-zoom, the button at the right of the header zooms the panel to 1.5× or 2×. Swipe sideways to see the rest of the panel. The phone remembers the zoom.
 - If you have more than one LDATA entry (one per residence), there is still a single sidebar item. It shows the load centers of every entry that has the option turned on.
 - The item is there as soon as Home Assistant starts and stays while the integration reloads or cannot reach Leviton, so a wall tablet left on the page stays on it. Until the integration has data, the breakers show as unavailable.
 - The page uses the card's defaults. For the card's options (a main breaker, lighting, and so on), add the card to a dashboard instead; both can be used at the same time.

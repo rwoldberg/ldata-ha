@@ -361,7 +361,8 @@ const EN = {
     "title": "Load Center",
     "empty_title": "No load centers to show",
     "empty_body": "This integration has not found an LDATA or LWHEM panel yet. It may still be starting, or it may be unable to reach Leviton.",
-    "fed_from": "Fed from {panel}"
+    "fed_from": "Fed from {panel}",
+    "zoom": "Zoom {factor}"
   },
   "card": {
     "name": {
@@ -675,6 +676,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     this._t = englishOnly;
     this._pending = new Map(); // switch entity_id -> { target, since }
     this._errors = new Map(); // slot position -> { text, until }
+    this._handles = new Map(); // status entity_id -> last handle position seen
     this._fmtCache = new Map();
     this._trackedIds = [];
     this._trackedRefs = [];
@@ -1431,8 +1433,12 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     s.vis = vis;
     // What the breaker itself shows (Leviton's handle and LED table): a
     // remote switch-off leaves the handle on and green and lights the LED.
+    // Out of touch (the panel is offline, or Leviton can't be reached), the
+    // breaker is still where it was: draw it that way under the veil rather
+    // than as switched off.
     const handleOn = isOn || (remoteOff && raw !== "ManualOFF");
-    s.handle = !available ? "off" : tripped ? "trip" : handleOn ? "on" : "off";
+    s.handle = !available ? this._handles.get(r.status) || "on" : tripped ? "trip" : handleOn ? "on" : "off";
+    if (available) this._handles.set(r.status, s.handle);
     s.led = vis === "pending" || s.blinkOn ? "blink" : vis === "remote-off" ? "on" : "off";
     // The cause LEDs are fed from the line side: they stay lit after a trip.
     const lit = available && tripped && cause;
@@ -1899,7 +1905,14 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       });
     }
     if (els.alarm) {
-      const alarm = [h.overVoltage ? t("card.alarm.over_voltage") : null, h.underVoltage ? t("card.alarm.under_voltage") : null].filter(Boolean).join(" · ");
+      // An offline panel leads: its readings are the last ones it sent.
+      const alarm = [
+        h.cloud === "off" ? t("card.meter.cloud_offline") : null,
+        h.overVoltage ? t("card.alarm.over_voltage") : null,
+        h.underVoltage ? t("card.alarm.under_voltage") : null,
+      ]
+        .filter(Boolean)
+        .join(" · ");
       this._set(c, "alarm", alarm, (v) => {
         els.alarm.hidden = !v;
         els.alarm.innerHTML = v ? `${icon("alert")}<span>${esc(v)}</span>` : "";
@@ -3560,11 +3573,54 @@ const PAGE_CSS = `
 .empty { max-width: 440px; margin: 16vh auto 0; padding: 0 8px; text-align: center; }
 .empty-t { margin: 0 0 8px; font-size: 20px; font-weight: 500; line-height: 1.3; }
 .empty-b { margin: 0; color: var(--secondary-text-color, #727272); font-size: 14px; line-height: 1.5; }
+/* Zoom for phones. Home Assistant's viewport tag forbids pinch-zoom, so the
+   page widens the card instead and lets the page pan sideways. The card sizes
+   its artwork and type from its own width, so a wider card reads larger. Both
+   the button and the zoom rules live in the phone breakpoint: a zoom saved on
+   a phone must not leave a wide screen stuck zoomed with no button to undo it. */
+.zoom-btn {
+  all: unset;
+  display: none;
+  flex: none;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 32px;
+  margin-left: 4px;
+  padding: 0 10px;
+  border: 1px solid currentColor;
+  border-radius: 16px;
+  font-size: var(--ha-font-size-s, 13px);
+  font-weight: var(--ha-font-weight-medium, 500);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.zoom-btn:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.zoom-btn[hidden] { display: none; }
 @media (max-width: 599px) {
   .bar { padding-left: calc(4px + var(--ldp-left)); padding-right: calc(4px + var(--ldp-right)); }
   .page { padding-top: 12px; padding-left: calc(4px + var(--ldp-left)); padding-right: calc(4px + var(--ldp-right)); }
+  .zoom-btn { display: inline-flex; }
+  .page[data-zoom] { overflow-x: auto; }
+  .page[data-zoom] > .grid { max-width: none; width: calc(100% * var(--ldp-zoom, 1)); margin: 0; }
 }
 `;
+
+// The zoom steps of the sidebar page on a phone, and where the choice is kept.
+const ZOOM_STEPS = [1, 1.5, 2];
+const ZOOM_KEY = "ldata.sidebar.zoom";
+
+function readZoom() {
+  try {
+    const saved = Number(window.localStorage.getItem(ZOOM_KEY));
+    if (ZOOM_STEPS.includes(saved)) return saved;
+  } catch (err) {
+    // storage can be blocked (private mode, some webviews): start at 1x
+  }
+  return 1;
+}
 
 class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
   constructor() {
@@ -3573,6 +3629,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
     this._cards = new Map(); // device id -> card element
     this._ids = []; // the load centers, in tab order
     this._narrow = false;
+    this._zoom = readZoom(); // 1, 1.5 or 2; only has an effect on a phone
   }
 
   // Home Assistant sets these four on every custom panel.
@@ -3633,6 +3690,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
         <div class="menu"></div>
         <h1 class="bar-title"></h1>
         <nav class="tabs" hidden></nav>
+        <button class="zoom-btn" type="button" hidden></button>
       </div>
       <div class="page">
         <div class="grid" hidden>
@@ -3661,6 +3719,8 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
       menu: root.querySelector(".menu"),
       title: root.querySelector(".bar-title"),
       tabs: root.querySelector(".tabs"),
+      zoom: root.querySelector(".zoom-btn"),
+      page: root.querySelector(".page"),
       feed: root.querySelector(".feed"),
       unit: root.querySelector(".unit"),
       grid: root.querySelector(".grid"),
@@ -3668,6 +3728,51 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
       emptyTitle: root.querySelector(".empty-t"),
       emptyBody: root.querySelector(".empty-b"),
     };
+    this._els.zoom.addEventListener("click", () => this._cycleZoom());
+    this._applyZoom();
+  }
+
+  // Phone zoom: 1x -> 1.5x -> 2x -> 1x. The card is widened, not scaled (see
+  // PAGE_CSS), so the page is kept centred on the same spot while it changes.
+  _cycleZoom() {
+    const next = ZOOM_STEPS[(ZOOM_STEPS.indexOf(this._zoom) + 1) % ZOOM_STEPS.length];
+    const page = this._els.page;
+    const centre = page.scrollWidth ? (page.scrollLeft + page.clientWidth / 2) / page.scrollWidth : 0.5;
+    this._zoom = next;
+    try {
+      window.localStorage.setItem(ZOOM_KEY, String(next));
+    } catch (err) {
+      // not saved; it still applies until the page is closed
+    }
+    this._applyZoom();
+    page.scrollLeft = Math.max(0, centre * page.scrollWidth - page.clientWidth / 2);
+  }
+
+  _applyZoom() {
+    const page = this._els.page;
+    page.style.setProperty("--ldp-zoom", String(this._zoom));
+    page.toggleAttribute("data-zoom", this._zoom > 1);
+    this._labelZoom();
+  }
+
+  // "1.5×" on the button, written the way the user's language writes numbers.
+  _labelZoom() {
+    const hass = this._hass;
+    const lang = hass ? (hass.locale && hass.locale.language) || hass.language : undefined;
+    let factor;
+    try {
+      factor = `${new Intl.NumberFormat(lang || undefined).format(this._zoom)}×`;
+    } catch (err) {
+      factor = `${this._zoom}×`;
+    }
+    const label = this._t("sidebar.zoom", { factor });
+    const key = `${factor}|${label}`;
+    if (key === this._zoomKey) return;
+    this._zoomKey = key;
+    const btn = this._els.zoom;
+    btn.textContent = factor;
+    btn.setAttribute("aria-label", label);
+    btn.title = label;
   }
 
   _update() {
@@ -3685,6 +3790,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
       this._els.title.textContent = title;
     }
     this._renderMenu(hass);
+    this._labelZoom();
 
     // The load centers, in the order the integration lists them: a sub-panel
     // comes right after the load center that feeds it.
@@ -3747,6 +3853,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
         unit.appendChild(card);
       }
       this._els.grid.hidden = !active;
+      this._els.zoom.hidden = !active;
       // Coming from a breaker far down the feeding panel, start at the top.
       if (switched && typeof window.scrollTo === "function") window.scrollTo(0, 0);
     } else if (active) {

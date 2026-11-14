@@ -137,7 +137,8 @@
             "title": "Cuadro eléctrico",
             "empty_title": "No hay cuadros eléctricos que mostrar",
             "empty_body": "Esta integración aún no ha encontrado ningún cuadro LDATA o LWHEM. Puede que todavía se esté iniciando o que no consiga conectar con Leviton.",
-            "fed_from": "Alimentado desde {panel}"
+            "fed_from": "Alimentado desde {panel}",
+            "zoom": "Ampliación {factor}"
         },
         "card": {
             "name": {

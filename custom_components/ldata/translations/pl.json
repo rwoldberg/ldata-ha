@@ -137,7 +137,8 @@
             "title": "Rozdzielnica",
             "empty_title": "Brak rozdzielnic do wyświetlenia",
             "empty_body": "Integracja nie znalazła jeszcze rozdzielnicy LDATA ani LWHEM. Być może wciąż się uruchamia albo nie może połączyć się z serwerami Leviton.",
-            "fed_from": "Zasilanie z: {panel}"
+            "fed_from": "Zasilanie z: {panel}",
+            "zoom": "Powiększenie {factor}"
         },
         "card": {
             "name": {

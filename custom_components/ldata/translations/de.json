@@ -137,7 +137,8 @@
             "title": "Sicherungskasten",
             "empty_title": "Keine Sicherungskästen vorhanden",
             "empty_body": "Diese Integration hat noch keinen Sicherungskasten mit LDATA oder LWHEM gefunden. Möglicherweise startet sie noch, oder sie kann Leviton nicht erreichen.",
-            "fed_from": "Versorgt von {panel}"
+            "fed_from": "Versorgt von {panel}",
+            "zoom": "Vergrößerung {factor}"
         },
         "card": {
             "name": {
