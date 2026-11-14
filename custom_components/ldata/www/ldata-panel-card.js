@@ -36,10 +36,12 @@
  *   main_breaker: 200          # optional, show a main breaker with this rating
  *   rotate_180: true           # optional override — by default the card reads
  *                              # the panel's reported mounting orientation.
- *   sub_panels:                # optional — link a "dumb" breaker that feeds a
+ *   sub_panels:                # optional — link a breaker that feeds a
  *                              # downstream sub-panel to that panel's device, so
  *                              # its label shows the sub-panel's live load and
- *                              # clicking it opens that panel's own card.
+ *                              # clicking it opens that panel's own card. Links
+ *                              # set in the integration's options need nothing
+ *                              # here; these entries add to them.
  *     - breaker_position: 9
  *       panel_device_id: <sub-panel's own device id>
  *       rating: 50             # optional — Leviton reports none for dumb breakers
@@ -103,6 +105,7 @@ const G = {
 G.fieldW = 2 * G.tileW + G.strip + 2 * G.fieldX;
 
 const pct = (v) => `${(v * 100).toFixed(2)}%`;
+const fedKeyOf = (state) => JSON.stringify((state && state.attributes && state.attributes.sub_panels) || null);
 
 // ── Entity roles ─────────────────────────────────────────────────────────
 // Matched against entity_id (not unique_id — some HA frontend versions omit
@@ -273,7 +276,8 @@ const EN = {
   "sidebar": {
     "title": "Load Center",
     "empty_title": "No load centers to show",
-    "empty_body": "This integration has not found an LDATA or LWHEM panel yet. It may still be starting, or it may be unable to reach Leviton."
+    "empty_body": "This integration has not found an LDATA or LWHEM panel yet. It may still be starting, or it may be unable to reach Leviton.",
+    "fed_from": "Fed from {panel}"
   },
   "card": {
     "name": {
@@ -420,7 +424,7 @@ const EN = {
       "remote_reset_yes": "Supported (Gen 2)",
       "remote_reset_no": "Not supported (Gen 1)",
       "standard_breaker": "This is a standard (non-smart) breaker. Leviton reports no state or readings for it, so there is nothing to control or monitor here.",
-      "standard_breaker_hint": "If it feeds a sub-panel that has its own LWHEM or LDATA hub, link them with {option} in this card's YAML to show that panel's live load on this breaker."
+      "standard_breaker_hint": "If it feeds a sub-panel that has its own LWHEM or LDATA hub, choose this breaker for that panel under Sub-panels in the LDATA integration options. The sub-panel's live load then shows on this breaker."
     },
     "setup": {
       "choose_title": "Choose your panel",
@@ -441,7 +445,7 @@ const EN = {
     "card_name": "LDATA Panel Card",
     "card_description": "A realistic, interactive view of your Leviton load center.",
     "panel": "Panel",
-    "panel_help": "Pick the panel (the LDATA or LWHEM hub), not a breaker. Sub-panel links are set in YAML.",
+    "panel_help": "Pick the panel (the LDATA or LWHEM hub), not a breaker. Sub-panel links are set in the LDATA integration options.",
     "title": "Title (optional)",
     "show_power": "Show live watts and amps",
     "show_alarms": "Flag alarms",
@@ -836,9 +840,11 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       !this._disc ||
       hass.entities !== this._discEntities ||
       hass.devices !== this._discDevices ||
-      (this._disc.incomplete && hass.states !== this._discStates && now - this._discAt > 5000)
+      (this._disc.incomplete && hass.states !== this._discStates && now - this._discAt > 5000) ||
+      this._fedChanged(hass)
     ) {
       this._disc = this._discover(hass);
+      this._discCloud = hass.states[this._disc.panel.roles.cloud];
       this._discAt = now;
       this._discEntities = hass.entities;
       this._discDevices = hass.devices;
@@ -877,6 +883,16 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
 
   _languageChanged() {
     this._update(false);
+  }
+
+  // The integration's sub-panel links are an attribute of the panel's Cloud
+  // Connected entity: they can change (the options were saved) or arrive
+  // (the entity's first state) without anything changing in the registry.
+  _fedChanged(hass) {
+    const state = hass.states[this._disc.panel.roles.cloud];
+    if (state === this._discCloud) return false;
+    this._discCloud = state;
+    return fedKeyOf(state) !== this._disc.fedKey;
   }
 
   // A translated sentence with markup in its placeholders. The sentence is
@@ -1036,20 +1052,34 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     }
     cts.sort((a, b) => a.name.localeCompare(b.name));
 
-    // Hand-configured links from a dumb breaker to the sub-panel it feeds.
-    const links = [];
+    // Breakers that feed another load center. The integration lists the ones
+    // chosen in its options on the panel's Cloud Connected entity, so every
+    // card has them; this card's own sub_panels entries add to those, and
+    // win for the same breaker.
+    const fed = attr(panel.roles.cloud).sub_panels;
+    const wanted = new Map();
+    for (const sp of Array.isArray(fed) ? fed : []) {
+      const position = Number(sp && sp.position);
+      if (Number.isFinite(position) && sp.device_id) wanted.set(position, { deviceId: sp.device_id, viewPath: null, rating: null });
+    }
     for (const sp of cfg.sub_panels) {
       if (!sp) continue;
       const position = Number(sp.breaker_position);
       if (!Number.isFinite(position)) continue;
-      const deviceId = sp.panel_device_id || null;
-      const dev = deviceId ? devices[deviceId] : null;
-      const ids = deviceId ? idsFor(deviceId) : [];
-      links.push({
-        position,
-        deviceId,
+      const known = wanted.get(position);
+      wanted.set(position, {
+        deviceId: sp.panel_device_id || (known && known.deviceId) || null,
         viewPath: sp.view_path || null,
         rating: numOrNull(sp.rating),
+      });
+    }
+    const links = [];
+    for (const [position, link] of wanted) {
+      const dev = link.deviceId ? devices[link.deviceId] : null;
+      const ids = link.deviceId ? idsFor(link.deviceId) : [];
+      links.push({
+        position,
+        ...link,
         name: (dev && (dev.name_by_user || dev.name)) || null,
         roles: matchRoles(ids, PANEL_ROLES).roles,
       });
@@ -1074,6 +1104,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       breakers,
       cts,
       links,
+      fedKey: fedKeyOf(states[panel.roles.cloud]),
       tracked: [...tracked],
       incomplete,
       diagnostics: {
@@ -1104,6 +1135,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
 
     const slots = [];
     const taken = new Set();
+    const linkByPos = new Map(d.links.map((l) => [l.position, l]));
     for (const b of d.breakers) {
       const s = st[b.roles.status];
       if (!s) continue;
@@ -1122,13 +1154,15 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         canRemoteOn: a.canRemoteOn === true,
         roles: b.roles,
         others: b.others,
+        // A smart breaker that feeds a sub-panel stays a breaker (its rocker,
+        // its own readings); its detail sheet leads on to the sub-panel.
+        link: linkByPos.has(position) && linkByPos.get(position).deviceId ? linkByPos.get(position) : null,
       });
     }
 
     // Physically present but non-smart ("dumb") breakers never become HA
     // devices — the integration lists them on the panel's Cloud Connected
     // entity so they don't show up as false gaps.
-    const linkByPos = new Map(d.links.map((l) => [l.position, l]));
     for (const db of Array.isArray(ca.dumb_breakers) ? ca.dumb_breakers : []) {
       const position = Number(db && db.position);
       if (!Number.isFinite(position) || taken.has(position)) continue;
@@ -1818,6 +1852,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       case "d-device":
         this._navigate(`/config/devices/device/${el.dataset.device}`);
         break;
+      case "d-feeds":
+        this._followLink(this._model && this._model.byPos.get(this._detailPos));
+        break;
       case "c-cancel":
         this._dlgConfirm.close();
         break;
@@ -1836,8 +1873,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const s = this._model && this._model.byPos.get(pos);
     if (!s) return;
     if (s.kind === "link") {
-      if (s.link.viewPath) this._navigate(s.link.viewPath);
-      else this._openSubPanel(s.link.deviceId, s.link.name || s.name);
+      this._followLink(s);
       return;
     }
     this._detailPos = pos;
@@ -1845,6 +1881,25 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     this._buildDetail();
     this._patchDetail();
     if (!this._dlgDetail.open) this._dlgDetail.showModal();
+  }
+
+  // Go to the load center a breaker feeds. A page that shows that load
+  // center itself (the sidebar page) says so by cancelling the event;
+  // otherwise it opens here, in a dialog.
+  _followLink(s) {
+    const link = s && s.link;
+    if (!link || !link.deviceId) return;
+    if (link.viewPath) {
+      this._navigate(link.viewPath);
+      return;
+    }
+    const ev = new CustomEvent("ldata-open-sub-panel", { bubbles: true, composed: true, cancelable: true, detail: { deviceId: link.deviceId } });
+    if (!this.dispatchEvent(ev)) {
+      for (const dlg of [this._dlgDetail, this._dlgConfirm, this._dlgSub]) if (dlg.open) dlg.close();
+      return;
+    }
+    if (this._dlgDetail.open) this._dlgDetail.close();
+    this._openSubPanel(link.deviceId, link.name || s.name);
   }
 
   _navigate(path) {
@@ -2023,10 +2078,16 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       body = `
         <section class="sec">
           <p class="note">${icon("info")}<span>${esc(t("card.detail.standard_breaker"))}</span></p>
-          <p class="note note--muted"><span>${this._html("card.detail.standard_breaker_hint", { option: "<code>sub_panels</code>" })}</span></p>
+          <p class="note note--muted"><span>${esc(t("card.detail.standard_breaker_hint"))}</span></p>
         </section>`;
     } else {
-      body = this._detailControlsHtml(s) + this._detailLiveHtml(s) + this._detailSectionsHtml(s);
+      const feeds = s.link
+        ? `<div class="rows rows--feeds"><button type="button" class="row" data-act="d-feeds">
+             <span class="row-l">↳ ${esc(s.link.name ? t("card.label.feeds", { name: s.link.name }) : t("card.label.feeds_sub_panel"))}</span>
+             <span class="row-v">${esc(t(s.link.viewPath ? "card.label.open_sub_panel_dashboard" : "card.label.open_sub_panel"))}</span>${icon("chevron", "ic row-c")}
+           </button></div>`
+        : "";
+      body = feeds + this._detailControlsHtml(s) + this._detailLiveHtml(s) + this._detailSectionsHtml(s);
     }
 
     inner.innerHTML = `
@@ -3033,6 +3094,8 @@ button.tile:hover:not(:disabled) { background: color-mix(in srgb, var(--primary-
 .meterbar i[data-level="high"] { background: var(--error-color, #db4437); }
 
 .rows { display: flex; flex-direction: column; }
+.rows--feeds { margin-bottom: 4px; }
+.rows--feeds .row-l { color: var(--primary-color, #03a9f4); font-weight: 500; }
 .row {
   display: flex;
   align-items: center;
@@ -3210,6 +3273,8 @@ class LdataPanelCardEditor extends LanguageMixin(HTMLElement) {
 // integration passes their device ids in the panel's config.
 
 const MENU_ICON = "M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z";
+// "arrow-left-top": back up to the load center this one is fed from.
+const FEED_ICON = "M20 13.5V20H18V13.5C18 11 16 9 13.5 9H7.83L10.91 12.09L9.5 13.5L4 8L9.5 2.5L10.92 3.91L7.83 7H13.5C17.09 7 20 9.91 20 13.5Z";
 
 const PAGE_CSS = `
 :host {
@@ -3239,6 +3304,53 @@ const PAGE_CSS = `
   background: var(--app-header-background-color, var(--primary-color, #03a9f4));
   color: var(--app-header-text-color, #fff);
   border-bottom: var(--app-header-border-bottom, none);
+}
+/* With more than one load center the bar carries a tab for each, where a
+   dashboard has its views, and the title is left to the sidebar. */
+.bar[data-tabs] .bar-title {
+  position: absolute;
+  flex: none;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+.tabs {
+  flex: 1 1 auto;
+  align-self: stretch;
+  display: flex;
+  min-width: 0;
+  padding: 0 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs[hidden] { display: none; }
+.tab {
+  flex: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  max-width: min(60vw, 280px);
+  padding: 2px 16px 0;
+  border-bottom: 2px solid transparent;
+  color: inherit;
+  font-size: var(--ha-font-size-m, 14px);
+  font-weight: var(--ha-font-weight-medium, 500);
+  text-decoration: none;
+  opacity: 0.72;
+  -webkit-tap-highlight-color: transparent;
+}
+.tab span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tab[aria-current="page"] {
+  border-bottom-color: var(--app-header-selection-bar-color, var(--app-header-text-color, #fff));
+  opacity: 1;
+}
+.tab:focus-visible { outline: 2px solid currentColor; outline-offset: -4px; border-radius: 8px; opacity: 1; }
+@media (hover: hover) {
+  .tab:hover { opacity: 1; }
 }
 .menu { display: flex; flex: none; }
 .menu-btn {
@@ -3271,20 +3383,29 @@ const PAGE_CSS = `
   box-sizing: border-box;
   padding: 20px calc(12px + var(--ldp-right)) calc(32px + var(--safe-area-inset-bottom, 0px)) calc(12px + var(--ldp-left));
 }
-/* One load center sits in the middle of the page; more share the width and
-   stack when there is no room side by side. */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
-  gap: 28px 24px;
-  align-items: start;
-  max-width: 900px;
-  margin: 0 auto;
-}
-.grid[data-count="2"] { max-width: 1824px; }
-.grid[data-count="3"] { max-width: 2748px; }
+/* One load center to a page, in the middle of it. */
+.grid { max-width: 900px; margin: 0 auto; }
 .grid[hidden], .empty[hidden] { display: none; }
-.unit { min-width: 0; width: 100%; max-width: 900px; justify-self: center; }
+.unit { min-width: 0; width: 100%; }
+/* A sub-panel names the load center that feeds it, and leads back to it. */
+.feed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin: 0 0 12px 3px;
+  color: var(--primary-color, #03a9f4);
+  font-size: var(--ha-font-size-m, 14px);
+  font-weight: var(--ha-font-weight-medium, 500);
+  text-decoration: none;
+}
+.feed[hidden] { display: none; }
+.feed span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.feed svg { flex: none; width: 18px; height: 18px; fill: currentColor; }
+.feed:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; border-radius: 4px; }
+@media (hover: hover) {
+  .feed:hover span { text-decoration: underline; text-underline-offset: 0.18em; }
+}
 .empty { max-width: 440px; margin: 16vh auto 0; padding: 0 8px; text-align: center; }
 .empty-t { margin: 0 0 8px; font-size: 20px; font-weight: 500; line-height: 1.3; }
 .empty-b { margin: 0; color: var(--secondary-text-color, #727272); font-size: 14px; line-height: 1.5; }
@@ -3299,6 +3420,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
     super();
     this._t = englishOnly;
     this._cards = new Map(); // device id -> card element
+    this._ids = []; // the load centers, in tab order
     this._narrow = false;
   }
 
@@ -3330,8 +3452,10 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
     return this._panel;
   }
 
+  // The rest of the address names the load center on show: /ldata/<device id>.
   set route(route) {
     this._route = route;
+    this._update();
   }
 
   get route() {
@@ -3357,14 +3481,37 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
       <div class="bar">
         <div class="menu"></div>
         <h1 class="bar-title"></h1>
+        <nav class="tabs" hidden></nav>
       </div>
       <div class="page">
-        <div class="grid" hidden></div>
+        <div class="grid" hidden>
+          <a class="feed" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="${FEED_ICON}"/></svg><span></span></a>
+          <section class="unit"></section>
+        </div>
         <div class="empty" hidden><h2 class="empty-t"></h2><p class="empty-b"></p></div>
       </div>`;
+    // A tab, or the way back to the feeding load center.
+    root.addEventListener("click", (ev) => {
+      const link = ev.target.closest ? ev.target.closest("a[data-id]") : null;
+      if (!link || ev.defaultPrevented || ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+      ev.preventDefault();
+      this._show(link.dataset.id);
+    });
+    // A breaker that feeds one of these load centers: go to its tab instead
+    // of the card opening it in a dialog.
+    root.addEventListener("ldata-open-sub-panel", (ev) => {
+      const id = ev.detail && ev.detail.deviceId;
+      if (!this._ids.includes(id)) return;
+      ev.preventDefault();
+      this._show(id);
+    });
     this._els = {
+      bar: root.querySelector(".bar"),
       menu: root.querySelector(".menu"),
       title: root.querySelector(".bar-title"),
+      tabs: root.querySelector(".tabs"),
+      feed: root.querySelector(".feed"),
+      unit: root.querySelector(".unit"),
       grid: root.querySelector(".grid"),
       empty: root.querySelector(".empty"),
       emptyTitle: root.querySelector(".empty-t"),
@@ -3388,34 +3535,85 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
     }
     this._renderMenu(hass);
 
+    // The load centers, in the order the integration lists them: a sub-panel
+    // comes right after the load center that feeds it.
     const devices = hass.devices;
-    const listed = (panel.config && Array.isArray(panel.config.panels) ? panel.config.panels : [])
-      .map((item) => item && item.device_id)
-      .filter((id) => typeof id === "string" && id && (!devices || devices[id]));
-    const ids = [...new Set(listed)];
-    const key = ids.join("|");
-    if (key !== this._cardsKey) {
-      this._cardsKey = key;
-      const cards = new Map();
-      const grid = this._els.grid;
-      grid.textContent = "";
-      for (const id of ids) {
-        let card = this._cards.get(id);
+    const fedBy = new Map();
+    const ids = [];
+    for (const item of panel.config && Array.isArray(panel.config.panels) ? panel.config.panels : []) {
+      const id = item && item.device_id;
+      if (typeof id !== "string" || !id || ids.includes(id) || (devices && !devices[id])) continue;
+      ids.push(id);
+      if (typeof item.fed_by === "string") fedBy.set(id, item.fed_by);
+    }
+    this._ids = ids;
+    const name = (id) => (devices && devices[id] && (devices[id].name_by_user || devices[id].name)) || this._t("card.name.panel");
+    const asked = this._routeId();
+    const active = ids.includes(asked) ? asked : ids[0] || null;
+
+    // One tab for each load center, once there is more than one.
+    const tabs = ids.length > 1 ? ids.map((id) => [id, name(id)]) : [];
+    const tabsKey = JSON.stringify([tabs, active]);
+    if (tabsKey !== this._tabsKey) {
+      this._tabsKey = tabsKey;
+      const nav = this._els.tabs;
+      nav.textContent = "";
+      for (const [id, label] of tabs) {
+        const tab = document.createElement("a");
+        tab.className = "tab";
+        tab.href = this._pathFor(id);
+        tab.dataset.id = id;
+        if (id === active) tab.setAttribute("aria-current", "page");
+        tab.appendChild(document.createElement("span")).textContent = label;
+        nav.appendChild(tab);
+      }
+      nav.hidden = !tabs.length;
+      this._els.bar.toggleAttribute("data-tabs", tabs.length > 0);
+      const current = nav.querySelector('[aria-current="page"]');
+      if (current && current.scrollIntoView) current.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+    if (title !== this._navLabel) {
+      this._navLabel = title;
+      this._els.tabs.setAttribute("aria-label", title);
+    }
+
+    // The card of the load center on show. The others keep their cards, so
+    // coming back to one does not start it over, but only this one is fed.
+    for (const id of [...this._cards.keys()]) if (!ids.includes(id)) this._cards.delete(id);
+    if (active !== this._activeId) {
+      const switched = this._activeId != null && active != null;
+      this._activeId = active;
+      const unit = this._els.unit;
+      unit.textContent = "";
+      if (active) {
+        let card = this._cards.get(active);
         if (!card) {
           card = document.createElement("ldata-panel-card");
-          card.setConfig({ device_id: id });
+          card.setConfig({ device_id: active });
+          this._cards.set(active, card);
         }
-        cards.set(id, card);
-        const unit = document.createElement("section");
-        unit.className = "unit";
+        card.hass = hass;
         unit.appendChild(card);
-        grid.appendChild(unit);
       }
-      this._cards = cards;
-      grid.dataset.count = String(Math.min(ids.length, 3));
-      grid.hidden = !ids.length;
+      this._els.grid.hidden = !active;
+      // Coming from a breaker far down the feeding panel, start at the top.
+      if (switched && typeof window.scrollTo === "function") window.scrollTo(0, 0);
+    } else if (active) {
+      this._cards.get(active).hass = hass;
     }
-    for (const card of this._cards.values()) card.hass = hass;
+
+    const feeder = active && ids.includes(fedBy.get(active)) ? fedBy.get(active) : null;
+    const feedKey = feeder ? JSON.stringify([feeder, waiting ? "" : this._t("sidebar.fed_from", { panel: name(feeder) })]) : "";
+    if (feedKey !== this._feedKey) {
+      this._feedKey = feedKey;
+      const feed = this._els.feed;
+      feed.hidden = !feeder || waiting;
+      if (feeder) {
+        feed.href = this._pathFor(feeder);
+        feed.dataset.id = feeder;
+        feed.querySelector("span").textContent = waiting ? "" : this._t("sidebar.fed_from", { panel: name(feeder) });
+      }
+    }
 
     const empty = !ids.length && !waiting;
     if (empty) {
@@ -3423,6 +3621,36 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
       this._els.emptyBody.textContent = this._t("sidebar.empty_body");
     }
     this._els.empty.hidden = !empty;
+  }
+
+  _routeId() {
+    const path = (this._route && this._route.path) || "";
+    try {
+      return decodeURIComponent(path.replace(/^\/+/, "").split("/")[0] || "");
+    } catch (err) {
+      return "";
+    }
+  }
+
+  _prefix() {
+    return (this._route && this._route.prefix) || `/${(this._panel && this._panel.url_path) || "ldata"}`;
+  }
+
+  _pathFor(id) {
+    return `${this._prefix()}/${encodeURIComponent(id)}`;
+  }
+
+  // Put a load center on show: the address changes with it, so the browser's
+  // back button returns to the one before and a reload stays on this one.
+  _show(id) {
+    if (!this._ids.includes(id) || id === this._activeId) return;
+    const prefix = this._prefix();
+    history.pushState(null, "", this._pathFor(id));
+    // Home Assistant hands the new route back; taking it now as well keeps
+    // the page in step even where nothing does.
+    this._route = { ...(this._route || {}), prefix, path: `/${encodeURIComponent(id)}` };
+    window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+    this._update();
   }
 
   // Home Assistant's own menu button, which also carries the notification

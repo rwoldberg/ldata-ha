@@ -75,8 +75,17 @@
                     "log_parsed_data": "Journaliser tous les champs des disjoncteurs et des panneaux après l'analyse de chaque mise à jour WebSocket ou REST. Utile pour vérifier les valeurs sans activer la journalisation WebSocket brute.",
                     "enable_specific_logging": "Journaliser les champs indiqués. Pour connaître les noms des champs, activez brièvement « Journaliser toutes les données analysées ».",
                     "log_fields": "Pour trouver les noms des champs, activez « Journaliser toutes les données analysées » et consultez les journaux de Home Assistant. Saisissez-les ci-dessus, séparés par des virgules."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Panneaux secondaires",
+                        "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Deux panneaux électriques ne peuvent pas s'alimenter l'un l'autre. Vérifiez les choix sous Panneaux secondaires."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Ignorer — Ne pas cumuler d'énergie pendant les interruptions",
                 "extrapolate": "Extrapoler — Supposer que la dernière puissance connue s'est maintenue",
                 "average": "Moyenne — Utiliser la moyenne entre la dernière puissance connue et celle à la reprise"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Pas un panneau secondaire"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Panneau électrique",
             "empty_title": "Aucun panneau électrique à afficher",
-            "empty_body": "Cette intégration n'a encore trouvé aucun panneau LDATA ou LWHEM. Elle est peut-être encore en cours de démarrage, ou elle ne parvient pas à joindre Leviton."
+            "empty_body": "Cette intégration n'a encore trouvé aucun panneau LDATA ou LWHEM. Elle est peut-être encore en cours de démarrage, ou elle ne parvient pas à joindre Leviton.",
+            "fed_from": "Alimenté par {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Pris en charge (Gen 2)",
                 "remote_reset_no": "Non pris en charge (Gen 1)",
                 "standard_breaker": "Il s'agit d'un disjoncteur standard (non intelligent). Leviton ne transmet ni état ni mesure pour ce disjoncteur : il n'y a donc rien à commander ni à surveiller ici.",
-                "standard_breaker_hint": "S'il alimente un panneau secondaire doté de son propre hub LWHEM ou LDATA, reliez-les avec {option} dans le YAML de cette carte pour afficher sur ce disjoncteur la charge en direct de ce panneau."
+                "standard_breaker_hint": "S'il alimente un panneau secondaire doté de son propre hub LWHEM ou LDATA, choisissez ce disjoncteur pour ce panneau sous Panneaux secondaires, dans les options de l'intégration LDATA. La charge en direct du panneau secondaire s'affiche alors sur ce disjoncteur."
             },
             "setup": {
                 "choose_title": "Choisissez votre panneau",
@@ -290,7 +305,7 @@
             "card_name": "Carte du panneau LDATA",
             "card_description": "Une vue réaliste et interactive de votre panneau électrique Leviton.",
             "panel": "Panneau",
-            "panel_help": "Choisissez le panneau (le hub LDATA ou LWHEM), et non un disjoncteur. Les liens vers les panneaux secondaires se définissent en YAML.",
+            "panel_help": "Choisissez le panneau (le hub LDATA ou LWHEM), et non un disjoncteur. Les liens vers les panneaux secondaires se définissent dans les options de l'intégration LDATA.",
             "title": "Titre (facultatif)",
             "show_power": "Afficher les watts et les ampères en direct",
             "show_alarms": "Signaler les alarmes",

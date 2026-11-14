@@ -75,8 +75,17 @@
                     "log_parsed_data": "每次解析 WebSocket 或 REST 更新後，記錄斷路器與配電箱的所有欄位。不必啟用原始 WebSocket 記錄，即可核對數值。",
                     "enable_specific_logging": "記錄指定的欄位。暫時啟用「記錄所有已解析資料」即可查到欄位名稱。",
                     "log_fields": "若要查詢欄位名稱，請啟用「記錄所有已解析資料」並查看 Home Assistant 日誌。請在上方輸入欄位名稱，並以逗號分隔。"
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "分電箱",
+                        "description": "若某個配電箱由另一個配電箱中的斷路器供電，請在其名稱旁選擇該斷路器。之後該斷路器會顯示分電箱的即時負載，並可由此前往該分電箱。"
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "兩個配電箱不能互相供電。請檢查「分電箱」下的選擇。"
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "略過：資料中斷期間不累計電能",
                 "extrapolate": "外推：假設中斷期間維持最後已知的功率",
                 "average": "平均：取中斷前與恢復後功率的平均值"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "不是分電箱"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "配電箱",
             "empty_title": "沒有可顯示的配電箱",
-            "empty_body": "此整合尚未找到 LDATA 或 LWHEM 配電箱。可能仍在啟動中，或無法連線至 Leviton。"
+            "empty_body": "此整合尚未找到 LDATA 或 LWHEM 配電箱。可能仍在啟動中，或無法連線至 Leviton。",
+            "fed_from": "由「{panel}」供電"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "支援（Gen 2）",
                 "remote_reset_no": "不支援（Gen 1）",
                 "standard_breaker": "這是一般（非智慧型）斷路器。Leviton 不會回報其狀態或讀數，因此這裡沒有可控制或監控的項目。",
-                "standard_breaker_hint": "若它供電給本身裝有 LWHEM 或 LDATA 集線器的分電箱，可在此面板的 YAML 中以 {option} 將兩者連結，就能在此斷路器上顯示該分電箱的即時負載。"
+                "standard_breaker_hint": "若它供電給本身裝有 LWHEM 或 LDATA 集線器的分電箱，請在 LDATA 整合選項的「分電箱」中為該配電箱選擇此斷路器。之後此斷路器上會顯示該分電箱的即時負載。"
             },
             "setup": {
                 "choose_title": "選擇您的配電箱",
@@ -290,7 +305,7 @@
             "card_name": "LDATA 配電箱面板",
             "card_description": "以擬真、可互動的方式呈現您的 Leviton 配電箱。",
             "panel": "配電箱",
-            "panel_help": "請選擇配電箱（LDATA 或 LWHEM 集線器），而非斷路器。分電箱的連結需在 YAML 中設定。",
+            "panel_help": "請選擇配電箱（LDATA 或 LWHEM 集線器），而非斷路器。分電箱的連結需在 LDATA 整合選項中設定。",
             "title": "標題（選填）",
             "show_power": "顯示即時功率與電流",
             "show_alarms": "標示警報",

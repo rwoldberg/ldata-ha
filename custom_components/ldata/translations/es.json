@@ -75,8 +75,17 @@
                     "log_parsed_data": "Registra todos los campos de los magnetotérmicos y del cuadro tras analizar cada actualización de WebSocket o REST. Resulta útil para comprobar valores sin habilitar el registro de WebSocket sin procesar.",
                     "enable_specific_logging": "Registra los campos que especifiques. Puedes encontrar los nombres de los campos habilitando brevemente «Registrar todos los datos analizados».",
                     "log_fields": "Para encontrar los nombres de los campos, habilita «Registrar todos los datos analizados» y consulta los registros de Home Assistant. Introdúcelos arriba separados por comas."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Subcuadros",
+                        "description": "Si un cuadro eléctrico se alimenta desde un magnetotérmico de otro cuadro, elige ese magnetotérmico junto a su nombre. Ese magnetotérmico mostrará entonces la carga en tiempo real del subcuadro y permitirá ir a él."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Dos cuadros eléctricos no pueden alimentarse entre sí. Revisa las opciones elegidas en Subcuadros."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Omitir: no acumular energía durante los huecos",
                 "extrapolate": "Extrapolar: suponer que se mantuvo la última potencia conocida",
                 "average": "Promediar: usar la media entre la última potencia y la de recuperación"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "No es un subcuadro"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Cuadro eléctrico",
             "empty_title": "No hay cuadros eléctricos que mostrar",
-            "empty_body": "Esta integración aún no ha encontrado ningún cuadro LDATA o LWHEM. Puede que todavía se esté iniciando o que no consiga conectar con Leviton."
+            "empty_body": "Esta integración aún no ha encontrado ningún cuadro LDATA o LWHEM. Puede que todavía se esté iniciando o que no consiga conectar con Leviton.",
+            "fed_from": "Alimentado desde {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Compatible (Gen 2)",
                 "remote_reset_no": "No compatible (Gen 1)",
                 "standard_breaker": "Este es un magnetotérmico estándar (no inteligente). Leviton no informa de su estado ni de sus lecturas, así que aquí no hay nada que controlar ni monitorizar.",
-                "standard_breaker_hint": "Si alimenta un subcuadro que tiene su propio hub LWHEM o LDATA, vincúlalos con {option} en el YAML de esta tarjeta para mostrar en este magnetotérmico la carga en tiempo real de ese subcuadro."
+                "standard_breaker_hint": "Si alimenta un subcuadro que tiene su propio hub LWHEM o LDATA, elige este magnetotérmico para ese cuadro en Subcuadros, en las opciones de la integración LDATA. La carga en tiempo real del subcuadro se mostrará entonces en este magnetotérmico."
             },
             "setup": {
                 "choose_title": "Elige tu cuadro eléctrico",
@@ -290,7 +305,7 @@
             "card_name": "Tarjeta de cuadro LDATA",
             "card_description": "Una vista realista e interactiva de tu cuadro eléctrico Leviton.",
             "panel": "Cuadro eléctrico",
-            "panel_help": "Elige el cuadro (el hub LDATA o LWHEM), no un magnetotérmico. Los vínculos con subcuadros se definen en YAML.",
+            "panel_help": "Elige el cuadro (el hub LDATA o LWHEM), no un magnetotérmico. Los vínculos con subcuadros se definen en las opciones de la integración LDATA.",
             "title": "Título (opcional)",
             "show_power": "Mostrar vatios y amperios en tiempo real",
             "show_alarms": "Resaltar las alarmas",

@@ -75,8 +75,17 @@
                     "log_parsed_data": "Logg alle felt for automatsikringer og sikringsskap etter tolkingen av hver WebSocket- eller REST-oppdatering. Nyttig for å kontrollere verdier uten å aktivere logging av rå WebSocket-data.",
                     "enable_specific_logging": "Logg et hvilket som helst angitt felt. Feltnavnene finner du ved å aktivere «Logg alle tolkede data» en kort stund.",
                     "log_fields": "For å finne feltnavnene aktiverer du «Logg alle tolkede data» og ser i loggene til Home Assistant. Skriv dem inn ovenfor, atskilt med komma."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Underfordelinger",
+                        "description": "Hvis et sikringsskap forsynes fra en automatsikring i et annet sikringsskap, velger du den automatsikringen ved siden av navnet. Automatsikringen viser deretter underfordelingens gjeldende belastning og fører videre til underfordelingen."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "To sikringsskap kan ikke forsyne hverandre. Kontroller valgene under Underfordelinger."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Hopp over – ikke regn med energi under datahull",
                 "extrapolate": "Ekstrapoler – anta at den sist kjente effekten fortsatte",
                 "average": "Gjennomsnitt – bruk gjennomsnittet av effekten før og etter hullet"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Ikke en underfordeling"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Sikringsskap",
             "empty_title": "Ingen sikringsskap å vise",
-            "empty_body": "Integrasjonen har ikke funnet noe LDATA- eller LWHEM-sikringsskap ennå. Den holder kanskje fortsatt på å starte, eller så får den ikke kontakt med Leviton."
+            "empty_body": "Integrasjonen har ikke funnet noe LDATA- eller LWHEM-sikringsskap ennå. Den holder kanskje fortsatt på å starte, eller så får den ikke kontakt med Leviton.",
+            "fed_from": "Forsynes fra {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Støttes (Gen 2)",
                 "remote_reset_no": "Støttes ikke (Gen 1)",
                 "standard_breaker": "Dette er en vanlig automatsikring (ikke smart). Leviton rapporterer verken tilstand eller målinger for den, så det er ingenting å styre eller overvåke her.",
-                "standard_breaker_hint": "Hvis den forsyner en underfordeling med egen LWHEM- eller LDATA-hub, kan du koble dem sammen med {option} i kortets YAML for å vise underfordelingens gjeldende belastning på denne automatsikringen."
+                "standard_breaker_hint": "Hvis den forsyner en underfordeling med egen LWHEM- eller LDATA-hub, velger du denne automatsikringen for det skapet under Underfordelinger i alternativene for LDATA-integrasjonen. Underfordelingens gjeldende belastning vises deretter på denne automatsikringen."
             },
             "setup": {
                 "choose_title": "Velg sikringsskapet ditt",
@@ -290,7 +305,7 @@
             "card_name": "LDATA-kort for sikringsskap",
             "card_description": "En realistisk, interaktiv visning av Leviton-sikringsskapet ditt.",
             "panel": "Sikringsskap",
-            "panel_help": "Velg sikringsskapet (LDATA- eller LWHEM-huben), ikke en automatsikring. Koblinger til underfordelinger angis i YAML.",
+            "panel_help": "Velg sikringsskapet (LDATA- eller LWHEM-huben), ikke en automatsikring. Koblinger til underfordelinger angis i alternativene for LDATA-integrasjonen.",
             "title": "Tittel (valgfritt)",
             "show_power": "Vis watt og ampere i sanntid",
             "show_alarms": "Marker alarmer",

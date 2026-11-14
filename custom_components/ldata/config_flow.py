@@ -10,6 +10,7 @@ from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.data_entry_flow import section
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import selector
 
@@ -41,6 +42,7 @@ from .const import (
     RESIDENCE_IMPORT_SOURCE,
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
+from .sub_panels import NOT_FED, SUB_PANELS, looped, sub_panel_feeds
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -363,6 +365,124 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlow(config_entry)
 
 
+class _SubPanelSection:
+    """The options form's "Sub-panels" section.
+
+    One field for each load center, holding the breaker in another load
+    center that feeds it. Home Assistant labels a field it has no translation
+    for with the field's own name, so each field is named after its load
+    center. Offered only while Leviton reports two or more load centers.
+    """
+
+    def __init__(self, coordinator: Any, options: Mapping[str, Any]) -> None:
+        data = getattr(coordinator, "data", None) or {}
+        panels = sorted(
+            (panel for panel in data.get("panels", []) if panel.get("id")),
+            key=lambda panel: (str(panel.get("name") or "").casefold(), str(panel["id"])),
+        )
+        self.stored = sub_panel_feeds(options)
+        self.fields: dict[str, str] = {}  # field -> the load center it is about
+        self._choices: dict[str, tuple[str, int]] = {}  # choice -> (feeding panel, position)
+        self._offered: dict[str, list[selector.SelectOptionDict]] = {}
+        if len(panels) < 2:
+            return
+
+        names: dict[str, str] = {}
+        for panel in panels:
+            name = str(panel.get("name") or panel["id"])
+            if name in names.values():
+                name = f"{name} ({panel['id']})"
+            names[panel["id"]] = name
+            self.fields[name] = panel["id"]
+
+        breakers: dict[str, list[selector.SelectOptionDict]] = {}
+        for panel in panels:
+            found = [
+                breaker
+                for breaker in (data.get("breakers") or {}).values()
+                if breaker.get("panel_id") == panel["id"]
+            ] + list(panel.get("dumb_breakers") or [])
+            listed = []
+            for breaker in found:
+                try:
+                    position = int(breaker.get("position"))
+                except (TypeError, ValueError):
+                    continue
+                listed.append((position, breaker))
+            listed.sort(key=lambda item: item[0])
+            breakers[panel["id"]] = [
+                self._choice(panel["id"], names[panel["id"]], position, breaker)
+                for position, breaker in listed
+            ]
+
+        none = selector.SelectOptionDict(value=NOT_FED, label="Not a sub-panel")
+        for sub_id in names:
+            offered = [none]
+            for panel_id in names:
+                if panel_id != sub_id:
+                    offered.extend(breakers[panel_id])
+            # A stored link to a breaker Leviton no longer lists stays on
+            # offer, or saving the form for another reason would drop it.
+            feed = self.stored.get(sub_id)
+            if feed and feed[0] in names and self._value(*feed) not in self._choices:
+                offered.append(self._choice(feed[0], names[feed[0]], feed[1], {}))
+            self._offered[sub_id] = offered
+
+    @staticmethod
+    def _value(panel_id: str, position: int) -> str:
+        return f"{panel_id}|{position}"
+
+    def _choice(
+        self, panel_id: str, panel_name: str, position: int, breaker: Mapping[str, Any]
+    ) -> selector.SelectOptionDict:
+        value = self._value(panel_id, position)
+        self._choices[value] = (panel_id, position)
+        two_pole = str(breaker.get("poles")) == "2"
+        parts = [panel_name, f"{position}/{position + 2}" if two_pole else str(position)]
+        if breaker.get("name"):
+            parts.append(str(breaker["name"]))
+        if breaker.get("rating"):
+            parts.append(f"{breaker['rating']} A")
+        return selector.SelectOptionDict(value=value, label=" · ".join(parts))
+
+    def schema(self, chosen: Mapping[str, Any] | None) -> dict[Any, Any]:
+        """Return the section for the form, or nothing when it does not apply."""
+        if not self.fields:
+            return {}
+        fields = {}
+        for field, sub_id in self.fields.items():
+            feed = self.stored.get(sub_id)
+            default = (chosen or {}).get(field) or (self._value(*feed) if feed else NOT_FED)
+            if default not in {option["value"] for option in self._offered[sub_id]}:
+                default = NOT_FED
+            fields[vol.Required(field, default=default)] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=self._offered[sub_id],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    # Names the "none" choice; a breaker keeps its own label.
+                    translation_key="sub_panel_feed",
+                )
+            )
+        linked = any(sub_id in self.stored for sub_id in self.fields.values())
+        # Optional: Home Assistant's form always sends the section, but
+        # something that posts only the options it wants to change does not.
+        return {
+            vol.Optional(SUB_PANELS): section(
+                vol.Schema(fields), {"collapsed": not (linked or chosen)}
+            )
+        }
+
+    def read(self, chosen: Mapping[str, Any] | None) -> dict[str, tuple[str, int]]:
+        """Return every feed after the form: what was chosen, and what it did not show."""
+        shown = set(self.fields.values())
+        feeds = {sub_id: feed for sub_id, feed in self.stored.items() if sub_id not in shown}
+        for field, sub_id in self.fields.items():
+            feed = self._choices.get((chosen or {}).get(field, NOT_FED))
+            if feed and feed[0] != sub_id:
+                feeds[sub_id] = feed
+        return feeds
+
+
 class OptionsFlow(config_entries.OptionsFlow):
     """Handle the options flow for Leviton LDATA."""
 
@@ -371,30 +491,49 @@ class OptionsFlow(config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Return the options form."""
+        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        sub_panels = _SubPanelSection(coordinator, self.config_entry.options)
+        errors: dict[str, str] = {}
+        chosen_feeds = None
         if user_input is not None:
+            user_input = dict(user_input)
             # Home Assistant's frontend leaves an emptied optional text field
             # out of the submission, so a missing log_fields means the user
             # cleared it.
             user_input.setdefault("log_fields", "")
             if not user_input["log_fields"].strip():
                 user_input["log_fields"] = ""
+            # The section is only on the form while Leviton reports two or
+            # more load centers; without it, or when a submission leaves it
+            # out, the stored links are left alone.
+            chosen_feeds = user_input.pop(SUB_PANELS, None)
+            if sub_panels.fields and chosen_feeds is not None:
+                feeds = sub_panels.read(chosen_feeds)
+                if looped(feeds):
+                    errors["base"] = "sub_panel_loop"
+                else:
+                    user_input[SUB_PANELS] = {
+                        sub_id: {"panel": panel_id, "position": position}
+                        for sub_id, (panel_id, position) in feeds.items()
+                    }
             # The entry's options also hold keys this form does not show: the
             # sensor platform's import-sensor classifications
             # (confirmed_solar_import_uids, suppressed_import_uids), and the gap
             # options when they are hidden. async_create_entry replaces all of
             # entry.options, so start from the current options and apply the
             # form values on top.
-            return self.async_create_entry(
-                title="", data={**self.config_entry.options, **user_input}
-            )
-        
-        current_options = self.config_entry.options
+            if not errors:
+                return self.async_create_entry(
+                    title="", data={**self.config_entry.options, **user_input}
+                )
+
+        # After a refused submission the form comes back as it was filled in.
+        current_options = {**self.config_entry.options, **(user_input or {})}
         current_data = self.config_entry.data
 
         # Check if any panel uses power×time fallback (no hw counters).
         # If ALL panels have hw counters, gap handling options are irrelevant.
         show_gap_options = True
-        coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
         if coordinator and hasattr(coordinator, '_service') and coordinator._service:
             service = coordinator._service
             if hasattr(service, '_panel_has_hw_counters') and service._panel_has_hw_counters:
@@ -430,6 +569,7 @@ class OptionsFlow(config_entries.OptionsFlow):
                 default=current_options.get(SHOW_SIDEBAR_PANEL, current_data.get(SHOW_SIDEBAR_PANEL, SHOW_SIDEBAR_PANEL_DEFAULT)),
             ): bool,
         }
+        options_schema.update(sub_panels.schema(chosen_feeds))
 
         # Only show gap handling when at least one panel lacks hw counters
         if show_gap_options:
@@ -486,7 +626,9 @@ class OptionsFlow(config_entries.OptionsFlow):
             ): selector.TextSelector(selector.TextSelectorConfig(multiline=True)),
         })
 
-        return self.async_show_form(step_id="init", data_schema=vol.Schema(options_schema))
+        return self.async_show_form(
+            step_id="init", data_schema=vol.Schema(options_schema), errors=errors
+        )
 
 
 class CannotConnect(HomeAssistantError):

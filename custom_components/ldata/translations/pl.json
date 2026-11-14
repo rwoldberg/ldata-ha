@@ -75,8 +75,17 @@
                     "log_parsed_data": "Zapisuje w logach wszystkie pola wyłączników i rozdzielnicy po przetworzeniu każdej aktualizacji WebSocket lub REST. Przydaje się do sprawdzania wartości bez włączania zapisu surowych danych WebSocket.",
                     "enable_specific_logging": "Zapisuje w logach wskazane pola. Nazwy pól znajdziesz, włączając na chwilę opcję „Zapisuj w logach wszystkie przetworzone dane”.",
                     "log_fields": "Aby poznać nazwy pól, włącz opcję „Zapisuj w logach wszystkie przetworzone dane” i sprawdź logi Home Assistant. Wpisz je powyżej, oddzielając przecinkami."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Podrozdzielnice",
+                        "description": "Jeśli rozdzielnica jest zasilana z wyłącznika w innej rozdzielnicy, wybierz ten wyłącznik obok jej nazwy. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy i będzie można z niego do niej przejść."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Dwie rozdzielnice nie mogą zasilać się nawzajem. Sprawdź wybór w sekcji Podrozdzielnice."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Pomiń – nie zliczaj energii podczas przerw",
                 "extrapolate": "Ekstrapoluj – przyjmij, że utrzymywała się ostatnia znana moc",
                 "average": "Uśrednij – użyj średniej z ostatniej mocy i mocy po wznowieniu"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "To nie jest podrozdzielnica"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Rozdzielnica",
             "empty_title": "Brak rozdzielnic do wyświetlenia",
-            "empty_body": "Integracja nie znalazła jeszcze rozdzielnicy LDATA ani LWHEM. Być może wciąż się uruchamia albo nie może połączyć się z serwerami Leviton."
+            "empty_body": "Integracja nie znalazła jeszcze rozdzielnicy LDATA ani LWHEM. Być może wciąż się uruchamia albo nie może połączyć się z serwerami Leviton.",
+            "fed_from": "Zasilanie z: {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Obsługiwane (Gen 2)",
                 "remote_reset_no": "Nieobsługiwane (Gen 1)",
                 "standard_breaker": "To standardowy (nieinteligentny) wyłącznik. Leviton nie podaje dla niego stanu ani odczytów, więc nie ma tu czym sterować ani czego monitorować.",
-                "standard_breaker_hint": "Jeśli zasila podrozdzielnicę z własnym hubem LWHEM lub LDATA, połącz je za pomocą {option} w kodzie YAML tej karty, aby pokazać przy tym wyłączniku bieżące obciążenie tej podrozdzielnicy."
+                "standard_breaker_hint": "Jeśli zasila podrozdzielnicę z własnym hubem LWHEM lub LDATA, wybierz ten wyłącznik dla tej rozdzielnicy w sekcji Podrozdzielnice w opcjach integracji LDATA. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy."
             },
             "setup": {
                 "choose_title": "Wybierz rozdzielnicę",
@@ -290,7 +305,7 @@
             "card_name": "Karta rozdzielnicy LDATA",
             "card_description": "Realistyczny, interaktywny widok twojej rozdzielnicy Leviton.",
             "panel": "Rozdzielnica",
-            "panel_help": "Wybierz rozdzielnicę (hub LDATA lub LWHEM), a nie wyłącznik. Powiązania z podrozdzielnicami ustawia się w YAML.",
+            "panel_help": "Wybierz rozdzielnicę (hub LDATA lub LWHEM), a nie wyłącznik. Powiązania z podrozdzielnicami ustawia się w opcjach integracji LDATA.",
             "title": "Tytuł (opcjonalnie)",
             "show_power": "Pokaż bieżącą moc i prąd",
             "show_alarms": "Sygnalizuj alarmy",

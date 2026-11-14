@@ -67,7 +67,7 @@ Features:
 - Click a label, or anywhere else on a breaker, for its detail sheet: on/off control, Identify (Blink LED), live power, current and load, today's and lifetime energy, every alarm, the raw breaker state and last change reason, Bluetooth signal, model, firmware and serial number. Each row opens Home Assistant's own dialog (with history) for that entity, and **Device page** goes to the breaker's device.
 - Gen1 breakers can be tripped remotely but not reset remotely — trying to turn one on explains that instead of sending a command that would do nothing.
 - Above the door, the cover shows the panel's load, each leg's voltage and current, line frequency, today's energy and your CT clamps (e.g. Grid, Solar), with pilot lights for the cloud connection, Wi-Fi signal, and a firmware update when one is available.
-- Optional linking of a "dumb" (non-smart) breaker to the downstream sub-panel it physically feeds — the linked breaker shows that sub-panel's live Watts/Amps, and clicking it opens the sub-panel's own card in a popup.
+- Knows your sub-panels once you say which breaker feeds each one (see [Sub-panels](#sub-panels)): the feeding breaker shows the sub-panel's live Watts/Amps, and clicking it opens the sub-panel.
 - Follows your theme: with a dark theme the panel is shown under dimmer lighting.
 - Speaks your language: the card's texts follow the language set in your Home Assistant profile (see [Languages](#languages)).
 - Can also be a page of its own in Home Assistant's sidebar, with no dashboard to set up (see [Sidebar page](#sidebar-page)).
@@ -191,9 +191,25 @@ cards:
 
 If the sub-panel doesn't have its own CT clamp, it won't have a "Grid Power"-style entity of its own — in that case the closest equivalent is the Watts/Amps of whichever breaker on the main panel feeds power to it (every smart breaker has its own Watts/Amps sensors, same as any other breaker).
 
-### Linking a "dumb" breaker to the sub-panel it feeds
+### Sub-panels
 
-If a sub-panel is fed by a **"dumb" (non-smart) breaker** on the main panel — no monitoring data of its own, just a physical slot — the card has no way to know that breaker feeds another panel; Leviton's API doesn't report that relationship at all. You can tell the card about it by hand in the main panel's card config, and it'll show that sub-panel's own live Watts/Amps on the dumb breaker's label, printed in blue with a "↳ sub-panel name" prefix so it reads at a glance as "feeds another panel" rather than "just unmonitored":
+Leviton reports each load center separately; nothing in its data says that one of them is a sub-panel fed from a breaker in another. Tell the integration once and every panel card uses it, on a dashboard and on the [sidebar page](#sidebar-page) alike:
+
+1. Open **Settings > Devices & Services > Leviton LDATA > Configure** and expand **Sub-panels**. The section is there when the integration has found two or more load centers.
+2. Each load center has a field under its name. For a sub-panel, choose the breaker in the other load center that feeds it (listed as *load center · position · breaker name*). Leave the others on **Not a sub-panel**.
+3. Save. The integration reloads, and the link shows without a restart.
+
+What you get:
+
+- A **"dumb" (non-smart) feeder breaker** has no monitoring data of its own. Linked, its label shows the sub-panel's live Watts/Amps instead, printed in blue with a "↳ sub-panel name" prefix, so it reads at a glance as "feeds another panel" rather than "just unmonitored". Clicking it opens the sub-panel.
+- A **smart feeder breaker** stays a breaker, with its own readings and rocker. Its detail sheet gains a **Feeds *sub-panel*** row that opens the sub-panel.
+- On a dashboard the sub-panel opens in a popup; on the sidebar page it opens the sub-panel's own tab.
+
+A load center has one feed, a sub-panel can feed another sub-panel, and two load centers cannot feed each other.
+
+#### Per-card extras in YAML
+
+The card's own `sub_panels` option still works. It adds to what is set in the integration's options, and wins for the same breaker, so it is the place for the two things the integration does not ask about (a dumb breaker's rating, and a dashboard view to open instead of the popup). A card can also link a breaker that way with nothing set in the options:
 
 ```yaml
 type: custom:ldata-panel-card
@@ -204,7 +220,7 @@ sub_panels:
     rating: 50                             # optional — see below
 ```
 
-Add one entry per dumb breaker you want linked — a single card can link more than one, e.g. if a panel has two dumb breakers each feeding a different sub-panel.
+Add one entry per breaker — a single card can link more than one, e.g. if a panel has two breakers each feeding a different sub-panel. `panel_device_id` can be left out for a breaker that is already linked in the integration's options.
 
 Leviton's API never reports a rating for a dumb breaker (it's not a smart device, so there's no data on it at all) — if you know the breaker's own max amp rating (e.g. it's a 50A double-pole feeding the sub-panel), add `rating` and it shows on the label the same way a smart breaker's does.
 
@@ -223,14 +239,15 @@ There's no registry mapping a device id to "the dashboard view showing its card"
 
 ## Sidebar page
 
-The integration can add a **Load Center** item to Home Assistant's sidebar. It opens a full page with the panel card for every load center the integration has found: side by side on a wide screen, stacked on a phone. There is no dashboard to create and nothing to configure on the card.
+The integration can add a **Load Center** item to Home Assistant's sidebar. It opens a full page with the panel card of your load center. With more than one load center, each has its own tab at the top of the page, so every panel gets the full width. There is no dashboard to create and nothing to configure on the card.
 
 It is **off by default**. Turn it on with **Show the load center in the sidebar**, either when you first set the integration up or later under **Settings > Devices & Services > Leviton LDATA > Configure**. The item appears (or disappears) as soon as you save; no restart is needed.
 
-- The page lists the load centers by name. Breakers are switched, and their details opened, exactly as on the dashboard card.
+- The tabs are in name order, with a sub-panel right after the load center that feeds it (see [Sub-panels](#sub-panels)). Breakers are switched, and their details opened, exactly as on the dashboard card.
+- Clicking a breaker that feeds a sub-panel opens that sub-panel's tab, and the sub-panel's page has a **Fed from** link back. Each tab has its own address (`/ldata/<device id>`), so the browser's back button works and a wall tablet can be left on one load center.
 - If you have more than one LDATA entry (one per residence), there is still a single sidebar item. It shows the load centers of every entry that has the option turned on.
 - The item is there as soon as Home Assistant starts and stays while the integration reloads or cannot reach Leviton, so a wall tablet left on the page stays on it. Until the integration has data, the breakers show as unavailable.
-- The page uses the card's defaults. For the card's options (a main breaker, sub-panel links, lighting, and so on), add the card to a dashboard instead; both can be used at the same time.
+- The page uses the card's defaults. For the card's options (a main breaker, lighting, and so on), add the card to a dashboard instead; both can be used at the same time.
 - The item's name in the sidebar is in the language Home Assistant itself is set to (**Settings > System > General**). Home Assistant shows one name to all users, so it does not follow each user's own language the way the page does. You can hide or move the item like any other by editing the sidebar.
 
 ## Languages
@@ -353,6 +370,9 @@ Addon is auto reloading on submit.
 
 - Show the load center in the sidebar (default off)
   - Adds a sidebar item that opens a full-page, interactive view of your load center(s). See [Sidebar page](#sidebar-page).
+
+- Sub-panels (shown with two or more load centers)
+  - For a load center that is fed from a breaker in another one, the breaker that feeds it. See [Sub-panels](#sub-panels).
 
 - Log General Integration Errors
   - Integration crashes or web errors

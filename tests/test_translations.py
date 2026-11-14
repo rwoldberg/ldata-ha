@@ -162,10 +162,14 @@ def test_english_follows_the_hassfest_layout() -> None:
     for name, doc in (("strings.json", strings), ("en.json", ENGLISH)):
         assert set(doc) <= TOP_LEVEL, name
         for flow in ("config", "options"):
+            assert set(doc[flow]) <= {"step", "error", "abort"}, (name, flow)
             for step_id, step in doc[flow]["step"].items():
-                assert set(step) <= {"title", "description", "data", "data_description"}, (name, step_id)
+                assert set(step) <= {"title", "description", "data", "data_description", "sections"}, (name, step_id)
                 # hassfest: "data_description key … is not in data"
                 assert set(step.get("data_description", {})) <= set(step.get("data", {})), (name, step_id)
+                for key, section in step.get("sections", {}).items():
+                    assert RE_TRANSLATION_KEY.match(key), (name, step_id, key)
+                    assert set(section) <= {"name", "description", "data", "data_description"}, (name, step_id, key)
         for key, selector in doc["selector"].items():
             assert RE_TRANSLATION_KEY.match(key) and set(selector) == {"options"}, (name, key)
             assert all(RE_TRANSLATION_KEY.match(option) for option in selector["options"]), (name, key)
@@ -198,6 +202,12 @@ def test_translations_cover_the_integration() -> None:
     assert SHOW_SIDEBAR_PANEL in ENGLISH["config"]["step"]["user"]["data"]
     assert SHOW_SIDEBAR_PANEL in ENGLISH["options"]["step"]["init"]["data"]
     assert set(ENGLISH["selector"][GAP_HANDLING]["options"]) == set(GAP_HANDLING_LABELS)
+    # The options form's section, its "none" choice and the error it can raise.
+    from custom_components.ldata.sub_panels import NOT_FED, SUB_PANELS
+
+    assert {"name", "description"} == set(ENGLISH["options"]["step"]["init"]["sections"][SUB_PANELS])
+    assert set(ENGLISH["selector"]["sub_panel_feed"]["options"]) == {NOT_FED}
+    assert "sub_panel_loop" in ENGLISH["options"]["error"]
 
     services = yaml.safe_load((COMPONENT / "services.yaml").read_text(encoding="utf-8"))
     assert set(ENGLISH["services"]) == set(services)

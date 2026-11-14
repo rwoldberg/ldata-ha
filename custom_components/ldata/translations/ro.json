@@ -75,8 +75,17 @@
                     "log_parsed_data": "Jurnalizează toate câmpurile disjunctoarelor și ale tablourilor după interpretarea fiecărei actualizări WebSocket sau REST. Util pentru verificarea valorilor fără a activa jurnalizarea WebSocket brută.",
                     "enable_specific_logging": "Jurnalizează orice câmp specificat. Numele câmpurilor pot fi aflate activând pentru scurt timp „Jurnalizează toate datele interpretate”.",
                     "log_fields": "Pentru a afla numele câmpurilor, activează „Jurnalizează toate datele interpretate” și verifică jurnalele Home Assistant. Introdu-le mai sus, separate prin virgulă."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Tablouri secundare",
+                        "description": "Dacă un tablou electric este alimentat dintr-un disjunctor al altui tablou, alege acel disjunctor în dreptul numelui său. Disjunctorul va afișa apoi sarcina în timp real a tabloului secundar și va permite deschiderea acestuia."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Două tablouri electrice nu se pot alimenta unul pe celălalt. Verifică alegerile de la Tablouri secundare."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Omite — nu se acumulează energie în timpul golurilor de date",
                 "extrapolate": "Extrapolează — se presupune că ultima putere cunoscută s-a menținut",
                 "average": "Medie — se folosește media dintre ultima putere și cea de la reluare"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Nu este tablou secundar"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Tablou electric",
             "empty_title": "Niciun tablou electric de afișat",
-            "empty_body": "Această integrare nu a găsit încă niciun tablou LDATA sau LWHEM. Este posibil să fie încă în curs de pornire sau să nu poată contacta Leviton."
+            "empty_body": "Această integrare nu a găsit încă niciun tablou LDATA sau LWHEM. Este posibil să fie încă în curs de pornire sau să nu poată contacta Leviton.",
+            "fed_from": "Alimentat din {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Disponibilă (Gen 2)",
                 "remote_reset_no": "Indisponibilă (Gen 1)",
                 "standard_breaker": "Acesta este un disjunctor standard (neinteligent). Leviton nu raportează nicio stare și nicio măsurătoare pentru el, așa că aici nu este nimic de controlat sau de monitorizat.",
-                "standard_breaker_hint": "Dacă alimentează un tablou secundar care are propriul hub LWHEM sau LDATA, leagă-le cu {option} în YAML-ul acestui card pentru a afișa pe acest disjunctor sarcina în timp real a acelui tablou."
+                "standard_breaker_hint": "Dacă alimentează un tablou secundar care are propriul hub LWHEM sau LDATA, alege acest disjunctor pentru acel tablou la Tablouri secundare, în opțiunile integrării LDATA. Sarcina în timp real a tabloului secundar va fi afișată apoi pe acest disjunctor."
             },
             "setup": {
                 "choose_title": "Alege tabloul",
@@ -290,7 +305,7 @@
             "card_name": "Card tablou LDATA",
             "card_description": "O vizualizare realistă și interactivă a tabloului tău electric Leviton.",
             "panel": "Tablou",
-            "panel_help": "Alege tabloul (hubul LDATA sau LWHEM), nu un disjunctor. Legăturile cu tablourile secundare se definesc în YAML.",
+            "panel_help": "Alege tabloul (hubul LDATA sau LWHEM), nu un disjunctor. Legăturile cu tablourile secundare se definesc în opțiunile integrării LDATA.",
             "title": "Titlu (opțional)",
             "show_power": "Afișează wații și amperii în timp real",
             "show_alarms": "Semnalează alarmele",

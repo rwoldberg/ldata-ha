@@ -75,8 +75,17 @@
                     "log_parsed_data": "Kirjaa lokiin kaikki johdonsuojien ja sähkökeskuksen kentät jokaisen WebSocket- tai REST-päivityksen jäsentämisen jälkeen. Hyödyllinen arvojen tarkistamiseen ilman WebSocket-raakadatan kirjausta.",
                     "enable_specific_logging": "Kirjaa lokiin määritetyt kentät. Kenttien nimet saat selville ottamalla hetkeksi käyttöön asetuksen ”Kirjaa lokiin kaikki jäsennetty data”.",
                     "log_fields": "Saat kenttien nimet selville ottamalla käyttöön asetuksen ”Kirjaa lokiin kaikki jäsennetty data” ja katsomalla Home Assistantin lokeja. Syötä nimet yllä olevaan kenttään pilkuilla erotettuina."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Alakeskukset",
+                        "description": "Jos sähkökeskusta syötetään toisen sähkökeskuksen johdonsuojasta, valitse kyseinen johdonsuoja keskuksen nimen kohdalta. Johdonsuoja näyttää sen jälkeen alakeskuksen reaaliaikaisen kuorman, ja siitä pääsee alakeskukseen."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Kaksi sähkökeskusta ei voi syöttää toisiaan. Tarkista Alakeskukset-kohdan valinnat."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Ohita – energiaa ei kerrytetä katkosten aikana",
                 "extrapolate": "Ekstrapoloi – oletetaan viimeisimmän tunnetun tehon jatkuneen",
                 "average": "Keskiarvo – käytetään viimeisen ja katkoksen jälkeisen tehon keskiarvoa"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Ei alakeskus"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Sähkökeskus",
             "empty_title": "Ei näytettäviä sähkökeskuksia",
-            "empty_body": "Integraatio ei ole vielä löytänyt LDATA- tai LWHEM-sähkökeskusta. Se voi olla vielä käynnistymässä, tai se ei saa yhteyttä Levitoniin."
+            "empty_body": "Integraatio ei ole vielä löytänyt LDATA- tai LWHEM-sähkökeskusta. Se voi olla vielä käynnistymässä, tai se ei saa yhteyttä Levitoniin.",
+            "fed_from": "Syöttö keskuksesta {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Tuettu (Gen 2)",
                 "remote_reset_no": "Ei tuettu (Gen 1)",
                 "standard_breaker": "Tämä on tavallinen johdonsuoja (ei älykäs). Leviton ei ilmoita sen tilaa eikä mittauslukemia, joten täällä ei ole mitään ohjattavaa tai valvottavaa.",
-                "standard_breaker_hint": "Jos se syöttää alakeskusta, jolla on oma LWHEM- tai LDATA-keskitin, yhdistä ne tämän kortin YAML-määrityksessä asetuksella {option}, niin alakeskuksen reaaliaikainen kuorma näkyy tässä johdonsuojassa."
+                "standard_breaker_hint": "Jos se syöttää alakeskusta, jolla on oma LWHEM- tai LDATA-keskitin, valitse tämä johdonsuoja kyseiselle keskukselle LDATA-integraation asetusten Alakeskukset-kohdasta. Alakeskuksen reaaliaikainen kuorma näkyy sen jälkeen tässä johdonsuojassa."
             },
             "setup": {
                 "choose_title": "Valitse sähkökeskus",
@@ -290,7 +305,7 @@
             "card_name": "LDATA-sähkökeskuskortti",
             "card_description": "Realistinen, interaktiivinen näkymä Leviton-sähkökeskuksestasi.",
             "panel": "Sähkökeskus",
-            "panel_help": "Valitse sähkökeskus (LDATA- tai LWHEM-keskitin), ei johdonsuojaa. Alakeskusten linkit asetetaan YAML-määrityksessä.",
+            "panel_help": "Valitse sähkökeskus (LDATA- tai LWHEM-keskitin), ei johdonsuojaa. Alakeskusten linkit asetetaan LDATA-integraation asetuksissa.",
             "title": "Otsikko (valinnainen)",
             "show_power": "Näytä reaaliaikaiset watit ja ampeerit",
             "show_alarms": "Korosta hälytykset",

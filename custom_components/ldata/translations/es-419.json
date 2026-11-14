@@ -75,8 +75,17 @@
                     "log_parsed_data": "Registra todos los campos de los interruptores y del centro de carga después de analizar cada actualización de WebSocket o REST. Es útil para verificar valores sin habilitar el registro de WebSocket sin procesar.",
                     "enable_specific_logging": "Registra los campos que usted especifique. Puede encontrar los nombres de los campos habilitando brevemente “Registrar todos los datos analizados”.",
                     "log_fields": "Para encontrar los nombres de los campos, habilite “Registrar todos los datos analizados” y revise los registros de Home Assistant. Ingréselos arriba separados por comas."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Subpaneles",
+                        "description": "Si un centro de carga se alimenta desde un interruptor de otro centro de carga, elija ese interruptor junto a su nombre. Ese interruptor mostrará entonces la carga en tiempo real del subpanel y permitirá ir a él."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Dos centros de carga no pueden alimentarse entre sí. Revise las opciones elegidas en Subpaneles."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Omitir: no acumular energía durante los intervalos sin datos",
                 "extrapolate": "Extrapolar: asumir que se mantuvo la última potencia conocida",
                 "average": "Promediar: usar el promedio entre la última potencia y la de recuperación"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "No es un subpanel"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Centro de carga",
             "empty_title": "No hay centros de carga para mostrar",
-            "empty_body": "Esta integración aún no ha encontrado ningún centro de carga LDATA o LWHEM. Es posible que todavía se esté iniciando o que no pueda conectarse con Leviton."
+            "empty_body": "Esta integración aún no ha encontrado ningún centro de carga LDATA o LWHEM. Es posible que todavía se esté iniciando o que no pueda conectarse con Leviton.",
+            "fed_from": "Alimentado desde {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Compatible (Gen 2)",
                 "remote_reset_no": "No compatible (Gen 1)",
                 "standard_breaker": "Este es un interruptor estándar (no inteligente). Leviton no reporta su estado ni sus lecturas, así que aquí no hay nada que controlar ni monitorear.",
-                "standard_breaker_hint": "Si alimenta un subpanel que tiene su propio hub LWHEM o LDATA, vincúlelos con {option} en el YAML de esta tarjeta para mostrar en este interruptor la carga en tiempo real de ese subpanel."
+                "standard_breaker_hint": "Si alimenta un subpanel que tiene su propio hub LWHEM o LDATA, elija este interruptor para ese centro de carga en Subpaneles, en las opciones de la integración LDATA. La carga en tiempo real del subpanel se mostrará entonces en este interruptor."
             },
             "setup": {
                 "choose_title": "Elija su centro de carga",
@@ -290,7 +305,7 @@
             "card_name": "Tarjeta de centro de carga LDATA",
             "card_description": "Una vista realista e interactiva de su centro de carga Leviton.",
             "panel": "Centro de carga",
-            "panel_help": "Elija el centro de carga (el hub LDATA o LWHEM), no un interruptor. Los vínculos con subpaneles se definen en YAML.",
+            "panel_help": "Elija el centro de carga (el hub LDATA o LWHEM), no un interruptor. Los vínculos con subpaneles se definen en las opciones de la integración LDATA.",
             "title": "Título (opcional)",
             "show_power": "Mostrar watts y amperes en tiempo real",
             "show_alarms": "Resaltar las alarmas",

@@ -75,8 +75,17 @@
                     "log_parsed_data": "Logga alla fält för dvärgbrytare och elcentral efter tolkningen av varje WebSocket- eller REST-uppdatering. Praktiskt för att kontrollera värden utan att aktivera loggning av rå WebSocket-data.",
                     "enable_specific_logging": "Logga valfria angivna fält. Fältnamnen hittar du genom att tillfälligt aktivera ”Logga all tolkad data”.",
                     "log_fields": "För att hitta fältnamnen aktiverar du ”Logga all tolkad data” och tittar i Home Assistants loggar. Ange dem ovan, avgränsade med kommatecken."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Undercentraler",
+                        "description": "Om en elcentral matas från en dvärgbrytare i en annan elcentral väljer du den dvärgbrytaren bredvid centralens namn. Dvärgbrytaren visar sedan undercentralens aktuella belastning och leder vidare till undercentralen."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Två elcentraler kan inte mata varandra. Kontrollera valen under Undercentraler."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Hoppa över – räkna inte in energi under dataluckor",
                 "extrapolate": "Extrapolera – anta att den senast kända effekten fortsatte",
                 "average": "Medelvärde – använd medelvärdet av effekten före och efter luckan"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Inte en undercentral"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Elcentral",
             "empty_title": "Inga elcentraler att visa",
-            "empty_body": "Integrationen har inte hittat någon LDATA- eller LWHEM-elcentral ännu. Den kanske fortfarande startar, eller så når den inte Leviton."
+            "empty_body": "Integrationen har inte hittat någon LDATA- eller LWHEM-elcentral ännu. Den kanske fortfarande startar, eller så når den inte Leviton.",
+            "fed_from": "Matas från {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Stöds (Gen 2)",
                 "remote_reset_no": "Stöds inte (Gen 1)",
                 "standard_breaker": "Detta är en vanlig dvärgbrytare (inte smart). Leviton rapporterar varken tillstånd eller mätvärden för den, så här finns inget att styra eller övervaka.",
-                "standard_breaker_hint": "Om den matar en undercentral med egen LWHEM- eller LDATA-hubb kan du länka dem med {option} i kortets YAML för att visa undercentralens aktuella belastning på den här dvärgbrytaren."
+                "standard_breaker_hint": "Om den matar en undercentral med egen LWHEM- eller LDATA-hubb väljer du den här dvärgbrytaren för den centralen under Undercentraler i LDATA-integrationens alternativ. Undercentralens aktuella belastning visas sedan på den här dvärgbrytaren."
             },
             "setup": {
                 "choose_title": "Välj din elcentral",
@@ -290,7 +305,7 @@
             "card_name": "LDATA-kort för elcentral",
             "card_description": "En realistisk, interaktiv vy av din Leviton-elcentral.",
             "panel": "Elcentral",
-            "panel_help": "Välj elcentralen (LDATA- eller LWHEM-hubben), inte en dvärgbrytare. Länkar till undercentraler anges i YAML.",
+            "panel_help": "Välj elcentralen (LDATA- eller LWHEM-hubben), inte en dvärgbrytare. Länkar till undercentraler anges i LDATA-integrationens alternativ.",
             "title": "Rubrik (valfritt)",
             "show_power": "Visa watt och ampere i realtid",
             "show_alarms": "Markera larm",

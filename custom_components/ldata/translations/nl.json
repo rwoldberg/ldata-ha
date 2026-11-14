@@ -75,8 +75,17 @@
                     "log_parsed_data": "Logt alle velden van automaten en groepenkast na het parsen van elke WebSocket- of REST-update. Handig om waarden te controleren zonder het loggen van ruwe WebSocket-data in te schakelen.",
                     "enable_specific_logging": "Logt de opgegeven velden. Veldnamen vind je door kort ‘Alle geparste data loggen’ in te schakelen.",
                     "log_fields": "Om veldnamen te vinden, schakel je ‘Alle geparste data loggen’ in en bekijk je de logboeken van Home Assistant. Vul ze hierboven in, gescheiden door komma’s."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Onderverdelers",
+                        "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Twee groepenkasten kunnen elkaar niet voeden. Controleer de keuzes onder Onderverdelers."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Overslaan – Geen energie optellen tijdens hiaten",
                 "extrapolate": "Extrapoleren – Aannemen dat het laatst bekende vermogen aanhield",
                 "average": "Gemiddelde – Het gemiddelde gebruiken van het laatste vermogen en het vermogen na het hiaat"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Geen onderverdeler"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Groepenkast",
             "empty_title": "Geen groepenkasten om te tonen",
-            "empty_body": "Deze integratie heeft nog geen groepenkast met LDATA of LWHEM gevonden. Mogelijk is de integratie nog aan het opstarten of is Leviton niet bereikbaar."
+            "empty_body": "Deze integratie heeft nog geen groepenkast met LDATA of LWHEM gevonden. Mogelijk is de integratie nog aan het opstarten of is Leviton niet bereikbaar.",
+            "fed_from": "Gevoed vanuit {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Ondersteund (Gen 2)",
                 "remote_reset_no": "Niet ondersteund (Gen 1)",
                 "standard_breaker": "Dit is een standaard (niet-slimme) automaat. Leviton geeft hiervoor geen status of meetwaarden door, dus valt er hier niets te bedienen of te monitoren.",
-                "standard_breaker_hint": "Als hij een onderverdeler voedt met een eigen LWHEM- of LDATA-hub, koppel ze dan met {option} in de YAML van deze kaart om de actuele belasting van die onderverdeler bij deze automaat te tonen."
+                "standard_breaker_hint": "Als hij een onderverdeler voedt met een eigen LWHEM- of LDATA-hub, kies deze automaat dan voor die kast onder Onderverdelers bij de opties van de LDATA-integratie. De actuele belasting van de onderverdeler wordt daarna bij deze automaat getoond."
             },
             "setup": {
                 "choose_title": "Kies je groepenkast",
@@ -290,7 +305,7 @@
             "card_name": "LDATA-groepenkastkaart",
             "card_description": "Een realistische, interactieve weergave van je Leviton-groepenkast.",
             "panel": "Groepenkast",
-            "panel_help": "Kies de groepenkast (de LDATA- of LWHEM-hub), niet een automaat. Koppelingen met onderverdelers stel je in YAML in.",
+            "panel_help": "Kies de groepenkast (de LDATA- of LWHEM-hub), niet een automaat. Koppelingen met onderverdelers stel je in bij de opties van de LDATA-integratie.",
             "title": "Titel (optioneel)",
             "show_power": "Actuele watt- en ampèrewaarden tonen",
             "show_alarms": "Alarmen markeren",

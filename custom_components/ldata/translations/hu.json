@@ -75,8 +75,17 @@
                     "log_parsed_data": "Az összes megszakító- és elosztótábla-mező naplózása minden WebSocket- vagy REST-frissítés feldolgozása után. Hasznos az értékek ellenőrzéséhez a nyers WebSocket-naplózás bekapcsolása nélkül.",
                     "enable_specific_logging": "A megadott mezők naplózása. A mezőnevek a „Minden feldolgozott adat naplózása” opció rövid idejű bekapcsolásával deríthetők ki.",
                     "log_fields": "A mezőnevek megtalálásához kapcsolja be a „Minden feldolgozott adat naplózása” opciót, és nézze meg a Home Assistant naplóját. A neveket fent, vesszővel elválasztva adja meg."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Alelosztók",
+                        "description": "Ha egy elosztótáblát egy másik elosztótábla megszakítója táplál, válassza ki azt a megszakítót a neve mellett. Ezután az a megszakító mutatja az alelosztó élő terhelését, és onnan megnyitható az alelosztó."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Két elosztótábla nem táplálhatja egymást. Ellenőrizze az Alelosztók alatti beállításokat."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Kihagyás – adatkiesés alatt nem számol energiát",
                 "extrapolate": "Extrapolálás – feltételezi, hogy az utolsó ismert teljesítmény változatlan maradt",
                 "average": "Átlagolás – a kiesés előtti utolsó és az utána mért első teljesítmény átlagával számol"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Nem alelosztó"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Elosztótábla",
             "empty_title": "Nincs megjeleníthető elosztótábla",
-            "empty_body": "Az integráció még nem talált LDATA vagy LWHEM elosztótáblát. Lehet, hogy még indul, vagy nem éri el a Levitont."
+            "empty_body": "Az integráció még nem talált LDATA vagy LWHEM elosztótáblát. Lehet, hogy még indul, vagy nem éri el a Levitont.",
+            "fed_from": "Táplálás innen: {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Támogatott (Gen 2)",
                 "remote_reset_no": "Nem támogatott (Gen 1)",
                 "standard_breaker": "Ez egy hagyományos (nem okos) megszakító. A Leviton nem közöl róla sem állapotot, sem mért értékeket, ezért itt nincs mit vezérelni vagy figyelni.",
-                "standard_breaker_hint": "Ha olyan alelosztót táplál, amelynek saját LWHEM vagy LDATA hubja van, kapcsolja össze őket a kártya YAML-kódjában a {option} beállítással, hogy ezen a megszakítón megjelenjen az alelosztó élő terhelése."
+                "standard_breaker_hint": "Ha olyan alelosztót táplál, amelynek saját LWHEM vagy LDATA hubja van, válassza ki ezt a megszakítót az adott elosztóhoz az LDATA integráció beállításaiban, az Alelosztók részben. Ezután ezen a megszakítón megjelenik az alelosztó élő terhelése."
             },
             "setup": {
                 "choose_title": "Válassza ki az elosztótáblát",
@@ -290,7 +305,7 @@
             "card_name": "LDATA elosztótábla-kártya",
             "card_description": "A Leviton elosztótábla élethű, interaktív nézete.",
             "panel": "Elosztótábla",
-            "panel_help": "Az elosztótáblát (az LDATA vagy LWHEM hubot) válassza ki, ne egy megszakítót. Az alelosztók kapcsolatai YAML-ben adhatók meg.",
+            "panel_help": "Az elosztótáblát (az LDATA vagy LWHEM hubot) válassza ki, ne egy megszakítót. Az alelosztók kapcsolatai az LDATA integráció beállításaiban adhatók meg.",
             "title": "Cím (opcionális)",
             "show_power": "Élő watt- és amperértékek megjelenítése",
             "show_alarms": "Riasztások jelzése",

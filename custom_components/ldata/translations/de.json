@@ -75,8 +75,17 @@
                     "log_parsed_data": "Protokolliert alle Felder von Sicherungen und Sicherungskasten nach dem Parsen jeder WebSocket- oder REST-Aktualisierung. Nützlich, um Werte zu prüfen, ohne die Protokollierung der WebSocket-Rohdaten zu aktivieren.",
                     "enable_specific_logging": "Protokolliert die angegebenen Felder. Die Feldnamen findest du, indem du kurz „Alle geparsten Daten protokollieren“ aktivierst.",
                     "log_fields": "Um Feldnamen zu finden, aktiviere „Alle geparsten Daten protokollieren“ und sieh in den Protokollen von Home Assistant nach. Trage die Felder oben durch Kommas getrennt ein."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Unterverteilungen",
+                        "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Zwei Sicherungskästen können sich nicht gegenseitig versorgen. Prüfe die Auswahl unter Unterverteilungen."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Überspringen – Während Datenlücken keine Energie aufsummieren",
                 "extrapolate": "Extrapolieren – Annehmen, dass die letzte bekannte Leistung weiter anlag",
                 "average": "Durchschnitt – Mittelwert aus der letzten Leistung und der Leistung nach der Lücke verwenden"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Keine Unterverteilung"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Sicherungskasten",
             "empty_title": "Keine Sicherungskästen vorhanden",
-            "empty_body": "Diese Integration hat noch keinen Sicherungskasten mit LDATA oder LWHEM gefunden. Möglicherweise startet sie noch, oder sie kann Leviton nicht erreichen."
+            "empty_body": "Diese Integration hat noch keinen Sicherungskasten mit LDATA oder LWHEM gefunden. Möglicherweise startet sie noch, oder sie kann Leviton nicht erreichen.",
+            "fed_from": "Versorgt von {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Unterstützt (Gen 2)",
                 "remote_reset_no": "Nicht unterstützt (Gen 1)",
                 "standard_breaker": "Dies ist eine herkömmliche (nicht smarte) Sicherung. Leviton meldet dafür weder Zustand noch Messwerte, daher gibt es hier nichts zu steuern oder zu überwachen.",
-                "standard_breaker_hint": "Falls sie eine Unterverteilung mit eigenem LWHEM- oder LDATA-Hub versorgt, verknüpfe beide über {option} im YAML dieser Karte, um die Live-Last dieser Unterverteilung an dieser Sicherung anzuzeigen."
+                "standard_breaker_hint": "Falls sie eine Unterverteilung mit eigenem LWHEM- oder LDATA-Hub versorgt, wähle diese Sicherung für sie unter Unterverteilungen in den Optionen der LDATA-Integration aus. Die Live-Last der Unterverteilung wird dann an dieser Sicherung angezeigt."
             },
             "setup": {
                 "choose_title": "Wähle deinen Sicherungskasten",
@@ -290,7 +305,7 @@
             "card_name": "LDATA-Sicherungskasten-Karte",
             "card_description": "Eine realistische, interaktive Ansicht deines Leviton-Sicherungskastens.",
             "panel": "Sicherungskasten",
-            "panel_help": "Wähle den Sicherungskasten (den LDATA- oder LWHEM-Hub), keine Sicherung. Verknüpfungen zu Unterverteilungen werden in YAML festgelegt.",
+            "panel_help": "Wähle den Sicherungskasten (den LDATA- oder LWHEM-Hub), keine Sicherung. Verknüpfungen zu Unterverteilungen werden in den Optionen der LDATA-Integration festgelegt.",
             "title": "Titel (optional)",
             "show_power": "Live-Werte in Watt und Ampere anzeigen",
             "show_alarms": "Alarme kennzeichnen",

@@ -75,8 +75,17 @@
           "log_parsed_data": "Log all breaker and panel fields after parsing each WebSocket or REST update. Useful for verifying values without enabling raw WebSocket logging.",
           "enable_specific_logging": "Log any specified field. Field names can be found by briefly enabling 'Log All Parsed Data'.",
           "log_fields": "To find field names, enable 'Log All Parsed Data' and check Home Assistant logs. Enter above as comma separated."
+        },
+        "sections": {
+          "sub_panels": {
+            "name": "Sub-panels",
+            "description": "If a load center is fed from a breaker in another one, choose that breaker next to its name. That breaker then shows the sub-panel's live load and leads to the sub-panel."
+          }
         }
       }
+    },
+    "error": {
+      "sub_panel_loop": "Two load centers cannot feed each other. Check the choices under Sub-panels."
     }
   },
   "selector": {
@@ -85,6 +94,11 @@
         "skip": "Skip — Don't accumulate energy during gaps",
         "extrapolate": "Extrapolate — Assume last known power continued",
         "average": "Average — Use mean of last and recovery power"
+      }
+    },
+    "sub_panel_feed": {
+      "options": {
+        "none": "Not a sub-panel"
       }
     }
   },
@@ -122,7 +136,8 @@
     "sidebar": {
       "title": "Load Center",
       "empty_title": "No load centers to show",
-      "empty_body": "This integration has not found an LDATA or LWHEM panel yet. It may still be starting, or it may be unable to reach Leviton."
+      "empty_body": "This integration has not found an LDATA or LWHEM panel yet. It may still be starting, or it may be unable to reach Leviton.",
+      "fed_from": "Fed from {panel}"
     },
     "card": {
       "name": {
@@ -269,7 +284,7 @@
         "remote_reset_yes": "Supported (Gen 2)",
         "remote_reset_no": "Not supported (Gen 1)",
         "standard_breaker": "This is a standard (non-smart) breaker. Leviton reports no state or readings for it, so there is nothing to control or monitor here.",
-        "standard_breaker_hint": "If it feeds a sub-panel that has its own LWHEM or LDATA hub, link them with {option} in this card's YAML to show that panel's live load on this breaker."
+        "standard_breaker_hint": "If it feeds a sub-panel that has its own LWHEM or LDATA hub, choose this breaker for that panel under Sub-panels in the LDATA integration options. The sub-panel's live load then shows on this breaker."
       },
       "setup": {
         "choose_title": "Choose your panel",
@@ -290,7 +305,7 @@
       "card_name": "LDATA Panel Card",
       "card_description": "A realistic, interactive view of your Leviton load center.",
       "panel": "Panel",
-      "panel_help": "Pick the panel (the LDATA or LWHEM hub), not a breaker. Sub-panel links are set in YAML.",
+      "panel_help": "Pick the panel (the LDATA or LWHEM hub), not a breaker. Sub-panel links are set in the LDATA integration options.",
       "title": "Title (optional)",
       "show_power": "Show live watts and amps",
       "show_alarms": "Flag alarms",

@@ -75,8 +75,17 @@
                     "log_parsed_data": "Loguje všechna pole jističů a rozvaděče po zpracování každé aktualizace přes WebSocket nebo REST. Hodí se k ověření hodnot bez zapínání logování nezpracovaných dat WebSocket.",
                     "enable_specific_logging": "Loguje vybraná pole. Názvy polí zjistíte, když nakrátko zapnete volbu „Logovat všechna zpracovaná data“.",
                     "log_fields": "Názvy polí zjistíte, když zapnete volbu „Logovat všechna zpracovaná data“ a podíváte se do logů systému Home Assistant. Zadejte je výše oddělené čárkami."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Podružné rozvaděče",
+                        "description": "Pokud je rozvaděč napájen z jističe v jiném rozvaděči, vyberte tento jistič u jeho názvu. U tohoto jističe se pak zobrazuje aktuální zatížení podružného rozvaděče a lze z něj na podružný rozvaděč přejít."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Dva rozvaděče se nemohou napájet navzájem. Zkontrolujte výběr v části Podružné rozvaděče."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Přeskočit – během výpadků energii nezapočítávat",
                 "extrapolate": "Extrapolovat – předpokládat, že trval poslední známý výkon",
                 "average": "Průměr – použít průměr posledního výkonu a výkonu po obnovení"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Není podružný rozvaděč"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Rozvaděč",
             "empty_title": "Žádné rozvaděče k zobrazení",
-            "empty_body": "Integrace zatím nenašla žádný rozvaděč LDATA ani LWHEM. Možná se teprve spouští, nebo se nemůže spojit se službou Leviton."
+            "empty_body": "Integrace zatím nenašla žádný rozvaděč LDATA ani LWHEM. Možná se teprve spouští, nebo se nemůže spojit se službou Leviton.",
+            "fed_from": "Napájeno z: {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Podporováno (Gen 2)",
                 "remote_reset_no": "Nepodporováno (Gen 1)",
                 "standard_breaker": "Toto je běžný (nikoli chytrý) jistič. Leviton u něj nehlásí žádný stav ani naměřené hodnoty, takže zde není co ovládat ani sledovat.",
-                "standard_breaker_hint": "Pokud napájí podružný rozvaděč s vlastním hubem LWHEM nebo LDATA, propojte je pomocí {option} v YAML této karty a u tohoto jističe se bude zobrazovat aktuální zatížení daného rozvaděče."
+                "standard_breaker_hint": "Pokud napájí podružný rozvaděč s vlastním hubem LWHEM nebo LDATA, vyberte tento jistič pro daný rozvaděč v části Podružné rozvaděče ve volbách integrace LDATA. U tohoto jističe se pak bude zobrazovat aktuální zatížení podružného rozvaděče."
             },
             "setup": {
                 "choose_title": "Vyberte rozvaděč",
@@ -290,7 +305,7 @@
             "card_name": "Karta rozvaděče LDATA",
             "card_description": "Realistické interaktivní zobrazení vašeho rozvaděče Leviton.",
             "panel": "Rozvaděč",
-            "panel_help": "Vyberte rozvaděč (hub LDATA nebo LWHEM), ne jistič. Propojení s podružnými rozvaděči se nastavuje v YAML.",
+            "panel_help": "Vyberte rozvaděč (hub LDATA nebo LWHEM), ne jistič. Propojení s podružnými rozvaděči se nastavuje ve volbách integrace LDATA.",
             "title": "Název (volitelný)",
             "show_power": "Zobrazit aktuální výkon a proud",
             "show_alarms": "Zvýraznit alarmy",

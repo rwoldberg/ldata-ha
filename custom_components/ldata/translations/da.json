@@ -75,8 +75,17 @@
                     "log_parsed_data": "Log alle felter for automatsikringer og eltavle efter fortolkningen af hver WebSocket- eller REST-opdatering. Nyttigt til at kontrollere værdier uden at aktivere logning af rå WebSocket-data.",
                     "enable_specific_logging": "Log et hvilket som helst angivet felt. Feltnavnene kan findes ved kortvarigt at aktivere ”Log alle fortolkede data”.",
                     "log_fields": "Du finder feltnavnene ved at aktivere ”Log alle fortolkede data” og kigge i Home Assistants logfiler. Indtast dem ovenfor adskilt af kommaer."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Undertavler",
+                        "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "To eltavler kan ikke forsyne hinanden. Kontrollér valgene under Undertavler."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Spring over – medregn ikke energi under datahuller",
                 "extrapolate": "Ekstrapolér – antag, at den sidst kendte effekt fortsatte",
                 "average": "Gennemsnit – brug gennemsnittet af effekten før og efter hullet"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Ikke en undertavle"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Eltavle",
             "empty_title": "Ingen eltavler at vise",
-            "empty_body": "Integrationen har endnu ikke fundet en LDATA- eller LWHEM-eltavle. Måske er den stadig ved at starte, eller også kan den ikke få forbindelse til Leviton."
+            "empty_body": "Integrationen har endnu ikke fundet en LDATA- eller LWHEM-eltavle. Måske er den stadig ved at starte, eller også kan den ikke få forbindelse til Leviton.",
+            "fed_from": "Forsynes fra {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Understøttet (Gen 2)",
                 "remote_reset_no": "Ikke understøttet (Gen 1)",
                 "standard_breaker": "Dette er en almindelig automatsikring (ikke smart). Leviton rapporterer hverken tilstand eller målinger for den, så der er intet at styre eller overvåge her.",
-                "standard_breaker_hint": "Hvis den forsyner en undertavle med sin egen LWHEM- eller LDATA-hub, kan du forbinde dem med {option} i kortets YAML for at vise undertavlens aktuelle belastning på denne automatsikring."
+                "standard_breaker_hint": "Hvis den forsyner en undertavle med sin egen LWHEM- eller LDATA-hub, skal du vælge denne automatsikring for den tavle under Undertavler i LDATA-integrationens indstillinger. Derefter vises undertavlens aktuelle belastning på denne automatsikring."
             },
             "setup": {
                 "choose_title": "Vælg din eltavle",
@@ -290,7 +305,7 @@
             "card_name": "LDATA-eltavlekort",
             "card_description": "En realistisk, interaktiv visning af din Leviton-eltavle.",
             "panel": "Eltavle",
-            "panel_help": "Vælg eltavlen (LDATA- eller LWHEM-hubben), ikke en automatsikring. Forbindelser til undertavler angives i YAML.",
+            "panel_help": "Vælg eltavlen (LDATA- eller LWHEM-hubben), ikke en automatsikring. Forbindelser til undertavler angives i LDATA-integrationens indstillinger.",
             "title": "Titel (valgfri)",
             "show_power": "Vis watt og ampere i realtid",
             "show_alarms": "Markér alarmer",

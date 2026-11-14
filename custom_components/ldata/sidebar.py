@@ -34,6 +34,8 @@ from .const import (
     SHOW_SIDEBAR_PANEL,
     SHOW_SIDEBAR_PANEL_DEFAULT,
 )
+from .sub_panels import panel_device as _panel_device
+from .sub_panels import sub_panel_feeds
 
 # The page's address (/ldata). Dashboards must have a hyphen in theirs, so a
 # user-made dashboard cannot already be using this one.
@@ -103,36 +105,54 @@ def _panel_ids(hass: HomeAssistant, entry: ConfigEntry) -> list[Any]:
     ]
 
 
-def _panel_device(
-    dev_reg: dr.DeviceRegistry, entry: ConfigEntry, panel_id: Any
-) -> dr.DeviceEntry | None:
-    """Return the device registry entry of one of the entry's load centers."""
-    by_identifier = getattr(dev_reg, "async_get_device_by_identifier", None)
-    if by_identifier is not None:
-        return by_identifier((DOMAIN, panel_id), entry.entry_id)
-    # Home Assistant cores that predate the per-entry lookup, where
-    # async_get_device is not deprecated yet.
-    return dev_reg.async_get_device(identifiers={(DOMAIN, panel_id)})
-
-
 def _panel_devices(hass: HomeAssistant, entries: list[ConfigEntry]) -> list[dict[str, str]]:
     """Return the load centers to show, as device registry ids.
 
-    Sorted by name so the page does not depend on the order entries happen
-    to load in.
+    The page gives each one a tab, in this order: sorted by name, so it does
+    not depend on the order entries happen to load in, with a sub-panel
+    right after the load center that feeds it. A sub-panel also names that
+    load center ("fed_by"), which the page links back to.
     """
     dev_reg = dr.async_get(hass)
     devices: dict[str, dr.DeviceEntry] = {}
+    fed_by: dict[str, str] = {}
     for entry in entries:
+        by_panel: dict[Any, str] = {}
         for panel_id in _panel_ids(hass, entry):
             device = _panel_device(dev_reg, entry, panel_id)
             if device is not None:
                 devices[device.id] = device
-    ordered = sorted(
-        devices.values(),
-        key=lambda device: ((device.name_by_user or device.name or "").casefold(), device.id),
-    )
-    return [{"device_id": device.id} for device in ordered]
+                by_panel[panel_id] = device.id
+        for sub_id, (feeder_id, _position) in sub_panel_feeds(entry.options).items():
+            if sub_id in by_panel and feeder_id in by_panel:
+                fed_by[by_panel[sub_id]] = by_panel[feeder_id]
+
+    def by_name(device_id: str) -> tuple[str, str]:
+        device = devices[device_id]
+        return ((device.name_by_user or device.name or "").casefold(), device_id)
+
+    fed: dict[str, list[str]] = {}
+    for sub, feeder in fed_by.items():
+        fed.setdefault(feeder, []).append(sub)
+
+    ordered: list[str] = []
+
+    def add(device_id: str) -> None:
+        ordered.append(device_id)
+        for sub in sorted(fed.get(device_id, ()), key=by_name):
+            add(sub)
+
+    # sub_panel_feeds() leaves out loops, so every sub-panel hangs off a
+    # load center that nothing in the list feeds.
+    for device_id in sorted((i for i in devices if i not in fed_by), key=by_name):
+        add(device_id)
+
+    return [
+        {"device_id": device_id, "fed_by": fed_by[device_id]}
+        if device_id in fed_by
+        else {"device_id": device_id}
+        for device_id in ordered
+    ]
 
 
 async def _async_title(hass: HomeAssistant) -> str:

@@ -75,8 +75,17 @@
                     "log_parsed_data": "Registra tutti i campi di interruttori e quadri dopo l'analisi di ogni aggiornamento WebSocket o REST. Utile per verificare i valori senza abilitare la registrazione WebSocket grezza.",
                     "enable_specific_logging": "Registra i campi specificati. Per trovare i nomi dei campi, abilita brevemente \"Registra tutti i dati analizzati\".",
                     "log_fields": "Per trovare i nomi dei campi, abilita \"Registra tutti i dati analizzati\" e controlla i registri di Home Assistant. Inseriscili qui sopra separati da virgole."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Sottoquadri",
+                        "description": "Se un quadro elettrico è alimentato da un interruttore di un altro quadro, scegli quell'interruttore accanto al suo nome. L'interruttore mostrerà quindi il carico in tempo reale del sottoquadro e permetterà di aprirlo."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Due quadri elettrici non possono alimentarsi a vicenda. Controlla le scelte in Sottoquadri."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Salta — Non accumulare energia durante le lacune",
                 "extrapolate": "Estrapola — Presumi che l'ultima potenza nota sia rimasta invariata",
                 "average": "Media — Usa la media tra l'ultima potenza nota e quella alla ripresa"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Non è un sottoquadro"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Quadro elettrico",
             "empty_title": "Nessun quadro elettrico da mostrare",
-            "empty_body": "Questa integrazione non ha ancora trovato un quadro LDATA o LWHEM. Potrebbe essere ancora in fase di avvio oppure non riuscire a raggiungere Leviton."
+            "empty_body": "Questa integrazione non ha ancora trovato un quadro LDATA o LWHEM. Potrebbe essere ancora in fase di avvio oppure non riuscire a raggiungere Leviton.",
+            "fed_from": "Alimentato da {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Supportato (Gen 2)",
                 "remote_reset_no": "Non supportato (Gen 1)",
                 "standard_breaker": "Questo è un interruttore standard (non smart). Leviton non ne comunica né lo stato né le letture, quindi qui non c'è nulla da comandare o monitorare.",
-                "standard_breaker_hint": "Se alimenta un sottoquadro dotato di un proprio hub LWHEM o LDATA, collegali con {option} nello YAML di questa scheda per mostrare su questo interruttore il carico in tempo reale di quel quadro."
+                "standard_breaker_hint": "Se alimenta un sottoquadro dotato di un proprio hub LWHEM o LDATA, scegli questo interruttore per quel quadro in Sottoquadri, nelle opzioni dell'integrazione LDATA. Il carico in tempo reale del sottoquadro verrà quindi mostrato su questo interruttore."
             },
             "setup": {
                 "choose_title": "Scegli il tuo quadro",
@@ -290,7 +305,7 @@
             "card_name": "Scheda del quadro LDATA",
             "card_description": "Una vista realistica e interattiva del tuo quadro elettrico Leviton.",
             "panel": "Quadro",
-            "panel_help": "Scegli il quadro (l'hub LDATA o LWHEM), non un interruttore. I collegamenti ai sottoquadri si impostano in YAML.",
+            "panel_help": "Scegli il quadro (l'hub LDATA o LWHEM), non un interruttore. I collegamenti ai sottoquadri si impostano nelle opzioni dell'integrazione LDATA.",
             "title": "Titolo (facoltativo)",
             "show_power": "Mostra watt e ampere in tempo reale",
             "show_alarms": "Segnala gli allarmi",

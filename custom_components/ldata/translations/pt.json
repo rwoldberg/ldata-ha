@@ -75,8 +75,17 @@
                     "log_parsed_data": "Registar todos os campos de disjuntores e quadros após analisar cada atualização WebSocket ou REST. Útil para verificar valores sem ativar o registo WebSocket bruto.",
                     "enable_specific_logging": "Registar qualquer campo especificado. Os nomes dos campos podem ser encontrados ativando brevemente «Registar todos os dados analisados».",
                     "log_fields": "Para encontrar nomes de campos, ative «Registar todos os dados analisados» e consulte os registos do Home Assistant. Introduza-os acima, separados por vírgulas."
+                },
+                "sections": {
+                    "sub_panels": {
+                        "name": "Quadros parciais",
+                        "description": "Se um quadro elétrico for alimentado por um disjuntor de outro quadro, escolha esse disjuntor junto ao nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro parcial e dá acesso a ele."
+                    }
                 }
             }
+        },
+        "error": {
+            "sub_panel_loop": "Dois quadros elétricos não se podem alimentar um ao outro. Verifique as escolhas em Quadros parciais."
         }
     },
     "selector": {
@@ -85,6 +94,11 @@
                 "skip": "Ignorar — não acumular energia durante as lacunas",
                 "extrapolate": "Extrapolar — assumir que a última potência conhecida se manteve",
                 "average": "Média — usar a média entre a última potência e a potência na retoma"
+            }
+        },
+        "sub_panel_feed": {
+            "options": {
+                "none": "Não é um quadro parcial"
             }
         }
     },
@@ -122,7 +136,8 @@
         "sidebar": {
             "title": "Quadro elétrico",
             "empty_title": "Não há quadros elétricos para mostrar",
-            "empty_body": "Esta integração ainda não encontrou nenhum quadro LDATA ou LWHEM. Pode estar ainda a iniciar ou pode não estar a conseguir contactar a Leviton."
+            "empty_body": "Esta integração ainda não encontrou nenhum quadro LDATA ou LWHEM. Pode estar ainda a iniciar ou pode não estar a conseguir contactar a Leviton.",
+            "fed_from": "Alimentado por {panel}"
         },
         "card": {
             "name": {
@@ -269,7 +284,7 @@
                 "remote_reset_yes": "Suportado (Gen 2)",
                 "remote_reset_no": "Não suportado (Gen 1)",
                 "standard_breaker": "Este é um disjuntor normal (não inteligente). A Leviton não fornece o estado nem leituras deste disjuntor, pelo que não há nada para controlar ou monitorizar aqui.",
-                "standard_breaker_hint": "Se alimentar um quadro parcial que tenha o seu próprio hub LWHEM ou LDATA, associe-os com {option} no YAML deste cartão para mostrar neste disjuntor a carga em tempo real desse quadro."
+                "standard_breaker_hint": "Se alimentar um quadro parcial que tenha o seu próprio hub LWHEM ou LDATA, escolha este disjuntor para esse quadro em Quadros parciais, nas opções da integração LDATA. A carga em tempo real do quadro parcial passa então a ser mostrada neste disjuntor."
             },
             "setup": {
                 "choose_title": "Escolha o seu quadro",
@@ -290,7 +305,7 @@
             "card_name": "Cartão do quadro LDATA",
             "card_description": "Uma vista realista e interativa do seu quadro elétrico Leviton.",
             "panel": "Quadro",
-            "panel_help": "Escolha o quadro (o hub LDATA ou LWHEM), e não um disjuntor. As ligações a quadros parciais são definidas em YAML.",
+            "panel_help": "Escolha o quadro (o hub LDATA ou LWHEM), e não um disjuntor. As ligações a quadros parciais são definidas nas opções da integração LDATA.",
             "title": "Título (opcional)",
             "show_power": "Mostrar watts e amperes em tempo real",
             "show_alarms": "Assinalar alarmes",
