@@ -43,6 +43,28 @@ def add_entities_grouped_by_panel(config_entry, async_add_entities, entities) ->
             async_add_entities(group)
 
 
+# The remoteState values the My Leviton app shows as the power being on.
+# Besides RemoteON these are a remote error, an over-voltage report and its
+# all-clear, a switch-off that failed, and a switch-on still in progress. The
+# rest (RemoteOFF, RemoteOVERVOLTAGEON, RemoteFAILEDON, RemotePENDINGOFF) are
+# off.
+POWERED_REMOTE_STATES = frozenset(
+    {
+        "RemoteON",
+        "RemoteERROR",
+        "RemoteOVERVOLTAGE",
+        "RemoteOVERVOLTAGEOFF",
+        "RemoteFAILEDOFF",
+        "RemotePENDINGON",
+        "UNKNOWN",
+    }
+)
+
+# Model of Leviton's Metering Accessory: it meters a standard breaker and has
+# nothing to switch.
+METERING_ACCESSORY_MODEL = "LSBMA"
+
+
 def is_breaker_on(data: dict) -> bool:
     """Return whether a breaker's raw state fields indicate it's manually on.
 
@@ -50,7 +72,12 @@ def is_breaker_on(data: dict) -> bool:
     (switch.py), which both derive their on/off state from the same
     state/remoteState field pair.
     """
-    return data.get("state") == "ManualON" and data.get("remoteState") == "RemoteON"
+    return data.get("state") == "ManualON" and data.get("remoteState") in POWERED_REMOTE_STATES
+
+
+def is_metering_accessory(data: dict) -> bool:
+    """Return whether a breaker record is a Metering Accessory."""
+    return str(data.get("model") or "").upper() == METERING_ACCESSORY_MODEL
 
 
 def find_panel(coordinator: LDATAUpdateCoordinator, panel_id: str) -> dict | None:

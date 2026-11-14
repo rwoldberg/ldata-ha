@@ -41,6 +41,9 @@ async def async_setup_entry(
         }
         entities_to_add.append(LDATAPanelFirmwareUpdateEntity(coordinator, entity_data))
 
+    for breaker in coordinator.data.get("breakers", {}).values():
+        entities_to_add.append(LDATABreakerFirmwareUpdateEntity(coordinator, breaker))
+
     add_entities_grouped_by_panel(config_entry, async_add_entities, entities_to_add)
 
     decora_entities = []
@@ -114,6 +117,65 @@ class LDATAPanelFirmwareUpdateEntity(LDATAEntity, UpdateEntity):
         tells HA there is nothing to report.
         """
         return self._available or self._installed
+
+    @property
+    def name_suffix(self) -> str | None:
+        return "Firmware Update"
+
+    @property
+    def unique_id_suffix(self) -> str | None:
+        return "firmware_update"
+
+
+class LDATABreakerFirmwareUpdateEntity(LDATAEntity, UpdateEntity):
+    """Report a smart breaker's firmware availability, without installing it.
+
+    Same no-install-button design as LDATAPanelFirmwareUpdateEntity. Whether
+    an update is waiting is decided in ldata_service._breaker_firmware_versions
+    with the My Leviton app's own rules, which differ between LDATA and LWHEM
+    breakers, so the versions are not compared again here.
+
+    Disabled by default: there is one per breaker, and Leviton updates every
+    breaker of a model at once, so the firmware notification blueprint would
+    otherwise send one notification per breaker to everyone who uses it.
+    """
+
+    _attr_device_class = UpdateDeviceClass.FIRMWARE
+    _attr_entity_category = None  # explicit — see LDATAPanelFirmwareUpdateEntity
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator, data) -> None:
+        """Init LDATABreakerFirmwareUpdateEntity."""
+        super().__init__(data=data, coordinator=coordinator)
+        self._breaker = data
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Take the breaker's latest firmware fields."""
+        try:
+            self._breaker = self.coordinator.data["breakers"][self.entity_data["id"]]
+        except (KeyError, TypeError):
+            pass
+        self.async_write_ha_state()
+
+    @property
+    def installed_version(self) -> StateType:
+        """Return the firmware the breaker runs."""
+        return self._breaker.get("installed_firmware") or self._breaker.get("firmware")
+
+    @property
+    def latest_version(self) -> StateType:
+        """Return the firmware waiting for it, or the installed one if none."""
+        return self._breaker.get("available_firmware") or self.installed_version
+
+    @property
+    def release_summary(self) -> str | None:
+        """Name each firmware image the update changes (LWHEM breakers)."""
+        return self._breaker.get("firmware_update_summary")
+
+    def version_is_newer(self, latest_version: str, installed_version: str) -> bool:
+        """Leviton's rule already decided there is an update; trust it."""
+        return True
 
     @property
     def name_suffix(self) -> str | None:
