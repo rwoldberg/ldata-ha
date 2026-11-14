@@ -73,10 +73,12 @@ FLAG = {
 }
 HANDLE_ANGLE = {"on": ALPHA, "off": -ALPHA, "trip": 0.0}
 
-# Status LEDs, as distances down the raised face. Every smart breaker has the
-# ON/OFF one. AFCI, GFCI and dual-function breakers add "AF" and/or "GF" above
-# it, which stay lit after a trip to show its cause (`protect` is "a", "g" or
-# "ag"); their handles read OFF/TEST.
+# Status LEDs, as distances down the raised face. A 2nd Gen smart breaker has
+# the "OFF" one, lit while it is switched off remotely; a 1st Gen breaker
+# (`remote=False`), which can't be switched back on remotely, has no OFF LED
+# and is otherwise the same. AFCI, GFCI and dual-function breakers add "AF"
+# and/or "GF" above it, which stay lit after a trip to show its cause
+# (`protect` is "a", "g" or "ag"); their handles read OFF/TEST.
 LED_H = 0.064
 LED_D = {"off": 2.684, "g": 2.422, "a": 2.158}
 LED_X = (-0.066, 0.0)  # across the face, from the centre of the handle pole
@@ -484,7 +486,7 @@ def build_handle(root, cx, state, m, plain=False, test=False):
     return pivot
 
 
-def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=True, plain=False, protect=""):
+def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=True, plain=False, protect="", remote=True):
     """The raised face of the pole that carries the handle, as its two moulded halves."""
     hw = FACE_W / 2
     xl = cx - hw if left_edge is None else left_edge
@@ -509,12 +511,14 @@ def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=T
         link(ob, root)
 
     if kind == "smart":
-        # The right half is notched for each LED above the ON/OFF one.
+        # The right half is notched for each LED above the OFF one. Without
+        # the OFF LED it comes down to meet the left half where the lens was.
         notches = []
         for key in extra:
             d0, d1 = led_span(key)
             notches += [(jx, d1), (cx, d1), (cx, d0), (jx, d0)]
-        seam_r = [(cx, FACE_L), (cx, led0), (jx, led0)] + notches + [(jx, jog1), (cx, jog0)]
+        off_top = led0 if remote else led1
+        seam_r = [(cx, FACE_L), (cx, off_top), (jx, off_top)] + notches + [(jx, jog1), (cx, jog0)]
         seam_l = [(cx, jog0), (jx, jog1), (jx, led1), (cx, led1), (cx, FACE_L)]
     else:
         seam_r = [(cx, FACE_L), (cx, 2.795), (jx, 2.777), (jx, jog1), (cx, jog0)]
@@ -551,14 +555,14 @@ def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=T
         link(liner, root)
 
     if kind == "smart" and not plain:
-        for key in ["off"] + extra:
+        for key in (["off"] if remote else []) + extra:
             d0, d1 = led_span(key)
             lens = box("led_" + key, jx + 0.004, cx - 0.004, fy(d1) + 0.004, fy(d0) - 0.004, z0, -0.006)
             lens.data.materials.append(m["lens"])
             link(lens, root)
 
 
-def build_legends(root, cx, kind, m, rating=None, protect=""):
+def build_legends(root, cx, kind, m, rating=None, protect="", remote=True):
     ink = m["ink"]
     if BRAND:
         # Wordmark, approximated in a plain heavy grotesque, with its square frame.
@@ -573,9 +577,10 @@ def build_legends(root, cx, kind, m, rating=None, protect=""):
     if rating:
         text("rating", str(rating), 0.076, (cx + 0.19, fy(1.775), 0), ink, parent=root)
     if kind == "smart":
-        text("remote1", "REMOTELY", 0.036, (cx + 0.192, fy(1.915), 0), ink, parent=root)
-        text("remote2", "OPERATED", 0.036, (cx + 0.192, fy(1.972), 0), ink, parent=root)
-        text("led_off", "OFF", 0.084, (cx + 0.156, fy(LED_D["off"] + 0.004), 0), ink, face="narrow", spacing=1.0, parent=root)
+        if remote:  # 1st Gen breakers are not marked as remotely operated
+            text("remote1", "REMOTELY", 0.036, (cx + 0.192, fy(1.915), 0), ink, parent=root)
+            text("remote2", "OPERATED", 0.036, (cx + 0.192, fy(1.972), 0), ink, parent=root)
+            text("led_off", "OFF", 0.084, (cx + 0.156, fy(LED_D["off"] + 0.004), 0), ink, face="narrow", spacing=1.0, parent=root)
         for key, legend in (("a", "AF"), ("g", "GF")):
             if key in protect:
                 text("led_" + key, legend, 0.080, (cx + 0.158, fy(LED_D[key] + 0.007), 0), ink, face="narrow", spacing=1.0, parent=root)
@@ -591,7 +596,7 @@ def build_legends(root, cx, kind, m, rating=None, protect=""):
         text("type", "T", 0.080, (cx + 0.19, fy(2.731), 0), ink, parent=root)
 
 
-def build_breaker(poles=1, kind="smart", state="on", rating=None, name="breaker", bare=False, legends=True, proxy=False, protect=""):
+def build_breaker(poles=1, kind="smart", state="on", rating=None, name="breaker", bare=False, legends=True, proxy=False, protect="", remote=True):
     """Returns the root empty. The handle pole is the right-hand pole of a 2-pole unit."""
     m = mats(kind)
     root = empty(name)
@@ -607,7 +612,7 @@ def build_breaker(poles=1, kind="smart", state="on", rating=None, name="breaker"
     if kind != "smart":
         protect = ""
     if poles == 1:
-        build_pole_face(root, cx, kind, m, guards=not bare, plain=proxy, protect=protect)
+        build_pole_face(root, cx, kind, m, guards=not bare, plain=proxy, protect=protect, remote=remote)
     else:
         # Blank pole to the left: moulded panels, as on the 2-pole catalog photo.
         fl = x_left + (BODY_W - FACE_W) / 2
@@ -634,7 +639,7 @@ def build_breaker(poles=1, kind="smart", state="on", rating=None, name="breaker"
             ob = prism(pname, pts2, z0, 0.0)
             finish(ob, m["body"], bevel=0.008)
             link(ob, root)
-        build_pole_face(root, cx, kind, m, left_edge=boundary, lower_left=False, guards=not bare, plain=proxy, protect=protect)
+        build_pole_face(root, cx, kind, m, left_edge=boundary, lower_left=False, guards=not bare, plain=proxy, protect=protect, remote=remote)
 
     # Housing below the raised face; the shelves at each end show in the product shot.
     top, bot = -STEP_TOP, FACE_L + STEP_BOT
@@ -664,7 +669,7 @@ def build_breaker(poles=1, kind="smart", state="on", rating=None, name="breaker"
                 link(flat_mesh("shelf_seams", part, zq, groove_mat), root)
 
     if legends and not bare and not proxy:
-        build_legends(root, cx, kind, m, rating, protect)
+        build_legends(root, cx, kind, m, rating, protect, remote)
     if not bare:
         build_handle(root, cx, state, m, plain=proxy, test=bool(protect))
     return root
@@ -945,7 +950,7 @@ def job_main(job):
 def job_hero(job):
     reset_scene()
     poles = job.get("poles", 1)
-    build_breaker(poles=poles, kind=job.get("kind", "smart"), state=job.get("state", "off"), rating=job.get("rating"), protect=job.get("protect", ""))
+    build_breaker(poles=poles, kind=job.get("kind", "smart"), state=job.get("state", "off"), rating=job.get("rating"), protect=job.get("protect", ""), remote=job.get("remote", True))
     lighting(**job.get("light", {}))
     width = BODY_W + (poles - 1) * PITCH
     pad = job.get("pad", 0.08)
@@ -983,7 +988,7 @@ def job_preview(job):
                 r += 1
                 continue
             poles = cell.get("poles", 1)
-            root = build_breaker(poles=poles, kind=cell.get("kind", "smart"), state=cell.get("state", "on"), rating=cell.get("rating"), protect=cell.get("protect", ""))
+            root = build_breaker(poles=poles, kind=cell.get("kind", "smart"), state=cell.get("state", "on"), rating=cell.get("rating"), protect=cell.get("protect", ""), remote=cell.get("remote", True))
             place(root, column, y_top - (r + poles / 2) * PITCH)
             r += poles
     cw = hw + FRAME_OUT + job.get("side", 2.0)
@@ -1033,7 +1038,7 @@ def job_tile(job):
         if what == "filler":
             build_filler(m, column, 0.0)
         else:
-            place(build_breaker(poles=poles, kind=job.get("kind", "smart"), state=job.get("state", "on"), protect=job.get("protect", "")), column, 0.0)
+            place(build_breaker(poles=poles, kind=job.get("kind", "smart"), state=job.get("state", "on"), protect=job.get("protect", ""), remote=job.get("remote", True)), column, 0.0)
         place(build_breaker(poles=1, bare=True), column, half + PITCH / 2)
         # The space below only receives this breaker's shadow. A plain slab at
         # face height catches it, so the shadow suits whatever ends up there:

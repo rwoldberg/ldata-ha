@@ -17,6 +17,8 @@
  *                                     ground fault (AFCI, GFCI and dual
  *                                     function breakers, which are drawn
  *                                     with those LEDs and an OFF/TEST handle)
+ * A Gen 1 smart breaker looks the same without the "OFF" LED: it can't be
+ * switched back on remotely, so switching it off remotely trips it.
  *
  *  - Click a breaker's rocker to switch it (asks for confirmation first).
  *  - Click anywhere else on a breaker, or its label, to open its detail sheet
@@ -67,7 +69,7 @@ const CARD_VERSION = "3.1.0";
 // tools/panel_card_art. ART_REV is the content hash of that folder (written
 // by build_assets.py); it is part of every image URL, so browsers fetch new
 // artwork after an upgrade instead of serving a cached copy.
-const ART_REV = "514ab4f6d0";
+const ART_REV = "cc0aa080cc";
 const ART_SERVED = new URL("/ldata_static/img/", location.href).href; // always served by the integration
 
 // Where this file was loaded from. `import.meta.url` would say, but it is a
@@ -101,7 +103,7 @@ const G = {
   frameOut: 0.78, // door surround, from the dead front out to flat cover
   coverEdge: 0.32, // chamfered edge of the cover
   cav: [0.374, 1.441], // the rocker, measured from the logo end of the face
-  led: { d: 2.684, x: -0.033 }, // ON/OFF status LED (centre)
+  led: { d: 2.684, x: -0.033 }, // "OFF" LED of a Gen 2 breaker (centre)
   ledAf: { d: 2.158, x: -0.033 }, // "AF" and "GF" LEDs of a protected breaker
   ledGf: { d: 2.422, x: -0.033 },
   rating: { d: 1.775, x: 0.19, size: 0.106 },
@@ -1250,15 +1252,19 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       const poles = Number(a.poles) === 2 ? 2 : 1;
       const protection = protectionOf(a.model, a.hardware);
       // The face to draw: the protected one where there is artwork for it.
-      const face = protection && FACES[poles].includes(protection.face) ? protection.face : "s";
+      // A Gen 1 breaker, which Leviton can't switch back on remotely, has the
+      // same face without the "OFF" LED; its artwork ends in "1".
+      const look = protection && FACES[poles].includes(protection.face) ? protection.face : "s";
+      const gen1 = a.canRemoteOn !== true;
       slots.push({
         kind: "smart",
         position,
         poles,
         protection,
-        face,
-        hasAf: face === "a" || face === "d",
-        hasGf: face === "g" || face === "d",
+        face: gen1 ? `${look}1` : look,
+        gen1,
+        hasAf: look === "a" || look === "d",
+        hasGf: look === "g" || look === "d",
         deviceId: b.deviceId,
         name: b.name || a.friendly_name || this._t("card.name.breaker"),
         rating: numOrNull(a.rating),
@@ -1432,12 +1438,15 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     s.raw = raw;
     s.vis = vis;
     // What the breaker itself shows (Leviton's handle and LED table): a
-    // remote switch-off leaves the handle on and green and lights the LED.
+    // remote switch-off leaves a Gen 2 breaker's handle on and green and
+    // lights its "OFF" LED. A Gen 1 breaker has no OFF LED; it is switched
+    // off by tripping it, and stays tripped until it is reset by hand.
     // Out of touch (the panel is offline, or Leviton can't be reached), the
     // breaker is still where it was: draw it that way under the veil rather
     // than as switched off.
-    const handleOn = isOn || (remoteOff && raw !== "ManualOFF");
-    s.handle = !available ? this._handles.get(r.status) || "on" : tripped ? "trip" : handleOn ? "on" : "off";
+    const heldOff = !isOn && remoteOff && raw !== "ManualOFF";
+    const handle = tripped || (heldOff && s.gen1) ? "trip" : isOn || heldOff ? "on" : "off";
+    s.handle = !available ? this._handles.get(r.status) || "on" : handle;
     if (available) this._handles.set(r.status, s.handle);
     s.led = vis === "pending" || s.blinkOn ? "blink" : vis === "remote-off" ? "on" : "off";
     // The cause LEDs are fed from the line side: they stay lit after a trip.
@@ -1686,7 +1695,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         <img class="sp" alt="" draggable="false">
         <button type="button" class="hit" data-act="open" data-pos="${s.position}" tabindex="-1" aria-hidden="true"></button>
         ${rating}
-        ${smart ? ledHtml("st", spots.led) : ""}
+        ${smart && !s.gen1 ? ledHtml("st", spots.led) : ""}
         ${s.hasAf ? ledHtml("af", spots.ledAf) : ""}
         ${s.hasGf ? ledHtml("gf", spots.ledGf) : ""}
         ${rocker}
@@ -2194,7 +2203,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     )}" data-gf="${esc(s.ledGf || "off")}">
         <img class="hero-img" alt="" draggable="false" src="${art(`hero-${s.poles}${s.face}-${s.handle || "on"}`)}">
         ${s.rating ? ratingSvg(w, G.hero.h, cx + G.rating.x, G.hero.top + G.rating.d, 0, String(s.rating), G.rating.size) : ""}
-        ${smart ? ledHtml("st", spot(G.led)) : ""}
+        ${smart && !s.gen1 ? ledHtml("st", spot(G.led)) : ""}
         ${s.hasAf ? ledHtml("af", spot(G.ledAf)) : ""}
         ${s.hasGf ? ledHtml("gf", spot(G.ledGf)) : ""}
         ${rocker}

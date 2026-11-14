@@ -25,19 +25,21 @@ WWW = os.path.join(ROOT, "custom_components", "ldata", "www")
 CARD = os.path.join(WWW, "ldata-panel-card.js")
 STATES = ("on", "off", "trip")
 # Smart breakers by protection: the letter used in file names, and the LEDs
-# the face carries besides ON/OFF ("a" = AF, "g" = GF). Leviton makes AFCI and
-# dual-function breakers as 1-pole units only.
+# the face carries besides OFF ("a" = AF, "g" = GF). Leviton makes AFCI and
+# dual-function breakers as 1-pole units only. A 1st Gen breaker has the same
+# face without the OFF LED; its code ends in "1" ("s1", "g1", ...).
 SMART = (("s", ""), ("a", "a"), ("g", "g"), ("d", "ag"))
 TWO_POLE = ("s", "g")
 
 
 def faces():
-    """Every breaker face that is drawn, as (poles, kind, code, protect)."""
+    """Every breaker face that is drawn, as (poles, kind, code, protect, remote)."""
     for poles in (1, 2):
         for code, protect in SMART:
             if poles == 1 or code in TWO_POLE:
-                yield poles, "smart", code, protect
-        yield poles, "std", "t", ""
+                yield poles, "smart", code, protect, True
+                yield poles, "smart", code + "1", protect, False
+        yield poles, "std", "t", "", True
 
 
 def blender():
@@ -54,9 +56,9 @@ def blender():
 def jobs():
     out = []
     for column, side in ((-1, "L"), (1, "R")):
-        for poles, kind, code, protect in faces():
+        for poles, kind, code, protect, remote in faces():
             for state in STATES:
-                out.append({"job": "tile", "what": "breaker", "column": column, "poles": poles, "kind": kind, "protect": protect, "state": state, "name": f"bk-{side}{poles}{code}-{state}"})
+                out.append({"job": "tile", "what": "breaker", "column": column, "poles": poles, "kind": kind, "protect": protect, "remote": remote, "state": state, "name": f"bk-{side}{poles}{code}-{state}"})
         out.append({"job": "tile", "what": "filler", "column": column, "name": f"fill-{side}"})
         out.append({"job": "tile", "what": "cap_top", "column": column, "name": f"cap-{side}-top"})
         out.append({"job": "tile", "what": "cap_bottom", "column": column, "name": f"cap-{side}-bot"})
@@ -66,9 +68,9 @@ def jobs():
     out.append({"job": "screw", "angle": -62, "name": "screw-b"})
     for state in ("on", "off"):
         out.append({"job": "main", "state": state, "name": f"main-{state}"})
-    for poles, kind, code, protect in faces():
+    for poles, kind, code, protect, remote in faces():
         for state in STATES:
-            out.append({"job": "hero", "poles": poles, "kind": kind, "protect": protect, "state": state, "ppi": 280, "samples": 160, "name": f"hero-{poles}{code}-{state}"})
+            out.append({"job": "hero", "poles": poles, "kind": kind, "protect": protect, "remote": remote, "state": state, "ppi": 280, "samples": 160, "name": f"hero-{poles}{code}-{state}"})
     for job in out:
         job["out"] = os.path.join(RENDERS, job.pop("name") + ".png")
     return out

@@ -26,11 +26,11 @@ The breakers are rendered with the maker's name on them, as the real ones are (s
 
 | Files | What they are |
 | --- | --- |
-| `bk-{L,R}{1,2}{s,a,g,d,t}-{on,off,trip}` | One breaker in the left or right column, 1- or 2-pole, in each handle position. The letter is its face: a smart breaker (`s`), a smart AFCI (`a`), GFCI (`g`) or dual function AFCI/GFCI (`d`) breaker, or a standard one (`t`). The protected ones have their `AF` and/or `GF` LEDs above the ON/OFF LED and an `OFF/TEST` handle; `a` and `d` exist as 1-pole only, as Leviton makes them. Each image is one space tall plus a strip underneath that holds only the shadow the breaker casts on the space below it. |
+| `bk-{L,R}{1,2}{s,a,g,d,t}[1]-{on,off,trip}` | One breaker in the left or right column, 1- or 2-pole, in each handle position. The letter is its face: a smart breaker (`s`), a smart AFCI (`a`), GFCI (`g`) or dual function AFCI/GFCI (`d`) breaker, or a standard one (`t`). The protected ones have their `AF` and/or `GF` LEDs above the `OFF` LED and an `OFF/TEST` handle; `a` and `d` exist as 1-pole only, as Leviton makes them. A smart face followed by `1` (`s1`, `a1`, `g1`, `d1`) is the 1st Gen breaker: the same face without the `OFF` LED and the `REMOTELY OPERATED` marking, as in Leviton's 1st Gen spec sheet photos. Each image is one space tall plus a strip underneath that holds only the shadow the breaker casts on the space below it. |
 | `fill-{L,R}`, `cap-{L,R}-{top,bot}` | The filler plate for an open space, and the dead front that closes the top and bottom of each column. |
 | `frame`, `cover` | The embossed door surround and the cover plate. Both are samples that the card stretches as nine-slices, which is how one set of images fits any panel size. |
 | `screw-a`, `screw-b`, `main-{on,off}` | Cover screws and the optional main breaker. |
-| `hero-{1,2}{s,a,g,d,t}-{on,off,trip}` | The upright product shot shown in the breaker's detail sheet, for the same faces. |
+| `hero-{1,2}{s,a,g,d,t}[1]-{on,off,trip}` | The upright product shot shown in the breaker's detail sheet, for the same faces. |
 
 ## Changing the model
 

@@ -12,6 +12,9 @@ IMAGES = sorted((WWW / "img").glob("*.webp"))
 # smart breaker, "a" AFCI, "g" GFCI, "d" dual function, "t" not smart.
 # Leviton makes AFCI and dual function breakers as 1-pole units only.
 FACES = {"1": "sagdt", "2": "sgt"}
+# A Gen 1 smart breaker has the same face without the "OFF" LED; its artwork
+# is named with a "1" after the letter ("s1", "g1", ...).
+GEN1_FACES = {poles: [f"{face}1" for face in faces if face != "t"] for poles, faces in FACES.items()}
 
 
 def _expected() -> set[str]:
@@ -20,11 +23,11 @@ def _expected() -> set[str]:
     for side in "LR":
         names |= {f"fill-{side}", f"cap-{side}-top", f"cap-{side}-bot"}
         for poles, faces in FACES.items():
-            for face in faces:
+            for face in [*faces, *GEN1_FACES[poles]]:
                 for state in ("on", "off", "trip"):
                     names.add(f"bk-{side}{poles}{face}-{state}")
     for poles, faces in FACES.items():
-        for face in faces:
+        for face in [*faces, *GEN1_FACES[poles]]:
             for state in ("on", "off", "trip"):
                 names.add(f"hero-{poles}{face}-{state}")
     return names
@@ -98,11 +101,12 @@ def test_art_rev_matches_the_shipped_images() -> None:
 
 
 def test_images_stay_small_enough_to_load_over_a_remote_link() -> None:
-    # A panel only fetches the faces its own breakers have, so what one
-    # browser loads is well under the size of the whole folder.
+    # A panel only fetches the faces its own breakers have (and only Gen 1
+    # or Gen 2 ones of each), so what one browser loads is well under the
+    # size of the whole folder.
     total = sum(path.stat().st_size for path in IMAGES)
 
-    assert total < 1_000_000, f"{total} bytes of artwork"
+    assert total < 1_600_000, f"{total} bytes of artwork"
     assert max(path.stat().st_size for path in IMAGES) < 120_000
 
 
