@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Unterverteilungen",
-                        "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr."
+                        "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr. Ist diese Sicherung keine smarte Sicherung, gib ihre Größe im Feld mit (A) darunter ein, damit die Karte zeigen kann, wie viel davon die Unterverteilung nutzt."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware ist aktuell",
                 "main": "Haupt",
                 "main_breaker": "Hauptsicherung",
-                "main_breaker_dead": "Hauptsicherung (beide Phasen ohne Spannung)"
+                "main_breaker_dead": "Hauptsicherung (beide Phasen ohne Spannung)",
+                "of_rating": "{pct} % von {amps} A",
+                "busier_leg": "{amps} A auf der stärker belasteten Phase"
             },
             "label": {
                 "circuit": "Stromkreis {position}",

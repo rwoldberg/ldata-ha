@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Alelosztók",
-                        "description": "Ha egy elosztótáblát egy másik elosztótábla megszakítója táplál, válassza ki azt a megszakítót a neve mellett. Ezután az a megszakító mutatja az alelosztó élő terhelését, és onnan megnyitható az alelosztó."
+                        "description": "Ha egy elosztótáblát egy másik elosztótábla megszakítója táplál, válassza ki azt a megszakítót a neve mellett. Ezután az a megszakító mutatja az alelosztó élő terhelését, és onnan megnyitható az alelosztó. Ha ez a megszakító nem okos megszakító, adja meg a névleges áramát az alatta lévő, (A) végű mezőben, hogy a kártya megmutathassa, mennyit használ belőle az alelosztó."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "A firmware naprakész",
                 "main": "Fő",
                 "main_breaker": "Főmegszakító",
-                "main_breaker_dead": "Főmegszakító (egyik fázison sincs feszültség)"
+                "main_breaker_dead": "Főmegszakító (egyik fázison sincs feszültség)",
+                "of_rating": "{amps} A {pct}%-a",
+                "busier_leg": "{amps} A a terheltebb fázison"
             },
             "label": {
                 "circuit": "{position}. áramkör",

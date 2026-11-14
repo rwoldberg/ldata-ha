@@ -11,7 +11,14 @@ from homeassistant.helpers import device_registry as dr
 from custom_components.ldata.binary_sensor import LdataCloudConnectedSensor
 from custom_components.ldata.const import DOMAIN, SHOW_SIDEBAR_PANEL
 from custom_components.ldata.sidebar import async_update_sidebar_panel
-from custom_components.ldata.sub_panels import SUB_PANELS, feeds_of, looped, sub_panel_feeds
+from custom_components.ldata.sub_panels import (
+    SUB_PANELS,
+    feed_ratings,
+    feeder_rating,
+    feeds_of,
+    looped,
+    sub_panel_feeds,
+)
 
 # The real-core scaffolding the sidebar tests use (tests/ is on the path, not a package).
 from test_sidebar_panel import _device_id, _entry, _events, _home_assistant, _loaded, _panel
@@ -66,6 +73,45 @@ def test_position_restored_as_text_still_counts() -> None:
     }
 
 
+def test_size_of_a_feeding_breaker_is_read_from_the_options() -> None:
+    options = {
+        SUB_PANELS: {
+            "casita": {"panel": "main", "position": 38, "rating": 100},
+            "garage": {"panel": "main", "position": 29, "rating": "60"},
+            "shed": {"panel": "main", "position": 5, "rating": 0},
+            "barn": {"panel": "main", "position": 7, "rating": "lots"},
+            "loop": {"panel": "loop", "position": 1, "rating": 50},
+        }
+    }
+
+    # Text counts, as when restored from a backup; nothing else does, and
+    # neither does a size for a feed that is not kept.
+    assert feed_ratings(options) == {"casita": 100.0, "garage": 60.0}
+
+
+def test_feeding_breaker_size_given_by_the_user_wins_over_leviton() -> None:
+    options = {SUB_PANELS: {"casita": {"panel": "main", "position": 38, "rating": 100}}}
+    data = {"breakers": {"b": {"panel_id": "main", "position": 38, "rating": 90}}}
+
+    assert feeder_rating(options, data, "casita") == 100.0
+
+
+def test_smart_feeding_breaker_brings_its_own_rating() -> None:
+    options = _stored(casita=("main", 38), garage=("main", 29))
+    data = {
+        "breakers": {
+            "b38": {"panel_id": "main", "position": "38", "rating": 60},
+            "other": {"panel_id": "garage", "position": 29, "rating": 20},
+        }
+    }
+
+    assert feeder_rating(options, data, "casita") == 60.0
+    # The breaker at that position in another panel is not the feeder.
+    assert feeder_rating(options, data, "garage") is None
+    assert feeder_rating(options, data, "not-fed") is None
+    assert feeder_rating(options, None, "casita") is None
+
+
 def test_load_centers_that_feed_each_other_are_left_out() -> None:
     pair = {"a": ("b", 1), "b": ("a", 2)}
     ring = {"a": ("b", 1), "b": ("c", 2), "c": ("a", 3)}
@@ -82,11 +128,11 @@ def test_load_centers_that_feed_each_other_are_left_out() -> None:
 # ── The feeding panel's Cloud Connected entity ────────────────────────────
 
 
-def _cloud_sensor(hass, entry, panel_id: str) -> LdataCloudConnectedSensor:
+def _cloud_sensor(hass, entry, panel_id: str, breakers: dict | None = None) -> LdataCloudConnectedSensor:
     panel = {"id": panel_id, "name": panel_id, "connected": True, "serialNumber": panel_id}
     coordinator = MagicMock()
     coordinator.config_entry = entry
-    coordinator.data = {"panels": [panel]}
+    coordinator.data = {"panels": [panel], "breakers": breakers or {}}
     sensor = LdataCloudConnectedSensor(coordinator, panel)
     sensor.hass = hass
     return sensor
@@ -110,8 +156,33 @@ async def test_feeding_panel_lists_the_breakers_that_feed_a_sub_panel() -> None:
             {"position": 38, "device_id": _device_id(hass, "p2")},
         ]
         assert casita["sub_panels"] == []
+        # The sub-panel says what feeds it; the main panel is fed by nothing.
+        assert casita["fed_from"] == {"device_id": _device_id(hass, "p1"), "position": 38}
+        assert main["fed_from"] is None
         # What the card already read from this entity is still there.
         assert {"orientation", "panel_size", "dumb_breakers"} <= set(main)
+
+
+@pytest.mark.asyncio
+async def test_links_carry_the_size_of_the_feeding_breaker() -> None:
+    async with _home_assistant() as hass:
+        options = {
+            SUB_PANELS: {
+                "p2": {"panel": "p1", "position": 38, "rating": 100},
+                "p3": {"panel": "p1", "position": 29},
+            }
+        }
+        entry = _entry(hass, options=options, panels=[("p1", "Main Panel"), ("p2", "Casita"), ("p3", "Garage")])
+        breakers = {"b29": {"panel_id": "p1", "position": 29, "rating": 50}}
+
+        main = _cloud_sensor(hass, entry, "p1", breakers).extra_state_attributes
+        garage = _cloud_sensor(hass, entry, "p3", breakers).extra_state_attributes
+
+        assert main["sub_panels"] == [
+            {"position": 29, "device_id": _device_id(hass, "p3"), "rating": 50.0},
+            {"position": 38, "device_id": _device_id(hass, "p2"), "rating": 100.0},
+        ]
+        assert garage["fed_from"] == {"device_id": _device_id(hass, "p1"), "position": 29, "rating": 50.0}
 
 
 @pytest.mark.asyncio

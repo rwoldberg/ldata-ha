@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Undertavler",
-                        "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen."
+                        "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen. Hvis automatsikringen ikke er en smart automatsikring, skal du angive dens størrelse i feltet, der ender på (A), under den, så kortet kan vise, hvor meget af den undertavlen bruger."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmwaren er opdateret",
                 "main": "Hoved",
                 "main_breaker": "Hovedafbryder",
-                "main_breaker_dead": "Hovedafbryder (ingen spænding på nogen af faserne)"
+                "main_breaker_dead": "Hovedafbryder (ingen spænding på nogen af faserne)",
+                "of_rating": "{pct} % af {amps} A",
+                "busier_leg": "{amps} A på den mest belastede fase"
             },
             "label": {
                 "circuit": "Gruppe {position}",

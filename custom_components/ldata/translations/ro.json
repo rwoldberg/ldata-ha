@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Tablouri secundare",
-                        "description": "Dacă un tablou electric este alimentat dintr-un disjunctor al altui tablou, alege acel disjunctor în dreptul numelui său. Disjunctorul va afișa apoi sarcina în timp real a tabloului secundar și va permite deschiderea acestuia."
+                        "description": "Dacă un tablou electric este alimentat dintr-un disjunctor al altui tablou, alege acel disjunctor în dreptul numelui său. Disjunctorul va afișa apoi sarcina în timp real a tabloului secundar și va permite deschiderea acestuia. Dacă acel disjunctor nu este inteligent, introdu curentul său nominal în câmpul terminat în (A) de dedesubt, ca fișa să poată arăta cât din el folosește tabloul secundar."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware la zi",
                 "main": "General",
                 "main_breaker": "Disjunctor general",
-                "main_breaker_dead": "Disjunctor general (fără tensiune pe nicio fază)"
+                "main_breaker_dead": "Disjunctor general (fără tensiune pe nicio fază)",
+                "of_rating": "{pct}% din {amps} A",
+                "busier_leg": "{amps} A pe faza mai încărcată"
             },
             "label": {
                 "circuit": "Circuitul {position}",

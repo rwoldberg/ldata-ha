@@ -42,7 +42,7 @@ from .const import (
     RESIDENCE_IMPORT_SOURCE,
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
-from .sub_panels import NOT_FED, SUB_PANELS, looped, sub_panel_feeds
+from .sub_panels import NOT_FED, SUB_PANELS, amps, feed_ratings, looped, sub_panel_feeds
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -368,10 +368,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class _SubPanelSection:
     """The options form's "Sub-panels" section.
 
-    One field for each load center, holding the breaker in another load
-    center that feeds it. Home Assistant labels a field it has no translation
-    for with the field's own name, so each field is named after its load
-    center. Offered only while Leviton reports two or more load centers.
+    Two fields for each load center: the breaker in another load center
+    that feeds it, and that breaker's size in amps, which only matters when
+    it isn't a smart breaker. Home Assistant labels a field it has no
+    translation for with the field's own name, so each field is named after
+    its load center. Offered only while Leviton reports two or more load
+    centers.
     """
 
     def __init__(self, coordinator: Any, options: Mapping[str, Any]) -> None:
@@ -381,7 +383,9 @@ class _SubPanelSection:
             key=lambda panel: (str(panel.get("name") or "").casefold(), str(panel["id"])),
         )
         self.stored = sub_panel_feeds(options)
+        self.stored_ratings = feed_ratings(options)
         self.fields: dict[str, str] = {}  # field -> the load center it is about
+        self.rating_fields: dict[str, str] = {}  # its feeder's size -> the load center
         self._choices: dict[str, tuple[str, int]] = {}  # choice -> (feeding panel, position)
         self._offered: dict[str, list[selector.SelectOptionDict]] = {}
         if len(panels) < 2:
@@ -394,6 +398,7 @@ class _SubPanelSection:
                 name = f"{name} ({panel['id']})"
             names[panel["id"]] = name
             self.fields[name] = panel["id"]
+            self.rating_fields[f"{name} (A)"] = panel["id"]
 
         breakers: dict[str, list[selector.SelectOptionDict]] = {}
         for panel in panels:
@@ -463,6 +468,14 @@ class _SubPanelSection:
                     translation_key="sub_panel_feed",
                 )
             )
+            # Suggested rather than default, so that it can be emptied.
+            rating_field = f"{field} (A)"
+            rating = (chosen or {}).get(rating_field) if chosen else self.stored_ratings.get(sub_id)
+            fields[vol.Optional(rating_field, description={"suggested_value": rating})] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=1200, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="A"
+                )
+            )
         linked = any(sub_id in self.stored for sub_id in self.fields.values())
         # Optional: Home Assistant's form always sends the section, but
         # something that posts only the options it wants to change does not.
@@ -481,6 +494,16 @@ class _SubPanelSection:
             if feed and feed[0] != sub_id:
                 feeds[sub_id] = feed
         return feeds
+
+    def read_ratings(self, chosen: Mapping[str, Any] | None, feeds: Mapping[str, Any]) -> dict[str, float]:
+        """Return the feeder sizes after the form, for the load centers that are fed."""
+        shown = set(self.rating_fields.values())
+        sizes = {sub_id: size for sub_id, size in self.stored_ratings.items() if sub_id not in shown}
+        for field, sub_id in self.rating_fields.items():
+            size = amps((chosen or {}).get(field))
+            if size is not None:
+                sizes[sub_id] = size
+        return {sub_id: size for sub_id, size in sizes.items() if sub_id in feeds}
 
 
 class OptionsFlow(config_entries.OptionsFlow):
@@ -509,11 +532,13 @@ class OptionsFlow(config_entries.OptionsFlow):
             chosen_feeds = user_input.pop(SUB_PANELS, None)
             if sub_panels.fields and chosen_feeds is not None:
                 feeds = sub_panels.read(chosen_feeds)
+                sizes = sub_panels.read_ratings(chosen_feeds, feeds)
                 if looped(feeds):
                     errors["base"] = "sub_panel_loop"
                 else:
                     user_input[SUB_PANELS] = {
                         sub_id: {"panel": panel_id, "position": position}
+                        | ({"rating": sizes[sub_id]} if sub_id in sizes else {})
                         for sub_id, (panel_id, position) in feeds.items()
                     }
             # The entry's options also hold keys this form does not show: the

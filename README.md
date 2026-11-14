@@ -59,7 +59,7 @@ A custom Lovelace card that shows your panel as it looks on the wall. It isn't a
 Features:
 - Auto-discovers breakers for a panel via Home Assistant's device registry — no manual entity list to maintain.
 - Sized to your panel: a 20-space panel shows 10 rows, a 42-space panel 21. Breakers keep their true proportions at any card width and the circuit labels take the rest. On a phone the labels drop the amp reading and rating (both still in the breaker's details) so circuit names stay readable.
-- Breakers show what the hardware shows, following Leviton's own handle and LED table: a green handle window when on, a white one with the handle switched over when turned off by hand, red with the handle centered when tripped. A breaker switched off remotely keeps its green handle and lights its "OFF" LED, as the real one does. Gen 1 smart breakers have no "OFF" LED and are drawn without one; switched off remotely, they show as tripped, because that is how Leviton switches them off.
+- Breakers show what the hardware shows, following Leviton's own handle and LED table: a green handle window when on, a white one with the handle switched over when turned off by hand, red with the handle centered when tripped. A breaker switched off remotely keeps its green handle and lights its "OFF" LED, as the real one does. Gen 1 smart breakers are drawn as they look: no "OFF" LED, their LEDs in a light strip down the seam, and on a plain one a single unlabelled LED that blinks when you identify the breaker (a protected one blinks its AF and GF LEDs). Switched off remotely, they show as tripped, because that is how Leviton switches them off.
 - AFCI, GFCI and dual function (AFCI/GFCI) breakers are drawn as they are, with their `AF` and `GF` LEDs and an `OFF/TEST` handle. When a breaker trips, its label says why (ground fault, arc fault, overload, short circuit) and the card lights the LED the real breaker lights for that cause: `GF` for a ground fault, `AF` for an arc fault. A breaker that reports a failed self-test flashes those LEDs and says so on its label. The kind of breaker is read from its Leviton model number, so there is nothing to set up.
 - Left/right column placement and space numbering match the physical panel (odd positions left, even positions right). 2-pole (240V) breakers span both of their positions with the single handle where Leviton puts it, open spaces show filler plates, and non-smart breakers are shown as standard Leviton breakers.
 - Panel mounting orientation (normal vs. rotated 180°) is auto-detected from Leviton's own data — no config needed unless you want to force an orientation.
@@ -68,7 +68,7 @@ Features:
 - Click a label, or anywhere else on a breaker, for its detail sheet: on/off control, Identify (Blink LED), live power, current and load, today's and lifetime energy, every alarm, the raw breaker state and last change reason, Bluetooth signal, model, firmware and serial number. Each row opens Home Assistant's own dialog (with history) for that entity, and **Device page** goes to the breaker's device.
 - Gen1 breakers can be tripped remotely but not reset remotely — trying to turn one on explains that instead of sending a command that would do nothing.
 - Above the door, the cover shows the panel's load, each leg's voltage and current, line frequency, today's energy and your CT clamps (e.g. Grid, Solar), with pilot lights for the cloud connection, Wi-Fi signal, and a firmware update when one is available. While the panel is offline the cover says so, and each breaker is shown where it last was.
-- Knows your sub-panels once you say which breaker feeds each one (see [Sub-panels](#sub-panels)): the feeding breaker shows the sub-panel's live Watts/Amps, and clicking it opens the sub-panel.
+- Knows your sub-panels once you say which breaker feeds each one (see [Sub-panels](#sub-panels)): the feeding breaker shows the sub-panel's live Watts/Amps, clicking it opens the sub-panel, and the sub-panel's header shows how much of that breaker it uses.
 - Follows your theme: with a dark theme the panel is shown under dimmer lighting.
 - Speaks your language: the card's texts follow the language set in your Home Assistant profile (see [Languages](#languages)).
 - Can also be a page of its own in Home Assistant's sidebar, with no dashboard to set up (see [Sidebar page](#sidebar-page)).
@@ -94,7 +94,7 @@ toggle: true               # optional, let each breaker's rocker switch it (need
 confirm: true              # optional, ask before switching a breaker
 show_panel_info: true      # optional, the panel's own readings above the door
 appearance: auto           # optional, auto (follow theme), light, or dark (dimmed lighting)
-# main_breaker: 200        # optional, show a main breaker with this rating (Leviton doesn't report it)
+# main_breaker: 200        # optional, show a main breaker with this rating, and how much of it is in use (Leviton doesn't report it)
 # rotate_180: true         # optional override — only set this if auto-detected orientation is wrong
 ```
 
@@ -198,12 +198,14 @@ Leviton reports each load center separately; nothing in its data says that one o
 
 1. Open **Settings > Devices & Services > Leviton LDATA > Configure** and expand **Sub-panels**. The section is there when the integration has found two or more load centers.
 2. Each load center has a field under its name. For a sub-panel, choose the breaker in the other load center that feeds it (listed as *load center · position · breaker name*). Leave the others on **Not a sub-panel**.
+   If that breaker isn't a smart breaker, also enter its size in the field below, ending in **(A)**: Leviton knows a smart breaker's rating but not a dumb one's.
 3. Save. The integration reloads, and the link shows without a restart.
 
 What you get:
 
-- A **"dumb" (non-smart) feeder breaker** has no monitoring data of its own. Linked, its label shows the sub-panel's live Watts/Amps instead, printed in blue with a "↳ sub-panel name" prefix, so it reads at a glance as "feeds another panel" rather than "just unmonitored". Clicking it opens the sub-panel.
+- A **"dumb" (non-smart) feeder breaker** has no monitoring data of its own. Linked, its label shows the sub-panel's live Watts/Amps instead, printed in blue after a "↳", so it reads at a glance as "feeds another panel" rather than "just unmonitored". The amps are the sub-panel's busier leg, which is what that pole of the feeder carries. With the feeder's size given, the label shows its rating and a load bar, like any other circuit. Clicking it opens the sub-panel.
 - A **smart feeder breaker** stays a breaker, with its own readings and rocker. Its detail sheet gains a **Feeds *sub-panel*** row that opens the sub-panel.
+- With the feeder's rating known (a smart feeder's own, or the size you entered), the sub-panel's header shows how much of it is in use under **Panel load**, e.g. *16% of 100 A*, with the same colors as the circuit bars. It is the busier leg's current against the feeder's rating. A main panel shows the same against its main breaker when the card has `main_breaker` set.
 - On a dashboard the sub-panel opens in a popup; on the sidebar page it opens the sub-panel's own tab.
 
 A load center has one feed, a sub-panel can feed another sub-panel, and two load centers cannot feed each other.

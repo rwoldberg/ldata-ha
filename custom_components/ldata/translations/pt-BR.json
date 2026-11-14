@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Quadros secundários",
-                        "description": "Se um quadro de distribuição for alimentado por um disjuntor de outro quadro, escolha esse disjuntor ao lado do nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro secundário e dá acesso a ele."
+                        "description": "Se um quadro de distribuição for alimentado por um disjuntor de outro quadro, escolha esse disjuntor ao lado do nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro secundário e dá acesso a ele. Se esse disjuntor não for inteligente, informe a capacidade dele no campo terminado em (A) logo abaixo, para que o cartão mostre quanto dele o quadro secundário usa."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware atualizado",
                 "main": "Geral",
                 "main_breaker": "Disjuntor geral",
-                "main_breaker_dead": "Disjuntor geral (sem tensão em nenhuma das fases)"
+                "main_breaker_dead": "Disjuntor geral (sem tensão em nenhuma das fases)",
+                "of_rating": "{pct}% de {amps} A",
+                "busier_leg": "{amps} A na fase mais carregada"
             },
             "label": {
                 "circuit": "Circuito {position}",

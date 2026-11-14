@@ -74,14 +74,49 @@ FLAG = {
 HANDLE_ANGLE = {"on": ALPHA, "off": -ALPHA, "trip": 0.0}
 
 # Status LEDs, as distances down the raised face. A 2nd Gen smart breaker has
-# the "OFF" one, lit while it is switched off remotely; a 1st Gen breaker
-# (`remote=False`), which can't be switched back on remotely, has no OFF LED
-# and is otherwise the same. AFCI, GFCI and dual-function breakers add "AF"
-# and/or "GF" above it, which stay lit after a trip to show its cause
-# (`protect` is "a", "g" or "ag"); their handles read OFF/TEST.
-LED_H = 0.064
+# the "OFF" one, lit while it is switched off remotely. AFCI, GFCI and
+# dual-function breakers add "AF" and/or "GF" above it, which stay lit after
+# a trip to show its cause (`protect` is "a", "g" or "ag"); their handles read
+# OFF/TEST.
+LED_H = 0.077
 LED_D = {"off": 2.684, "g": 2.422, "a": 2.158}
-LED_X = (-0.066, 0.0)  # across the face, from the centre of the handle pole
+# Across the face, from the centre of the handle pole: each LED runs from the
+# jog in the seam to past the line of the seam above it, as on the photos.
+LED_X = (-0.056, 0.047)
+SMART_STEP = (2.795, 2.815)  # where the seam steps back to the centre below the OFF LED
+STD_JOG = -0.066  # the standard breaker's jog in the seam
+
+# Radio mark, by generation (`remote`), as measured on Leviton's photos: its
+# centre across and down the face, the dot's radius, the three arcs' radii,
+# their stroke, and how far each arc reaches either side of level (degrees).
+RADIO = {
+    True: (0.287, 2.804, 0.0074, (0.0212, 0.0384, 0.0550), 0.0084, 45),
+    False: (0.237, 2.719, 0.019, (0.0455, 0.0778, 0.1124), 0.015, 47),
+}
+
+# A 1st Gen breaker (`remote=False`) can't be switched back on remotely and
+# has no OFF LED. Its LEDs, larger, show through a light strip let into the
+# seam, at the AF and GF places. A plain one has a single unlabelled LED, used
+# to identify it: at the AF place on a 1-pole breaker, at the GF place on a
+# 2-pole one (Leviton's LB120-S and LB230-S photos). It has no "T" and a
+# larger radio mark.
+STRIP_D = (2.000, 2.578)  # tips of the strip
+STRIP_W = 0.055  # half its width, either side of the seam
+STRIP_TIP = 0.020  # its pointed ends
+LED1_H = 0.084
+
+
+def gen1_leds(poles, protect):
+    """The LEDs that show through a 1st Gen breaker's strip."""
+    keys = [key for key in "ag" if key in protect]
+    return keys or (["a"] if poles == 1 else ["g"])
+
+
+def strip_seam(cx, side):
+    """The seam around a 1st Gen breaker's strip, top to bottom, on one side (-1 left, 1 right)."""
+    s0, s1 = STRIP_D
+    x = cx + side * STRIP_W
+    return [(cx, s0), (x, s0 + STRIP_TIP), (x, s1 - STRIP_TIP), (cx, s1)]
 
 
 def led_span(key):
@@ -486,7 +521,7 @@ def build_handle(root, cx, state, m, plain=False, test=False):
     return pivot
 
 
-def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=True, plain=False, protect="", remote=True):
+def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=True, plain=False, protect="", remote=True, poles=1):
     """The raised face of the pole that carries the handle, as its two moulded halves."""
     hw = FACE_W / 2
     xl = cx - hw if left_edge is None else left_edge
@@ -495,8 +530,9 @@ def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=T
     z0 = -FACE_H - 0.03
     crease_l, crease_r = 0.264, 0.315
     chin_side, chin_mid = 1.521, 1.537
-    jog0, jog1, jx = 2.030, 2.052, cx + LED_X[0]
-    led0, led1 = led_span("off")
+    jog0, jog1 = 2.030, 2.052
+    jx = cx + (LED_X[0] if kind == "smart" else STD_JOG)
+    lx = cx + LED_X[1]
     extra = [key for key in "ga" if key in protect] if kind == "smart" else []
     r = 0.030
 
@@ -510,16 +546,19 @@ def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=T
         finish(ob, m["body"], bevel=0.008)
         link(ob, root)
 
-    if kind == "smart":
-        # The right half is notched for each LED above the OFF one. Without
-        # the OFF LED it comes down to meet the left half where the lens was.
+    if kind == "smart" and not remote:
+        # 1st Gen: a straight seam, opened around the light strip.
+        seam_r = [(cx, FACE_L)] + strip_seam(cx, 1)[::-1]
+        seam_l = strip_seam(cx, -1) + [(cx, FACE_L)]
+    elif kind == "smart":
+        # The seam runs down the jog past the LEDs, each in a notch in the
+        # right half, and steps back below the OFF one.
         notches = []
-        for key in extra:
+        for key in ["off"] + extra:
             d0, d1 = led_span(key)
-            notches += [(jx, d1), (cx, d1), (cx, d0), (jx, d0)]
-        off_top = led0 if remote else led1
-        seam_r = [(cx, FACE_L), (cx, off_top), (jx, off_top)] + notches + [(jx, jog1), (cx, jog0)]
-        seam_l = [(cx, jog0), (jx, jog1), (jx, led1), (cx, led1), (cx, FACE_L)]
+            notches += [(jx, d1), (lx, d1), (lx, d0), (jx, d0)]
+        seam_r = [(cx, FACE_L), (cx, SMART_STEP[1]), (jx, SMART_STEP[0])] + notches + [(jx, jog1), (cx, jog0)]
+        seam_l = [(cx, jog0), (jx, jog1), (jx, SMART_STEP[0]), (cx, SMART_STEP[1]), (cx, FACE_L)]
     else:
         seam_r = [(cx, FACE_L), (cx, 2.795), (jx, 2.777), (jx, jog1), (cx, jog0)]
         seam_l = [(cx, jog0), (jx, jog1), (jx, 2.777), (cx, 2.795), (cx, FACE_L)]
@@ -554,10 +593,22 @@ def build_pole_face(root, cx, kind, m, left_edge=None, lower_left=True, guards=T
         liner.data.materials.append(m["dark"])
         link(liner, root)
 
-    if kind == "smart" and not plain:
-        for key in (["off"] if remote else []) + extra:
+    if kind == "smart" and not remote:
+        # The light strip sits a little below the face; its LEDs fill its width.
+        strip = strip_seam(cx, 1) + strip_seam(cx, -1)[::-1][1:-1]
+        ob = prism("strip", inset(P(strip), SEAM), z0, -0.004)
+        finish(ob, m["body"], bevel=0.003, segments=2)
+        link(ob, root)
+        for key in gen1_leds(poles, protect) if not plain else ():
+            d = LED_D[key]
+            hw = STRIP_W - SEAM - 0.002
+            lens = box("led_" + key, cx - hw, cx + hw, fy(d + LED1_H / 2), fy(d - LED1_H / 2), z0, -0.003)
+            lens.data.materials.append(m["lens"])
+            link(lens, root)
+    elif kind == "smart" and not plain:
+        for key in ["off"] + extra:
             d0, d1 = led_span(key)
-            lens = box("led_" + key, jx + 0.004, cx - 0.004, fy(d1) + 0.004, fy(d0) - 0.004, z0, -0.006)
+            lens = box("led_" + key, jx + 0.004, lx - 0.004, fy(d1) + 0.004, fy(d0) - 0.004, z0, -0.006)
             lens.data.materials.append(m["lens"])
             link(lens, root)
 
@@ -582,15 +633,22 @@ def build_legends(root, cx, kind, m, rating=None, protect="", remote=True):
             text("remote2", "OPERATED", 0.036, (cx + 0.192, fy(1.972), 0), ink, parent=root)
             text("led_off", "OFF", 0.084, (cx + 0.156, fy(LED_D["off"] + 0.004), 0), ink, face="narrow", spacing=1.0, parent=root)
         for key, legend in (("a", "AF"), ("g", "GF")):
-            if key in protect:
+            if key not in protect:
+                continue
+            if remote:
                 text("led_" + key, legend, 0.080, (cx + 0.158, fy(LED_D[key] + 0.007), 0), ink, face="narrow", spacing=1.0, parent=root)
-        text("type", "T", 0.076, (cx + 0.030, fy(2.808), 0), ink, face="narrow", parent=root)
-        # Radio mark: a dot with two arcs each side.
-        ix, iy = cx + 0.282, fy(2.805)
-        marks = [[(ix + 0.009 * cos(a * math.pi / 8), iy + 0.009 * sin(a * math.pi / 8)) for a in range(16)]]
-        for rad in (0.029, 0.050):
-            marks.append(arc_band(ix, iy, rad, radians(-52), radians(52), 0.0065))
-            marks.append(arc_band(ix, iy, rad, radians(128), radians(232), 0.0065))
+            else:  # beside the wider strip, a little larger
+                text("led_" + key, legend, 0.090, (cx + 0.196, fy(LED_D[key]), 0), ink, face="narrow", spacing=1.0, stretch=1.12, parent=root)
+        if remote:
+            text("type", "T", 0.076, (cx + 0.030, fy(2.808), 0), ink, face="narrow", parent=root)
+        # Radio mark: a dot with three arcs each side.
+        across, down, dot, rads, band, half = RADIO[remote]
+        ix, iy = cx + across, fy(down)
+        n = 16 if remote else 24
+        marks = [[(ix + dot * cos(2 * math.pi * a / n), iy + dot * sin(2 * math.pi * a / n)) for a in range(n)]]
+        for rad in rads:
+            marks.append(arc_band(ix, iy, rad, radians(-half), radians(half), band))
+            marks.append(arc_band(ix, iy, rad, radians(180 - half), radians(180 + half), band))
         link(flat_mesh("rf", marks, 0.0012, ink), root)
     else:
         text("type", "T", 0.080, (cx + 0.19, fy(2.731), 0), ink, parent=root)
@@ -612,18 +670,19 @@ def build_breaker(poles=1, kind="smart", state="on", rating=None, name="breaker"
     if kind != "smart":
         protect = ""
     if poles == 1:
-        build_pole_face(root, cx, kind, m, guards=not bare, plain=proxy, protect=protect, remote=remote)
+        build_pole_face(root, cx, kind, m, guards=not bare, plain=proxy, protect=protect, remote=remote, poles=poles)
     else:
         # Blank pole to the left: moulded panels, as on the 2-pole catalog photo.
         fl = x_left + (BODY_W - FACE_W) / 2
         seam_a, seam_a2 = x_left + 0.466, x_left + 0.420
         boundary = cx - 0.5  # line between the two poles
         split_d, jog_d = 1.839, 2.040
-        jx = cx + LED_X[0]
+        jx = cx + (LED_X[0] if kind == "smart" else STD_JOG)
         r = 0.030
-        led_bottom = led_span("off")[1] if kind == "smart" else None
-        if kind == "smart":
-            d_seam = [(cx, 2.030), (jx, 2.052), (jx, led_bottom), (cx, led_bottom), (cx, FACE_L)]
+        if kind == "smart" and not remote:
+            d_seam = strip_seam(cx, -1) + [(cx, FACE_L)]
+        elif kind == "smart":
+            d_seam = [(cx, 2.030), (jx, 2.052), (jx, SMART_STEP[0]), (cx, SMART_STEP[1]), (cx, FACE_L)]
         else:
             d_seam = [(cx, 2.030), (jx, 2.052), (jx, 2.777), (cx, 2.795), (cx, FACE_L)]
         panels = {
@@ -639,7 +698,7 @@ def build_breaker(poles=1, kind="smart", state="on", rating=None, name="breaker"
             ob = prism(pname, pts2, z0, 0.0)
             finish(ob, m["body"], bevel=0.008)
             link(ob, root)
-        build_pole_face(root, cx, kind, m, left_edge=boundary, lower_left=False, guards=not bare, plain=proxy, protect=protect, remote=remote)
+        build_pole_face(root, cx, kind, m, left_edge=boundary, lower_left=False, guards=not bare, plain=proxy, protect=protect, remote=remote, poles=poles)
 
     # Housing below the raised face; the shelves at each end show in the product shot.
     top, bot = -STEP_TOP, FACE_L + STEP_BOT

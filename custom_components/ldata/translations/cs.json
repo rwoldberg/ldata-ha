@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Podružné rozvaděče",
-                        "description": "Pokud je rozvaděč napájen z jističe v jiném rozvaděči, vyberte tento jistič u jeho názvu. U tohoto jističe se pak zobrazuje aktuální zatížení podružného rozvaděče a lze z něj na podružný rozvaděč přejít."
+                        "description": "Pokud je rozvaděč napájen z jističe v jiném rozvaděči, vyberte tento jistič u jeho názvu. U tohoto jističe se pak zobrazuje aktuální zatížení podružného rozvaděče a lze z něj na podružný rozvaděč přejít. Pokud tento jistič není chytrý jistič, zadejte jeho jmenovitý proud do pole končícího (A) pod ním, aby karta mohla ukázat, jakou část z něj podružný rozvaděč využívá."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware je aktuální",
                 "main": "Hlavní",
                 "main_breaker": "Hlavní jistič",
-                "main_breaker_dead": "Hlavní jistič (bez napětí na obou fázích)"
+                "main_breaker_dead": "Hlavní jistič (bez napětí na obou fázích)",
+                "of_rating": "{pct} % z {amps} A",
+                "busier_leg": "{amps} A na více zatížené fázi"
             },
             "label": {
                 "circuit": "Okruh {position}",

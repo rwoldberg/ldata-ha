@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Onderverdelers",
-                        "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe."
+                        "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe. Is die automaat geen slimme automaat, vul dan de grootte in het veld eronder in dat eindigt op (A), zodat de kaart kan tonen hoeveel ervan de onderverdeler gebruikt."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware is up-to-date",
                 "main": "Hoofd",
                 "main_breaker": "Hoofdschakelaar",
-                "main_breaker_dead": "Hoofdschakelaar (beide fasen spanningsloos)"
+                "main_breaker_dead": "Hoofdschakelaar (beide fasen spanningsloos)",
+                "of_rating": "{pct}% van {amps} A",
+                "busier_leg": "{amps} A op de zwaarst belaste fase"
             },
             "label": {
                 "circuit": "Groep {position}",

@@ -268,9 +268,15 @@ async def test_each_load_center_can_be_given_the_breaker_that_feeds_it() -> None
     assert isinstance(next(m for m in form["data_schema"].schema if str(m) == "sub_panels"), vol.Optional)
     # Closed until there is something in it.
     assert section.options == {"collapsed": True}
-    # One field for each load center, named after it: Home Assistant shows a
-    # field it has no translation for under its own name.
-    assert sorted(str(m) for m in section.schema.schema) == ["Casita", "Main Panel"]
+    # Two fields for each load center, named after it: Home Assistant shows a
+    # field it has no translation for under its own name. The second is the
+    # size of the feeding breaker, which Leviton doesn't know for one that
+    # isn't smart.
+    assert [str(m) for m in section.schema.schema] == ["Casita", "Casita (A)", "Main Panel", "Main Panel (A)"]
+    size = next(m for m in section.schema.schema if str(m) == "Casita (A)")
+    assert isinstance(size, vol.Optional)
+    assert (size.description or {}).get("suggested_value") is None
+    assert section.schema.schema[size].config["unit_of_measurement"] == "A"
 
     marker, selector_ = _feed_field(form, "Casita")
     assert marker.default() == "none"
@@ -379,8 +385,45 @@ async def test_load_centers_with_the_same_name_get_their_own_fields() -> None:
 
     form = await _flow(_entry({}), twins).async_step_init()
 
-    assert sorted(str(m) for m in _section(form).schema.schema) == ["Panel", "Panel (b)"]
+    assert [str(m) for m in _section(form).schema.schema] == ["Panel", "Panel (A)", "Panel (b)", "Panel (b) (A)"]
     result = await _flow(_entry({}), twins).async_step_init(
         {"sub_panels": {"Panel": "none", "Panel (b)": "a|3"}}
     )
     assert result["data"]["sub_panels"] == {"b": {"panel": "a", "position": 3}}
+
+
+async def test_size_of_the_feeding_breaker_is_stored_with_its_feed() -> None:
+    entry = _entry(_stored_options())
+
+    result = await _flow(entry, _two_load_centers()).async_step_init(
+        {"sub_panels": {"Casita": "main|38", "Casita (A)": 100, "Main Panel": "none", "Main Panel (A)": 60}}
+    )
+
+    # A size for a load center that isn't fed from anywhere is dropped.
+    assert result["data"]["sub_panels"] == {"casita": {"panel": "main", "position": 38, "rating": 100.0}}
+
+
+async def test_stored_size_is_suggested_and_can_be_emptied() -> None:
+    entry = _entry({"sub_panels": {"casita": {"panel": "main", "position": 38, "rating": 100}}})
+
+    form = await _flow(entry, _two_load_centers()).async_step_init()
+    size = next(m for m in _section(form).schema.schema if str(m) == "Casita (A)")
+    assert size.description == {"suggested_value": 100.0}
+
+    # Home Assistant leaves an emptied number field out of the submission.
+    result = await _flow(entry, _two_load_centers()).async_step_init(
+        {"sub_panels": {"Casita": "main|38", "Main Panel": "none"}}
+    )
+    assert result["data"]["sub_panels"] == {"casita": {"panel": "main", "position": 38}}
+
+
+async def test_refused_form_comes_back_with_the_size_that_was_typed() -> None:
+    entry = _entry({})
+
+    result = await _flow(entry, _two_load_centers()).async_step_init(
+        {"sub_panels": {"Casita": "main|38", "Casita (A)": 70, "Main Panel": "casita|1"}}
+    )
+
+    assert result["errors"] == {"base": "sub_panel_loop"}
+    size = next(m for m in _section(result).schema.schema if str(m) == "Casita (A)")
+    assert size.description == {"suggested_value": 70}

@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Podrozdzielnice",
-                        "description": "Jeśli rozdzielnica jest zasilana z wyłącznika w innej rozdzielnicy, wybierz ten wyłącznik obok jej nazwy. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy i będzie można z niego do niej przejść."
+                        "description": "Jeśli rozdzielnica jest zasilana z wyłącznika w innej rozdzielnicy, wybierz ten wyłącznik obok jej nazwy. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy i będzie można z niego do niej przejść. Jeśli ten wyłącznik nie jest inteligentny, wpisz jego prąd znamionowy w polu zakończonym (A) pod nim, aby karta mogła pokazać, jaką jego część wykorzystuje podrozdzielnica."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Oprogramowanie układowe jest aktualne",
                 "main": "Główny",
                 "main_breaker": "Wyłącznik główny",
-                "main_breaker_dead": "Wyłącznik główny (brak napięcia na obu fazach)"
+                "main_breaker_dead": "Wyłącznik główny (brak napięcia na obu fazach)",
+                "of_rating": "{pct}% z {amps} A",
+                "busier_leg": "{amps} A na bardziej obciążonej fazie"
             },
             "label": {
                 "circuit": "Obwód {position}",

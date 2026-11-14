@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Panneaux secondaires",
-                        "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder."
+                        "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder. Si ce disjoncteur n'est pas un disjoncteur intelligent, indiquez son calibre dans le champ se terminant par (A) en dessous, pour que la carte puisse montrer quelle part en utilise le panneau secondaire."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Micrologiciel à jour",
                 "main": "Principal",
                 "main_breaker": "Disjoncteur principal",
-                "main_breaker_dead": "Disjoncteur principal (aucune tension sur les deux phases)"
+                "main_breaker_dead": "Disjoncteur principal (aucune tension sur les deux phases)",
+                "of_rating": "{pct} % de {amps} A",
+                "busier_leg": "{amps} A sur la phase la plus chargée"
             },
             "label": {
                 "circuit": "Circuit {position}",

@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Sottoquadri",
-                        "description": "Se un quadro elettrico è alimentato da un interruttore di un altro quadro, scegli quell'interruttore accanto al suo nome. L'interruttore mostrerà quindi il carico in tempo reale del sottoquadro e permetterà di aprirlo."
+                        "description": "Se un quadro elettrico è alimentato da un interruttore di un altro quadro, scegli quell'interruttore accanto al suo nome. L'interruttore mostrerà quindi il carico in tempo reale del sottoquadro e permetterà di aprirlo. Se quell'interruttore non è smart, inserisci la sua taglia nel campo che termina con (A) sotto di esso, così la scheda può mostrare quanto ne usa il sottoquadro."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware aggiornato",
                 "main": "Generale",
                 "main_breaker": "Interruttore generale",
-                "main_breaker_dead": "Interruttore generale (tensione assente su entrambe le fasi)"
+                "main_breaker_dead": "Interruttore generale (tensione assente su entrambe le fasi)",
+                "of_rating": "{pct}% di {amps} A",
+                "busier_leg": "{amps} A sulla fase più carica"
             },
             "label": {
                 "circuit": "Circuito {position}",

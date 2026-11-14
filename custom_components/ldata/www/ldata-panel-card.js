@@ -17,8 +17,10 @@
  *                                     ground fault (AFCI, GFCI and dual
  *                                     function breakers, which are drawn
  *                                     with those LEDs and an OFF/TEST handle)
- * A Gen 1 smart breaker looks the same without the "OFF" LED: it can't be
- * switched back on remotely, so switching it off remotely trips it.
+ * A Gen 1 smart breaker has no "OFF" LED: it can't be switched back on
+ * remotely, so switching it off remotely trips it. Its LEDs show through a
+ * light strip down the seam; a plain one has a single unlabelled LED there,
+ * which blinks to identify it.
  *
  *  - Click a breaker's rocker to switch it (asks for confirmation first).
  *  - Click anywhere else on a breaker, or its label, to open its detail sheet
@@ -40,6 +42,7 @@
  *   show_panel_info: true      # optional, the panel's own readings above the door
  *   appearance: auto           # optional, auto | light | dark (dimmed lighting)
  *   main_breaker: 200          # optional, show a main breaker with this rating
+ *                              # (the header then shows how much of it is in use)
  *   rotate_180: true           # optional override — by default the card reads
  *                              # the panel's reported mounting orientation.
  *   sub_panels:                # optional — link a breaker that feeds a
@@ -69,7 +72,7 @@ const CARD_VERSION = "3.1.0";
 // tools/panel_card_art. ART_REV is the content hash of that folder (written
 // by build_assets.py); it is part of every image URL, so browsers fetch new
 // artwork after an upgrade instead of serving a cached copy.
-const ART_REV = "cc0aa080cc";
+const ART_REV = "258d2efb71";
 const ART_SERVED = new URL("/ldata_static/img/", location.href).href; // always served by the integration
 
 // Where this file was loaded from. `import.meta.url` would say, but it is a
@@ -103,9 +106,10 @@ const G = {
   frameOut: 0.78, // door surround, from the dead front out to flat cover
   coverEdge: 0.32, // chamfered edge of the cover
   cav: [0.374, 1.441], // the rocker, measured from the logo end of the face
-  led: { d: 2.684, x: -0.033 }, // "OFF" LED of a Gen 2 breaker (centre)
-  ledAf: { d: 2.158, x: -0.033 }, // "AF" and "GF" LEDs of a protected breaker
-  ledGf: { d: 2.422, x: -0.033 },
+  led: { d: 2.684, x: -0.0045 }, // "OFF" LED of a Gen 2 breaker (centre)
+  ledAf: { d: 2.158, x: -0.0045 }, // "AF" and "GF" LEDs of a protected breaker
+  ledGf: { d: 2.422, x: -0.0045 },
+  gen1LedX: 0, // a Gen 1 breaker's LEDs, in a light strip centred on the seam
   rating: { d: 1.775, x: 0.19, size: 0.106 },
   hero: { w1: 1.14, w2: 2.14, h: 3.796, top: 0.52 }, // upright product shot
   main: { w: 3.6, h: 2.7, scale: 1.25, rating: [1.372, 2.212] }, // main breaker in its opening
@@ -320,7 +324,7 @@ const icon = (name, cls = "ic") =>
 // is the breaker lying on its side with its logo end toward the middle of the
 // panel; on a 2-pole unit the rocker is on the lower space in the left column
 // and the upper space in the right column, exactly as the hardware mounts.
-function tileSpots(side, poles) {
+function tileSpots(side, poles, leds) {
   const left = side === "left";
   const along = (d) => (left ? G.tileW - G.tileM - G.slotPad - d : G.tileM + G.slotPad + d) / G.tileW;
   const pole = poles === 2 ? (left ? 1.5 : 0.5) : 0.5;
@@ -329,15 +333,29 @@ function tileSpots(side, poles) {
   const a1 = along(G.cav[1] + 0.05);
   return {
     rocker: { left: Math.min(a0, a1), width: Math.abs(a1 - a0), top: (pole - 0.5) / poles, height: 1 / poles },
-    led: { left: along(G.led.d), top: across(G.led.x) },
-    ledAf: { left: along(G.ledAf.d), top: across(G.ledAf.x) },
-    ledGf: { left: along(G.ledGf.d), top: across(G.ledGf.x) },
+    led: leds.st ? { left: along(leds.st.d), top: across(leds.st.x) } : null,
+    ledAf: { left: along(leds.af.d), top: across(leds.af.x) },
+    ledGf: { left: along(leds.gf.d), top: across(leds.gf.x) },
     rating: { x: along(G.rating.d) * G.tileW, y: across(G.rating.x) * poles, turn: left ? 90 : -90 },
   };
 }
 
+// Where a breaker's LEDs sit, in G units. "st" is the one lit or blinked for
+// its state and for Identify: the "OFF" LED of a Gen 2 breaker, or the only
+// LED of a plain Gen 1 breaker (at the AF place on a 1-pole breaker, at the GF
+// place on a 2-pole one). A protected Gen 1 breaker has no such LED; Identify
+// blinks its AF and GF LEDs.
+function ledSpots(s) {
+  if (!s.gen1) return { st: G.led, af: G.ledAf, gf: G.ledGf };
+  const af = { d: G.ledAf.d, x: G.gen1LedX };
+  const gf = { d: G.ledGf.d, x: G.gen1LedX };
+  const plain = !s.hasAf && !s.hasGf;
+  return { st: plain ? (s.poles === 1 ? af : gf) : null, af, gf };
+}
+
 // One of a breaker's LEDs, at a spot given as fractions of its box. "st" is
-// the ON/OFF status LED; "af" and "gf" show why a protected breaker tripped.
+// the status LED (see ledSpots); "af" and "gf" show why a protected breaker
+// tripped.
 const ledHtml = (which, spot) => `<i class="led led--${which}" style="left:${pct(spot.left)};top:${pct(spot.top)}"></i>`;
 
 // Printed amp rating. SVG, so it scales with the artwork instead of being
@@ -436,7 +454,9 @@ const EN = {
       "update_current": "Firmware up to date",
       "main": "Main",
       "main_breaker": "Main breaker",
-      "main_breaker_dead": "Main breaker (no voltage on either leg)"
+      "main_breaker_dead": "Main breaker (no voltage on either leg)",
+      "of_rating": "{pct}% of {amps} A",
+      "busier_leg": "{amps} A on the busier leg"
     },
     "label": {
       "circuit": "Circuit {position}",
@@ -1166,7 +1186,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const wanted = new Map();
     for (const sp of Array.isArray(fed) ? fed : []) {
       const position = Number(sp && sp.position);
-      if (Number.isFinite(position) && sp.device_id) wanted.set(position, { deviceId: sp.device_id, viewPath: null, rating: null });
+      if (Number.isFinite(position) && sp.device_id) wanted.set(position, { deviceId: sp.device_id, viewPath: null, rating: numOrNull(sp.rating) });
     }
     for (const sp of cfg.sub_panels) {
       if (!sp) continue;
@@ -1176,7 +1196,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       wanted.set(position, {
         deviceId: sp.panel_device_id || (known && known.deviceId) || null,
         viewPath: sp.view_path || null,
-        rating: numOrNull(sp.rating),
+        rating: numOrNull(sp.rating) || (known && known.rating) || null,
       });
     }
     const links = [];
@@ -1385,7 +1405,10 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     if (s.kind !== "smart") {
       const roles = (s.link && s.link.roles) || {};
       s.watts = cfg.show_power ? this._num(roles.watts) : null;
-      s.amps = cfg.show_power ? this._num(roles.amps) : null;
+      // A sub-panel's current is its busier leg's: what that pole of the
+      // breaker feeding it carries, and what the breaker's rating limits.
+      const legs = [this._num(roles.ampsL1), this._num(roles.ampsL2)].filter((v) => v !== null);
+      s.amps = !cfg.show_power ? null : legs.length ? Math.max(...legs) : this._num(roles.amps);
       s.vis = "unknown";
       s.handle = "on";
       s.led = "off";
@@ -1448,14 +1471,19 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const handle = tripped || (heldOff && s.gen1) ? "trip" : isOn || heldOff ? "on" : "off";
     s.handle = !available ? this._handles.get(r.status) || "on" : handle;
     if (available) this._handles.set(r.status, s.handle);
-    s.led = vis === "pending" || s.blinkOn ? "blink" : vis === "remote-off" ? "on" : "off";
+    // A Gen 1 breaker's LED only blinks for Identify: it has no OFF LED to
+    // light when switched off, or to blink while a switch is under way.
+    s.led = s.blinkOn || (vis === "pending" && !s.gen1) ? "blink" : vis === "remote-off" && !s.gen1 ? "on" : "off";
     // The cause LEDs are fed from the line side: they stay lit after a trip.
     const lit = available && tripped && cause;
     const op = available && r.operationalState && st[r.operationalState] ? st[r.operationalState].state : null;
     const selfTest = isSelfTestFailure(op);
     s.cause = lit ? cause.key : null;
-    s.ledAf = !s.hasAf ? "off" : selfTest ? "fast" : lit ? cause.af : "off";
-    s.ledGf = !s.hasGf ? "off" : selfTest ? "fast" : lit ? cause.gf : "off";
+    // Identify blinks a protected Gen 1 breaker's AF and GF LEDs together,
+    // unless they are showing a fault.
+    const ident = s.gen1 && s.blinkOn ? "blink" : "off";
+    s.ledAf = !s.hasAf ? "off" : selfTest ? "fast" : lit ? cause.af : ident;
+    s.ledGf = !s.hasGf ? "off" : selfTest ? "fast" : lit ? cause.gf : ident;
     s.watts = cfg.show_power ? this._num(r.watts) : null;
     s.amps = cfg.show_power ? this._num(r.amps) : null;
 
@@ -1491,6 +1519,14 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       rssi: val(r.wifi),
       cloud: cloud ? cloud.state : null,
       fwAvailable: !!fw && fw.state === "on",
+      // What this load center may draw: the breaker feeding it, if it is a
+      // sub-panel (from the integration), or the main breaker on the card,
+      // whichever is smaller.
+      capacity: Math.min(
+        ...[numOrNull(cloud && cloud.attributes && cloud.attributes.fed_from && cloud.attributes.fed_from.rating), numOrNull(this._config.main_breaker)].filter((v) => v > 0),
+        Infinity
+      ),
+      busiest: [val(r.ampsL1), val(r.ampsL2)].filter((v) => v !== null).reduce((a, v) => Math.max(a === null ? v : a, v), null),
       overVoltage: !!(r.overVoltage && st[r.overVoltage] && st[r.overVoltage].state === "on"),
       underVoltage: !!(r.underVoltage && st[r.underVoltage] && st[r.underVoltage].state === "on"),
       cts: d.cts.map((c) => ({ name: c.name, watts: val(c.roles.watts), eid: c.roles.watts || c.roles.amps })),
@@ -1648,6 +1684,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
             <span class="m-cap">${esc(t("card.meter.panel_load"))}</span>
             <span class="m-big" data-h="total"></span>
             <span class="m-amps" data-h="amps"></span>
+            <span class="m-use" data-h="use" hidden><span class="m-usebar"><i data-h="useFill"></i></span><span class="m-usecap" data-h="useCap"></span></span>
           </button>
           <div class="m-grid">${cells}</div>
           <div class="m-alarm" data-h="alarm" hidden></div>
@@ -1676,7 +1713,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         `fill-${col}`
       )}" alt="" draggable="false"></div>`;
     }
-    const spots = tileSpots(side, s.poles);
+    const spots = tileSpots(side, s.poles, ledSpots(s));
     const smart = s.kind === "smart";
     const rk = spots.rocker;
     const rocker =
@@ -1695,7 +1732,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         <img class="sp" alt="" draggable="false">
         <button type="button" class="hit" data-act="open" data-pos="${s.position}" tabindex="-1" aria-hidden="true"></button>
         ${rating}
-        ${smart && !s.gen1 ? ledHtml("st", spots.led) : ""}
+        ${smart && spots.led ? ledHtml("st", spots.led) : ""}
         ${s.hasAf ? ledHtml("af", spots.ledAf) : ""}
         ${s.hasGf ? ledHtml("gf", spots.ledGf) : ""}
         ${rocker}
@@ -1746,7 +1783,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     if (s.kind === "dumb") return { text: t("card.state.not_monitored"), tone: "muted" };
     if (s.kind === "link") {
       const name = s.link.name || t("card.name.sub_panel");
-      return { text: r ? `${name}, ${r.text}` : name, html: `↳ ${esc(name)}${r ? ` · ${r.html}` : ""}`, tone: "link" };
+      // Its readings, where a long sub-panel name can't push them out of
+      // sight; the name is in the label's tooltip ("Feeds ...").
+      return { text: r ? `${name}, ${r.text}` : name, html: `↳ ${r ? r.html : esc(name)}`, tone: "link" };
     }
     if (s.error) return { text: s.error, tone: "bad" };
     const alarm = s.alarms && s.alarms.length ? s.alarms.join(", ") : null;
@@ -1800,9 +1839,10 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       el.tag.classList.toggle("lbl-tag--alarm", !!alarm);
     });
 
-    // Load bar: how close the circuit runs to its rating.
+    // Load bar: how close the circuit runs to its rating (a sub-panel's
+    // busier leg against the breaker that feeds it).
     let load = null;
-    if (s.vis === "on" && s.rating && s.amps !== null && s.amps >= 0) load = Math.min(100, (s.amps / s.rating) * 100);
+    if ((s.vis === "on" || s.kind === "link") && s.rating && s.amps !== null && s.amps >= 0) load = Math.min(100, (s.amps / s.rating) * 100);
     const loadKey = load === null ? "" : Math.round(load);
     this._set(c, "load", loadKey, () => {
       el.barFill.style.width = load === null ? "0" : `${Math.max(2, load)}%`;
@@ -1874,6 +1914,19 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       if (w !== null) big = Math.abs(w) >= 1000 ? `${this._nf(2).format(w / 1000)} kW` : `${this._nf(0).format(w)} W`;
       text("total", big);
       text("amps", h.amps !== null ? `${nf1.format(h.amps)} A` : "");
+    }
+    if (els.use) {
+      // How much of what feeds it the load center uses, on its busier leg.
+      const pct = Number.isFinite(h.capacity) && h.busiest !== null ? (h.busiest / h.capacity) * 100 : null;
+      const key = pct === null ? "" : `${Math.round(pct)}|${h.capacity}|${nf1.format(h.busiest)}`;
+      this._set(c, "use", key, () => {
+        els.use.hidden = pct === null;
+        if (pct === null) return;
+        els.useFill.style.width = `${Math.max(2, Math.min(100, pct))}%`;
+        els.use.dataset.load = pct >= 80 ? "high" : pct >= 50 ? "warn" : "ok";
+        els.useCap.textContent = t("card.meter.of_rating", { pct: Math.round(pct), amps: this._nf(0).format(h.capacity) });
+        els.use.title = t("card.meter.busier_leg", { amps: nf1.format(h.busiest) });
+      });
     }
     const leg = (v, a) => [v !== null ? `${nf1.format(v)} V` : null, a !== null ? `${nf1.format(a)} A` : null].filter(Boolean).join(" · ") || dash;
     text("l1", leg(h.voltsL1, h.ampsL1));
@@ -2198,14 +2251,15 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
           )}"></button>`
         : "";
     const spot = (led) => ({ left: (cx + led.x) / w, top: y(led.d) });
+    const leds = ledSpots(s);
     return `<div class="hero hero--${s.poles}p${smart ? "" : " hero--std"}" data-led="${esc(s.led || "off")}" data-af="${esc(
       s.ledAf || "off"
     )}" data-gf="${esc(s.ledGf || "off")}">
         <img class="hero-img" alt="" draggable="false" src="${art(`hero-${s.poles}${s.face}-${s.handle || "on"}`)}">
         ${s.rating ? ratingSvg(w, G.hero.h, cx + G.rating.x, G.hero.top + G.rating.d, 0, String(s.rating), G.rating.size) : ""}
-        ${smart && !s.gen1 ? ledHtml("st", spot(G.led)) : ""}
-        ${s.hasAf ? ledHtml("af", spot(G.ledAf)) : ""}
-        ${s.hasGf ? ledHtml("gf", spot(G.ledGf)) : ""}
+        ${smart && leds.st ? ledHtml("st", spot(leds.st)) : ""}
+        ${s.hasAf ? ledHtml("af", spot(leds.af)) : ""}
+        ${s.hasGf ? ledHtml("gf", spot(leds.gf)) : ""}
         ${rocker}
       </div>`;
   }
@@ -2790,6 +2844,14 @@ button { font: inherit; }
   white-space: nowrap;
 }
 .m-amps { color: var(--ink-2); font-size: 0.98em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* Share of the feeding (or main) breaker in use, coloured as the circuit bars. */
+.m-use { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.5em; margin-top: 0.3em; }
+.m-use[hidden] { display: none; }
+.m-usebar { flex: 0 0 5.5em; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--ink-2) 22%, transparent); overflow: hidden; }
+.m-usebar i { display: block; width: 0; height: 100%; background: #2f9a4f; transition: width 0.4s ease; }
+.m-use[data-load="warn"] .m-usebar i { background: #d98d00; }
+.m-use[data-load="high"] .m-usebar i { background: #d5371f; }
+.m-usecap { color: var(--ink-2); font-size: 0.78em; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .m-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(8.4em, 1fr)); gap: 0.5em 0; min-width: 0; }
 .m-cell {
   all: unset;

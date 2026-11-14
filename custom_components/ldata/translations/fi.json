@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Alakeskukset",
-                        "description": "Jos sähkökeskusta syötetään toisen sähkökeskuksen johdonsuojasta, valitse kyseinen johdonsuoja keskuksen nimen kohdalta. Johdonsuoja näyttää sen jälkeen alakeskuksen reaaliaikaisen kuorman, ja siitä pääsee alakeskukseen."
+                        "description": "Jos sähkökeskusta syötetään toisen sähkökeskuksen johdonsuojasta, valitse kyseinen johdonsuoja keskuksen nimen kohdalta. Johdonsuoja näyttää sen jälkeen alakeskuksen reaaliaikaisen kuorman, ja siitä pääsee alakeskukseen. Jos johdonsuoja ei ole älyjohdonsuoja, anna sen koko alla olevaan kenttään, joka päättyy (A), jotta kortti voi näyttää, kuinka suuren osan siitä alakeskus käyttää."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Laiteohjelmisto on ajan tasalla",
                 "main": "Pääkytkin",
                 "main_breaker": "Pääkatkaisija",
-                "main_breaker_dead": "Pääkatkaisija (ei jännitettä kummassakaan vaiheessa)"
+                "main_breaker_dead": "Pääkatkaisija (ei jännitettä kummassakaan vaiheessa)",
+                "of_rating": "{pct} % / {amps} A",
+                "busier_leg": "{amps} A kuormitetummassa vaiheessa"
             },
             "label": {
                 "circuit": "Piiri {position}",

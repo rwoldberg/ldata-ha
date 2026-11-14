@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Subcuadros",
-                        "description": "Si un cuadro eléctrico se alimenta desde un magnetotérmico de otro cuadro, elige ese magnetotérmico junto a su nombre. Ese magnetotérmico mostrará entonces la carga en tiempo real del subcuadro y permitirá ir a él."
+                        "description": "Si un cuadro eléctrico se alimenta desde un magnetotérmico de otro cuadro, elige ese magnetotérmico junto a su nombre. Ese magnetotérmico mostrará entonces la carga en tiempo real del subcuadro y permitirá ir a él. Si ese magnetotérmico no es inteligente, escribe su calibre en el campo terminado en (A) de debajo, para que la tarjeta muestre cuánto de él usa el subcuadro."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware actualizado",
                 "main": "General",
                 "main_breaker": "Interruptor general",
-                "main_breaker_dead": "Interruptor general (sin tensión en ninguna fase)"
+                "main_breaker_dead": "Interruptor general (sin tensión en ninguna fase)",
+                "of_rating": "{pct} % de {amps} A",
+                "busier_leg": "{amps} A en la fase más cargada"
             },
             "label": {
                 "circuit": "Circuito {position}",

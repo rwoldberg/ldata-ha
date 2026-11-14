@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Subpaneles",
-                        "description": "Si un centro de carga se alimenta desde un interruptor de otro centro de carga, elija ese interruptor junto a su nombre. Ese interruptor mostrará entonces la carga en tiempo real del subpanel y permitirá ir a él."
+                        "description": "Si un centro de carga se alimenta desde un interruptor de otro centro de carga, elija ese interruptor junto a su nombre. Ese interruptor mostrará entonces la carga en tiempo real del subpanel y permitirá ir a él. Si ese interruptor no es inteligente, escriba su capacidad en el campo terminado en (A) que está debajo, para que la tarjeta muestre cuánto de él usa el subpanel."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware actualizado",
                 "main": "Principal",
                 "main_breaker": "Interruptor principal",
-                "main_breaker_dead": "Interruptor principal (sin voltaje en ninguna fase)"
+                "main_breaker_dead": "Interruptor principal (sin voltaje en ninguna fase)",
+                "of_rating": "{pct} % de {amps} A",
+                "busier_leg": "{amps} A en la fase más cargada"
             },
             "label": {
                 "circuit": "Circuito {position}",

@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Quadros parciais",
-                        "description": "Se um quadro elétrico for alimentado por um disjuntor de outro quadro, escolha esse disjuntor junto ao nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro parcial e dá acesso a ele."
+                        "description": "Se um quadro elétrico for alimentado por um disjuntor de outro quadro, escolha esse disjuntor junto ao nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro parcial e dá acesso a ele. Se esse disjuntor não for inteligente, indique o calibre no campo terminado em (A) por baixo, para que o cartão mostre quanto dele o quadro parcial usa."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmware atualizado",
                 "main": "Geral",
                 "main_breaker": "Disjuntor geral",
-                "main_breaker_dead": "Disjuntor geral (sem tensão em nenhuma das fases)"
+                "main_breaker_dead": "Disjuntor geral (sem tensão em nenhuma das fases)",
+                "of_rating": "{pct}% de {amps} A",
+                "busier_leg": "{amps} A na fase mais carregada"
             },
             "label": {
                 "circuit": "Circuito {position}",

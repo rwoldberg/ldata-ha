@@ -79,7 +79,7 @@
         "sections": {
           "sub_panels": {
             "name": "Sub-panels",
-            "description": "If a load center is fed from a breaker in another one, choose that breaker next to its name. That breaker then shows the sub-panel's live load and leads to the sub-panel."
+            "description": "If a load center is fed from a breaker in another one, choose that breaker next to its name. That breaker then shows the sub-panel's live load and leads to the sub-panel. If that breaker isn't a smart breaker, enter its size in the field ending in (A) below it, so the card can show how much of it the sub-panel uses."
           }
         }
       }
@@ -210,7 +210,9 @@
         "update_current": "Firmware up to date",
         "main": "Main",
         "main_breaker": "Main breaker",
-        "main_breaker_dead": "Main breaker (no voltage on either leg)"
+        "main_breaker_dead": "Main breaker (no voltage on either leg)",
+        "of_rating": "{pct}% of {amps} A",
+        "busier_leg": "{amps} A on the busier leg"
       },
       "label": {
         "circuit": "Circuit {position}",

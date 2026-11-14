@@ -82,10 +82,17 @@ def test_card_and_model_agree_on_where_the_leds_are() -> None:
 
     assert modelled is not None
     off, gf, af = (float(value) for value in modelled.groups())
+    across = re.search(r"LED_X = \((-?[0-9.]+), (-?[0-9.]+)\)", scene)
+    assert across is not None
+    centre = (float(across.group(1)) + float(across.group(2))) / 2
     for name, expected in (("led", off), ("ledGf", gf), ("ledAf", af)):
-        placed = re.search(rf"\b{name}: \{{ d: ([0-9.]+), x: -0\.033 \}}", CARD)
+        placed = re.search(rf"\b{name}: \{{ d: ([0-9.]+), x: (-?[0-9.]+) \}}", CARD)
         assert placed is not None, name
         assert float(placed.group(1)) == expected, name
+        assert abs(float(placed.group(2)) - centre) < 1e-9, name
+    # A Gen 1 breaker's LEDs are at the same places, in a strip centred on the seam.
+    assert "x = cx + side * STRIP_W" in scene
+    assert re.search(r"\bgen1LedX: 0,", CARD)
 
 
 def test_art_rev_matches_the_shipped_images() -> None:

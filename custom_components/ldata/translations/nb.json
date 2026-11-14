@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Underfordelinger",
-                        "description": "Hvis et sikringsskap forsynes fra en automatsikring i et annet sikringsskap, velger du den automatsikringen ved siden av navnet. Automatsikringen viser deretter underfordelingens gjeldende belastning og fører videre til underfordelingen."
+                        "description": "Hvis et sikringsskap forsynes fra en automatsikring i et annet sikringsskap, velger du den automatsikringen ved siden av navnet. Automatsikringen viser deretter underfordelingens gjeldende belastning og fører videre til underfordelingen. Hvis automatsikringen ikke er en smart automatsikring, angir du størrelsen i feltet som slutter på (A), under den, slik at kortet kan vise hvor mye av den underfordelingen bruker."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Fastvaren er oppdatert",
                 "main": "Hoved",
                 "main_breaker": "Hovedsikring",
-                "main_breaker_dead": "Hovedsikring (ingen spenning på noen av fasene)"
+                "main_breaker_dead": "Hovedsikring (ingen spenning på noen av fasene)",
+                "of_rating": "{pct} % av {amps} A",
+                "busier_leg": "{amps} A på den mest belastede fasen"
             },
             "label": {
                 "circuit": "Kurs {position}",

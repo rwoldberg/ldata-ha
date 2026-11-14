@@ -79,7 +79,7 @@
                 "sections": {
                     "sub_panels": {
                         "name": "Undercentraler",
-                        "description": "Om en elcentral matas från en dvärgbrytare i en annan elcentral väljer du den dvärgbrytaren bredvid centralens namn. Dvärgbrytaren visar sedan undercentralens aktuella belastning och leder vidare till undercentralen."
+                        "description": "Om en elcentral matas från en dvärgbrytare i en annan elcentral väljer du den dvärgbrytaren bredvid centralens namn. Dvärgbrytaren visar sedan undercentralens aktuella belastning och leder vidare till undercentralen. Om dvärgbrytaren inte är en smart brytare anger du dess storlek i fältet som slutar på (A) under den, så att kortet kan visa hur mycket av den undercentralen använder."
                     }
                 }
             }
@@ -210,7 +210,9 @@
                 "update_current": "Firmwaren är uppdaterad",
                 "main": "Huvud",
                 "main_breaker": "Huvudbrytare",
-                "main_breaker_dead": "Huvudbrytare (ingen spänning på någon av faserna)"
+                "main_breaker_dead": "Huvudbrytare (ingen spänning på någon av faserna)",
+                "of_rating": "{pct} % av {amps} A",
+                "busier_leg": "{amps} A på den mest belastade fasen"
             },
             "label": {
                 "circuit": "Grupp {position}",

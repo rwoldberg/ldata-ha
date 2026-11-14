@@ -5,18 +5,24 @@ that one of them is a sub-panel fed from a breaker in another. The user says
 so in the integration's options (see OptionsFlow in config_flow.py), where it
 is kept as
 
-    options["sub_panels"] = {"<sub-panel id>": {"panel": "<feeding panel id>", "position": 38}}
+    options["sub_panels"] = {"<sub-panel id>": {"panel": "<feeding panel id>", "position": 38, "rating": 100}}
+
+"rating" is optional: the size of the feeding breaker in amps, which the user
+gives when that breaker isn't a smart one (Leviton knows a smart breaker's).
 
 A load center has one feed at most. The link is used in two places:
 
 - The feeding panel's Cloud Connected entity lists its breakers that feed
-  another load center (binary_sensor.py). The panel card reads it there, so
-  every card shows the link, on a dashboard and on the sidebar page alike.
+  another load center, and the sub-panel's says what feeds it
+  (binary_sensor.py). The panel card reads them there, so every card shows
+  the link, and how much of its feeder a sub-panel uses, on a dashboard and on
+  the sidebar page alike.
 - The sidebar page puts a sub-panel right after the load center that feeds
   it (sidebar.py).
 """
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
@@ -69,6 +75,57 @@ def sub_panel_feeds(options: Mapping[str, Any]) -> dict[str, tuple[str, int]]:
     for sub_id in looped(feeds):
         feeds.pop(sub_id)
     return feeds
+
+
+def amps(value: Any) -> float | None:
+    """Return a breaker size in amps, or None for anything that isn't one."""
+    if isinstance(value, bool):
+        return None
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return None
+    return size if math.isfinite(size) and size > 0 else None
+
+
+def feed_ratings(options: Mapping[str, Any]) -> dict[str, float]:
+    """Return {sub-panel id: amps} for the feeds whose breaker size the user gave."""
+    raw = options.get(SUB_PANELS)
+    feeds = sub_panel_feeds(options)
+    sizes: dict[str, float] = {}
+    if isinstance(raw, Mapping):
+        for sub_id, feed in raw.items():
+            if sub_id in feeds and isinstance(feed, Mapping):
+                size = amps(feed.get("rating"))
+                if size is not None:
+                    sizes[sub_id] = size
+    return sizes
+
+
+def feeder_rating(options: Mapping[str, Any], data: Any, sub_id: str) -> float | None:
+    """Return the size in amps of the breaker that feeds a sub-panel.
+
+    The size the user gave wins; otherwise Leviton's rating of the breaker,
+    which only a smart breaker has.
+    """
+    given = feed_ratings(options).get(sub_id)
+    if given is not None:
+        return given
+    feed = sub_panel_feeds(options).get(sub_id)
+    if feed is None or not isinstance(data, Mapping):
+        return None
+    panel_id, position = feed
+    breakers = data.get("breakers")
+    for breaker in breakers.values() if isinstance(breakers, Mapping) else ():
+        if not isinstance(breaker, Mapping) or breaker.get("panel_id") != panel_id:
+            continue
+        try:
+            here = int(breaker.get("position"))
+        except (TypeError, ValueError):
+            continue
+        if here == position:
+            return amps(breaker.get("rating"))
+    return None
 
 
 def feeds_of(options: Mapping[str, Any], panel_id: str) -> list[tuple[int, str]]:
