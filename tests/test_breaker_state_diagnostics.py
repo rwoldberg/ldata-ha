@@ -197,3 +197,40 @@ def test_state_sensor_uses_coordinator_lifecycle_and_clears_missing_breaker() ->
     entity._handle_coordinator_update()
     assert entity.native_value is None
     assert all(value is None for value in entity.extra_state_attributes.values())
+
+
+def test_trip_cause_and_protection_reach_the_panel_card() -> None:
+    """The card draws a breaker's AF/GF LEDs from two things it is given.
+
+    The catalog number says which protection the breaker has (LB120-GST is a
+    GFCI), and Leviton's own state name says what tripped it. Both have to
+    arrive unchanged, and a trip must never read as "on".
+    """
+    from custom_components.ldata.binary_sensor import LDATABinarySensor
+    from custom_components.ldata.ldata_base_entity import is_breaker_on
+
+    payload = {
+        **_breaker_payload(),
+        "model": "LB120-GST",
+        "poles": 1,
+        "currentState": "GFCIFault",
+        "currentState2": "",
+    }
+    panel = {
+        "id": "panel-test",
+        "name": "Test Panel",
+        "updateVersion": "2.1.0",
+        "residentialBreakers": [payload],
+    }
+
+    breaker = _service().parse_panels([panel])["breakers"]["breaker-test"]
+
+    assert breaker["model"] == "LB120-GST"
+    assert breaker["state"] == "GFCIFault"
+    assert is_breaker_on(breaker) is False
+
+    state = sensor.LDATABreakerStateSensor(FakeCoordinator(breaker), breaker)
+    assert state.native_value == "GFCIFault"
+
+    status = LDATABinarySensor(FakeCoordinator(breaker), breaker)
+    assert status.extra_state_attributes["model"] == "LB120-GST"

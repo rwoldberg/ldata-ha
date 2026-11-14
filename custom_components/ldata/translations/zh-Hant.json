@@ -164,6 +164,21 @@
                 "over_voltage": "過電壓",
                 "under_voltage": "低電壓"
             },
+            "trip": {
+                "ground_fault": "接地故障",
+                "arc_fault": "電弧故障",
+                "parallel_arc_fault": "並聯電弧故障",
+                "miswire": "中性線接線錯誤",
+                "overload": "過載",
+                "short_circuit": "短路",
+                "over_current": "過電流"
+            },
+            "protection": {
+                "afci": "電弧故障（AFCI）",
+                "gfci": "接地故障（GFCI）",
+                "dual": "電弧故障與接地故障（AFCI/GFCI）",
+                "gfpe": "接地故障，設備保護（GFPE）"
+            },
             "raw": {
                 "manualon": "手動開啟",
                 "manualoff": "手動關閉",
@@ -254,6 +269,7 @@
                 "lifetime": "累計",
                 "lifetime_import": "累計輸入",
                 "protection": "保護",
+                "protection_type": "保護類型",
                 "operational_state": "運作狀態",
                 "diagnostics": "診斷",
                 "breaker_state": "斷路器狀態",

@@ -164,6 +164,21 @@
                 "over_voltage": "Перенапряжение",
                 "under_voltage": "Низкое напряжение"
             },
+            "trip": {
+                "ground_fault": "Утечка на землю",
+                "arc_fault": "Дуговой пробой",
+                "parallel_arc_fault": "Параллельная дуга",
+                "miswire": "Ошибка нейтрали",
+                "overload": "Перегрузка",
+                "short_circuit": "Короткое замыкание",
+                "over_current": "Перегрузка по току"
+            },
+            "protection": {
+                "afci": "Дуговой пробой (AFCI)",
+                "gfci": "Утечка на землю (GFCI)",
+                "dual": "Дуговой пробой и утечка на землю (AFCI/GFCI)",
+                "gfpe": "Утечка на землю, защита оборудования (GFPE)"
+            },
             "raw": {
                 "manualon": "Включён вручную",
                 "manualoff": "Выключен вручную",
@@ -254,6 +269,7 @@
                 "lifetime": "За всё время",
                 "lifetime_import": "За всё время, импорт",
                 "protection": "Защита",
+                "protection_type": "Тип защиты",
                 "operational_state": "Рабочее состояние",
                 "diagnostics": "Диагностика",
                 "breaker_state": "Состояние автомата",

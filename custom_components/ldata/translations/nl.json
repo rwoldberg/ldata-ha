@@ -164,6 +164,21 @@
                 "over_voltage": "Overspanning",
                 "under_voltage": "Onderspanning"
             },
+            "trip": {
+                "ground_fault": "Aardlek",
+                "arc_fault": "Vlamboogfout",
+                "parallel_arc_fault": "Parallelle vlamboog",
+                "miswire": "Fout in nuldraad",
+                "overload": "Overbelasting",
+                "short_circuit": "Kortsluiting",
+                "over_current": "Overstroom"
+            },
+            "protection": {
+                "afci": "Vlamboogfout (AFCI)",
+                "gfci": "Aardlek (GFCI)",
+                "dual": "Vlamboogfout en aardlek (AFCI/GFCI)",
+                "gfpe": "Aardlek, beveiliging van apparatuur (GFPE)"
+            },
             "raw": {
                 "manualon": "Aan (handmatig)",
                 "manualoff": "Uit (handmatig)",
@@ -254,6 +269,7 @@
                 "lifetime": "Totaal",
                 "lifetime_import": "Totaal, teruglevering",
                 "protection": "Beveiliging",
+                "protection_type": "Type beveiliging",
                 "operational_state": "Bedrijfsstatus",
                 "diagnostics": "Diagnose",
                 "breaker_state": "Status van de automaat",

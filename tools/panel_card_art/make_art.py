@@ -1,6 +1,7 @@
 """Render the panel card's artwork and install it into the integration.
 
     python3 tools/panel_card_art/make_art.py            # render everything, then build
+    python3 tools/panel_card_art/make_art.py --missing  # render only the pieces not rendered yet, then build
     python3 tools/panel_card_art/make_art.py --build    # rebuild the WebP files from existing renders
 
 Needs Blender (4.2 or newer; set BLENDER to its executable if it isn't found),
@@ -23,6 +24,20 @@ RENDERS = os.environ.get("LD_RENDERS") or os.path.join(HERE, "renders")
 WWW = os.path.join(ROOT, "custom_components", "ldata", "www")
 CARD = os.path.join(WWW, "ldata-panel-card.js")
 STATES = ("on", "off", "trip")
+# Smart breakers by protection: the letter used in file names, and the LEDs
+# the face carries besides ON/OFF ("a" = AF, "g" = GF). Leviton makes AFCI and
+# dual-function breakers as 1-pole units only.
+SMART = (("s", ""), ("a", "a"), ("g", "g"), ("d", "ag"))
+TWO_POLE = ("s", "g")
+
+
+def faces():
+    """Every breaker face that is drawn, as (poles, kind, code, protect)."""
+    for poles in (1, 2):
+        for code, protect in SMART:
+            if poles == 1 or code in TWO_POLE:
+                yield poles, "smart", code, protect
+        yield poles, "std", "t", ""
 
 
 def blender():
@@ -39,10 +54,9 @@ def blender():
 def jobs():
     out = []
     for column, side in ((-1, "L"), (1, "R")):
-        for poles in (1, 2):
-            for kind, code in (("smart", "s"), ("std", "t")):
-                for state in STATES:
-                    out.append({"job": "tile", "what": "breaker", "column": column, "poles": poles, "kind": kind, "state": state, "name": f"bk-{side}{poles}{code}-{state}"})
+        for poles, kind, code, protect in faces():
+            for state in STATES:
+                out.append({"job": "tile", "what": "breaker", "column": column, "poles": poles, "kind": kind, "protect": protect, "state": state, "name": f"bk-{side}{poles}{code}-{state}"})
         out.append({"job": "tile", "what": "filler", "column": column, "name": f"fill-{side}"})
         out.append({"job": "tile", "what": "cap_top", "column": column, "name": f"cap-{side}-top"})
         out.append({"job": "tile", "what": "cap_bottom", "column": column, "name": f"cap-{side}-bot"})
@@ -52,20 +66,20 @@ def jobs():
     out.append({"job": "screw", "angle": -62, "name": "screw-b"})
     for state in ("on", "off"):
         out.append({"job": "main", "state": state, "name": f"main-{state}"})
-    for poles in (1, 2):
-        for kind, code in (("smart", "s"), ("std", "t")):
-            for state in STATES:
-                out.append({"job": "hero", "poles": poles, "kind": kind, "state": state, "ppi": 280, "samples": 160, "name": f"hero-{poles}{code}-{state}"})
+    for poles, kind, code, protect in faces():
+        for state in STATES:
+            out.append({"job": "hero", "poles": poles, "kind": kind, "protect": protect, "state": state, "ppi": 280, "samples": 160, "name": f"hero-{poles}{code}-{state}"})
     for job in out:
         job["out"] = os.path.join(RENDERS, job.pop("name") + ".png")
     return out
 
 
-def render():
+def render(missing_only=False):
     os.makedirs(RENDERS, exist_ok=True)
     job_file = os.path.join(RENDERS, "jobs.json")
+    todo = [job for job in jobs() if not (missing_only and os.path.exists(job["out"]))]
     with open(job_file, "w") as fh:
-        json.dump(jobs(), fh, indent=1)
+        json.dump(todo, fh, indent=1)
     scene = os.path.join(HERE, "ld_scene.py")
     base = [blender(), "-b", "--factory-startup", "--python", scene, "--"]
     subprocess.run(base + ["--geometry", os.path.join(RENDERS, "geometry.json")], check=True, stdout=subprocess.DEVNULL)
@@ -93,5 +107,5 @@ def build():
 
 if __name__ == "__main__":
     if "--build" not in sys.argv:
-        render()
+        render(missing_only="--missing" in sys.argv)
     build()

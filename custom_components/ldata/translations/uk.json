@@ -164,6 +164,21 @@
                 "over_voltage": "Перенапруга",
                 "under_voltage": "Низька напруга"
             },
+            "trip": {
+                "ground_fault": "Витік на землю",
+                "arc_fault": "Дуговий пробій",
+                "parallel_arc_fault": "Паралельна дуга",
+                "miswire": "Помилка нейтралі",
+                "overload": "Перевантаження",
+                "short_circuit": "Коротке замикання",
+                "over_current": "Перевищення струму"
+            },
+            "protection": {
+                "afci": "Дуговий пробій (AFCI)",
+                "gfci": "Витік на землю (GFCI)",
+                "dual": "Дуговий пробій і витік на землю (AFCI/GFCI)",
+                "gfpe": "Витік на землю, захист обладнання (GFPE)"
+            },
             "raw": {
                 "manualon": "Увімкнено вручну",
                 "manualoff": "Вимкнено вручну",
@@ -254,6 +269,7 @@
                 "lifetime": "За весь час",
                 "lifetime_import": "За весь час, імпорт",
                 "protection": "Захист",
+                "protection_type": "Тип захисту",
                 "operational_state": "Робочий стан",
                 "diagnostics": "Діагностика",
                 "breaker_state": "Стан автомата",

@@ -164,6 +164,21 @@
                 "over_voltage": "Overspenning",
                 "under_voltage": "Underspenning"
             },
+            "trip": {
+                "ground_fault": "Jordfeil",
+                "arc_fault": "Lysbuefeil",
+                "parallel_arc_fault": "Parallell lysbuefeil",
+                "miswire": "Feil på nøytralleder",
+                "overload": "Overbelastning",
+                "short_circuit": "Kortslutning",
+                "over_current": "Overstrøm"
+            },
+            "protection": {
+                "afci": "Lysbuefeil (AFCI)",
+                "gfci": "Jordfeil (GFCI)",
+                "dual": "Lysbuefeil og jordfeil (AFCI/GFCI)",
+                "gfpe": "Jordfeil, vern av utstyr (GFPE)"
+            },
             "raw": {
                 "manualon": "Manuelt på",
                 "manualoff": "Manuelt av",
@@ -254,6 +269,7 @@
                 "lifetime": "Totalt",
                 "lifetime_import": "Totalt, import",
                 "protection": "Vern",
+                "protection_type": "Verntype",
                 "operational_state": "Driftstilstand",
                 "diagnostics": "Diagnostikk",
                 "breaker_state": "Automatsikringens tilstand",

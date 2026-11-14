@@ -164,6 +164,21 @@
                 "over_voltage": "Ylijännite",
                 "under_voltage": "Alijännite"
             },
+            "trip": {
+                "ground_fault": "Maasulku",
+                "arc_fault": "Valokaarivika",
+                "parallel_arc_fault": "Rinnakkaisvalokaari",
+                "miswire": "Nollajohdinvika",
+                "overload": "Ylikuormitus",
+                "short_circuit": "Oikosulku",
+                "over_current": "Ylivirta"
+            },
+            "protection": {
+                "afci": "Valokaarivika (AFCI)",
+                "gfci": "Maasulku (GFCI)",
+                "dual": "Valokaarivika ja maasulku (AFCI/GFCI)",
+                "gfpe": "Maasulku, laitteiden suojaus (GFPE)"
+            },
             "raw": {
                 "manualon": "Päällä (käsin)",
                 "manualoff": "Pois (käsin)",
@@ -254,6 +269,7 @@
                 "lifetime": "Yhteensä",
                 "lifetime_import": "Yhteensä, tuonti",
                 "protection": "Suojaus",
+                "protection_type": "Suojaustyyppi",
                 "operational_state": "Toimintatila",
                 "diagnostics": "Diagnostiikka",
                 "breaker_state": "Johdonsuojan tila",

@@ -240,6 +240,12 @@ def test_card_and_translations_use_the_same_keys() -> None:
         used |= {f"card.detail.{key}" for key in re.findall(r'"([a-z0-9_]+)"', group)}
     # keys built at run time
     used |= {key for key in known if key.startswith("card.raw.")}  # Leviton's state names
+    # card.trip.<cause> and card.protection.<kind>, from the card's own tables
+    causes = re.search(r"const TRIP_CAUSES = \[(.*?)\n\];", _card_source(), re.DOTALL)
+    kinds = re.search(r"const PROTECTION = \{(.*?)\n\};", _card_source(), re.DOTALL)
+    assert causes and kinds, "fault-protection tables not found in the card"
+    used |= {f"card.trip.{key}" for key in re.findall(r'\[/[^\n]*?/i, "([a-z_]+)"', causes.group(1))}
+    used |= {f"card.protection.{key}" for key in re.findall(r'key: "([a-z_]+)"', kinds.group(1))}
     used |= {f"card.label.{action}" for action in ("show_details", "open_sub_panel", "open_sub_panel_dashboard")}
 
     assert sorted(used - known) == [], "the card asks for strings that en.json doesn't have"

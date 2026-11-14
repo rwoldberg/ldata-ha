@@ -164,6 +164,21 @@
                 "over_voltage": "Surtension",
                 "under_voltage": "Sous-tension"
             },
+            "trip": {
+                "ground_fault": "Défaut à la terre",
+                "arc_fault": "Défaut d'arc",
+                "parallel_arc_fault": "Arc parallèle",
+                "miswire": "Neutre mal raccordé",
+                "overload": "Surcharge",
+                "short_circuit": "Court-circuit",
+                "over_current": "Surintensité"
+            },
+            "protection": {
+                "afci": "Défaut d'arc (AFCI)",
+                "gfci": "Défaut à la terre (GFCI)",
+                "dual": "Défaut d'arc et défaut à la terre (AFCI/GFCI)",
+                "gfpe": "Défaut à la terre, protection des équipements (GFPE)"
+            },
             "raw": {
                 "manualon": "Allumé manuellement",
                 "manualoff": "Éteint manuellement",
@@ -254,6 +269,7 @@
                 "lifetime": "Total",
                 "lifetime_import": "Importée au total",
                 "protection": "Protection",
+                "protection_type": "Type de protection",
                 "operational_state": "État de fonctionnement",
                 "diagnostics": "Diagnostic",
                 "breaker_state": "État du disjoncteur",

@@ -13,6 +13,10 @@
  *   green window, "OFF" LED lit ..... switched off remotely
  *   white window, handle OFF ........ switched off by hand
  *   red window, handle centred ...... tripped
+ *   "AF" / "GF" LED lit ............. what tripped it: an arc fault or a
+ *                                     ground fault (AFCI, GFCI and dual
+ *                                     function breakers, which are drawn
+ *                                     with those LEDs and an OFF/TEST handle)
  *
  *  - Click a breaker's rocker to switch it (asks for confirmation first).
  *  - Click anywhere else on a breaker, or its label, to open its detail sheet
@@ -63,7 +67,7 @@ const CARD_VERSION = "3.1.0";
 // tools/panel_card_art. ART_REV is the content hash of that folder (written
 // by build_assets.py); it is part of every image URL, so browsers fetch new
 // artwork after an upgrade instead of serving a cached copy.
-const ART_REV = "634f3d87e9";
+const ART_REV = "514ab4f6d0";
 const ART_SERVED = new URL("/ldata_static/img/", location.href).href; // always served by the integration
 
 // Where this file was loaded from. `import.meta.url` would say, but it is a
@@ -97,7 +101,9 @@ const G = {
   frameOut: 0.78, // door surround, from the dead front out to flat cover
   coverEdge: 0.32, // chamfered edge of the cover
   cav: [0.374, 1.441], // the rocker, measured from the logo end of the face
-  led: { d: 2.684, x: -0.033 }, // status LED (centre)
+  led: { d: 2.684, x: -0.033 }, // ON/OFF status LED (centre)
+  ledAf: { d: 2.158, x: -0.033 }, // "AF" and "GF" LEDs of a protected breaker
+  ledGf: { d: 2.422, x: -0.033 },
   rating: { d: 1.775, x: 0.19, size: 0.106 },
   hero: { w1: 1.14, w2: 2.14, h: 3.796, top: 0.52 }, // upright product shot
   main: { w: 3.6, h: 2.7, scale: 1.25, rating: [1.372, 2.212] }, // main breaker in its opening
@@ -222,6 +228,51 @@ const prettyRaw = (v) => {
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
 
+// ── Fault protection ─────────────────────────────────────────────────────
+// What a smart breaker protects against besides overloads and short
+// circuits, read from its catalog number. Leviton reports LB120-0ST for a
+// standard one; the character in that place says the rest: A = AFCI,
+// G = GFCI, D = dual function (AFCI and GFCI), E = GFPE. `face` is the
+// artwork drawn for it and `af` / `gf` the cause LEDs that face carries.
+const PROTECTION = {
+  A: { key: "afci", short: "AFCI", face: "a", af: true, gf: false },
+  G: { key: "gfci", short: "GFCI", face: "g", af: false, gf: true },
+  D: { key: "dual", short: "AFCI/GFCI", face: "d", af: true, gf: true },
+  E: { key: "gfpe", short: "GFPE", face: "g", af: false, gf: true },
+};
+// Leviton makes AFCI and dual function breakers as 1-pole units only, so
+// those are the faces there is artwork for.
+const FACES = { 1: "sagd", 2: "sg" };
+
+function protectionOf(model) {
+  const found = /^LB\d{3}-?([A-Z0-9])S/i.exec(String(model || "").trim());
+  return (found && PROTECTION[found[1].toUpperCase()]) || null;
+}
+
+// Why a breaker tripped, from Leviton's state names (GFCIFault,
+// AFCISerialArc15AFault, AFCIParallelFault, AFCIMiswire, OverloadTrip,
+// ShortCircuitTrip, OverCurrentTripPhase1, ...). The last two columns are
+// what the "AF" and "GF" LEDs do for it in Leviton's handle and LED table:
+// solid, blinking once a second, or blinking every three seconds. The first
+// match wins, so the narrower names come first.
+const TRIP_CAUSES = [
+  [/miswire/i, "miswire", "off", "slow"],
+  [/parallel/i, "parallel_arc_fault", "blink", "off"],
+  [/afci|arc/i, "arc_fault", "on", "off"],
+  [/gfci|gfpe|ground/i, "ground_fault", "off", "on"],
+  [/overload/i, "overload", "off", "off"],
+  [/short/i, "short_circuit", "off", "off"],
+  [/over.?current/i, "over_current", "off", "off"],
+];
+
+function tripCause(value) {
+  const text = value == null ? "" : String(value);
+  for (const [pattern, key, af, gf] of TRIP_CAUSES) if (pattern.test(text)) return { key, af, gf };
+  return null;
+}
+
+const isTripState = (value) => /trip/i.test(value == null ? "" : String(value)) || !!tripCause(value);
+
 // Material Design Icons (Apache 2.0) — inlined so the card has no runtime
 // dependency on HA's icon set being loaded.
 const ICON = {
@@ -250,9 +301,15 @@ function tileSpots(side, poles) {
   return {
     rocker: { left: Math.min(a0, a1), width: Math.abs(a1 - a0), top: (pole - 0.5) / poles, height: 1 / poles },
     led: { left: along(G.led.d), top: across(G.led.x) },
+    ledAf: { left: along(G.ledAf.d), top: across(G.ledAf.x) },
+    ledGf: { left: along(G.ledGf.d), top: across(G.ledGf.x) },
     rating: { x: along(G.rating.d) * G.tileW, y: across(G.rating.x) * poles, turn: left ? 90 : -90 },
   };
 }
+
+// One of a breaker's LEDs, at a spot given as fractions of its box. "st" is
+// the ON/OFF status LED; "af" and "gf" show why a protected breaker tripped.
+const ledHtml = (which, spot) => `<i class="led led--${which}" style="left:${pct(spot.left)};top:${pct(spot.top)}"></i>`;
 
 // Printed amp rating. SVG, so it scales with the artwork instead of being
 // clamped by the browser's minimum font size.
@@ -303,6 +360,21 @@ const EN = {
       "over_current": "Over current",
       "over_voltage": "Over voltage",
       "under_voltage": "Under voltage"
+    },
+    "trip": {
+      "ground_fault": "Ground fault",
+      "arc_fault": "Arc fault",
+      "parallel_arc_fault": "Parallel arc fault",
+      "miswire": "Miswired neutral",
+      "overload": "Overload",
+      "short_circuit": "Short circuit",
+      "over_current": "Over current"
+    },
+    "protection": {
+      "afci": "Arc fault (AFCI)",
+      "gfci": "Ground fault (GFCI)",
+      "dual": "Arc fault and ground fault (AFCI/GFCI)",
+      "gfpe": "Ground fault, equipment protection (GFPE)"
     },
     "raw": {
       "manualon": "Manual on",
@@ -394,6 +466,7 @@ const EN = {
       "lifetime": "Lifetime",
       "lifetime_import": "Lifetime, import",
       "protection": "Protection",
+      "protection_type": "Protection type",
       "operational_state": "Operational state",
       "diagnostics": "Diagnostics",
       "breaker_state": "Breaker state",
@@ -789,7 +862,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     for (const p of m.placed) {
       const s = p.slot;
       if (s.kind === "empty") continue;
-      const base = `bk-${p.column === 1 ? "L" : "R"}${s.poles}${s.kind === "smart" ? "s" : "t"}`;
+      const base = `bk-${p.column === 1 ? "L" : "R"}${s.poles}${s.face}`;
       for (const state of s.kind === "smart" ? ["on", "off", "trip"] : ["on"]) want.add(`${base}-${state}`);
     }
     const run = () => {
@@ -906,7 +979,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   _raw(value) {
     if (value == null || value === "") return "—";
     const key = `card.raw.${String(value).toLowerCase().replace(/[^a-z0-9]/g, "")}`;
-    return key in EN_FLAT ? this._t(key) : prettyRaw(value);
+    if (key in EN_FLAT) return this._t(key);
+    const cause = tripCause(value);
+    return cause ? this._t(`card.trip.${cause.key}`) : prettyRaw(value);
   }
 
   // "Circuit 7", or "Circuits 7 and 9" for a 2-pole breaker.
@@ -1143,10 +1218,18 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       const position = Number(a.position);
       if (!Number.isFinite(position) || taken.has(position)) continue;
       taken.add(position);
+      const poles = Number(a.poles) === 2 ? 2 : 1;
+      const protection = protectionOf(a.model);
+      // The face to draw: the protected one where there is artwork for it.
+      const face = protection && FACES[poles].includes(protection.face) ? protection.face : "s";
       slots.push({
         kind: "smart",
         position,
-        poles: Number(a.poles) === 2 ? 2 : 1,
+        poles,
+        protection,
+        face,
+        hasAf: face === "a" || face === "d",
+        hasGf: face === "g" || face === "d",
         deviceId: b.deviceId,
         name: b.name || a.friendly_name || this._t("card.name.breaker"),
         rating: numOrNull(a.rating),
@@ -1170,6 +1253,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       const link = linkByPos.get(position) || null;
       slots.push({
         kind: link && link.deviceId ? "link" : "dumb",
+        face: "t",
         position,
         poles: Number(db.poles) === 2 ? 2 : 1,
         name: db.name || this._t("card.name.unmonitored_breaker"),
@@ -1233,6 +1317,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         p.row,
         p.rowSpan,
         p.slot.kind,
+        p.slot.face || "",
         p.slot.position,
         p.slot.poles,
         p.slot.name || "",
@@ -1269,6 +1354,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       s.vis = "unknown";
       s.handle = "on";
       s.led = "off";
+      s.ledAf = "off";
+      s.ledGf = "off";
+      s.cause = null;
       s.alarms = [];
       return;
     }
@@ -1280,7 +1368,10 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const bs = r.breakerState ? st[r.breakerState] : null;
     const bsa = (bs && bs.attributes) || {};
     const raw = bs && bs.state !== "unavailable" && bs.state !== "unknown" ? bs.state : null;
-    const tripped = /trip/i.test(raw || "") || /trip/i.test(bsa.second_pole_state || "");
+    // Leviton names the cause in the state itself ("GFCIFault"), for either
+    // pole of a 2-pole breaker.
+    const tripped = isTripState(raw) || isTripState(bsa.second_pole_state);
+    const cause = tripped ? tripCause(raw) || tripCause(bsa.second_pole_state) : null;
     const remoteOff = bsa.remote_state === "RemoteOFF";
 
     let vis;
@@ -1316,6 +1407,11 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const handleOn = isOn || (remoteOff && raw !== "ManualOFF");
     s.handle = !available ? "off" : tripped ? "trip" : handleOn ? "on" : "off";
     s.led = vis === "pending" || s.blinkOn ? "blink" : vis === "remote-off" ? "on" : "off";
+    // The cause LEDs are fed from the line side: they stay lit after a trip.
+    const lit = available && tripped && cause;
+    s.cause = lit ? cause.key : null;
+    s.ledAf = lit && s.hasAf ? cause.af : "off";
+    s.ledGf = lit && s.hasGf ? cause.gf : "off";
     s.watts = cfg.show_power ? this._num(r.watts) : null;
     s.amps = cfg.show_power ? this._num(r.amps) : null;
 
@@ -1551,12 +1647,14 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       : "";
     return `
       <div class="bkr bkr--${side} bkr--${s.kind}" style="${style}" data-pos="${s.position}" data-code="${col}${s.poles}${
-      smart ? "s" : "t"
+      s.face
     }" data-vis="unknown">
         <img class="sp" alt="" draggable="false">
         <button type="button" class="hit" data-act="open" data-pos="${s.position}" tabindex="-1" aria-hidden="true"></button>
         ${rating}
-        ${smart ? `<i class="led" style="left:${pct(spots.led.left)};top:${pct(spots.led.top)}"></i>` : ""}
+        ${smart ? ledHtml("st", spots.led) : ""}
+        ${s.hasAf ? ledHtml("af", spots.ledAf) : ""}
+        ${s.hasGf ? ledHtml("gf", spots.ledGf) : ""}
         ${rocker}
       </div>`;
   }
@@ -1615,7 +1713,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       case "unavailable":
         return { text: t("card.state.unavailable"), tone: "muted" };
       case "tripped":
-        return { text: alarm ? `${t("card.state.tripped")} · ${alarm}` : t("card.state.tripped"), tone: "bad" };
+        // What tripped it, when the breaker says. The line is short and
+        // already in the alarm colour, so the cause stands in for "Tripped".
+        return { text: [t(s.cause ? `card.trip.${s.cause}` : "card.state.tripped"), alarm].filter(Boolean).join(" · "), tone: "bad" };
       default:
         break;
     }
@@ -1641,6 +1741,8 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     // The picture follows the hardware: handle position and window colour.
     this._set(c, "art", `bk-${el.code}-${s.handle}`, (v) => (el.img.src = art(v)));
     this._set(c, "led", s.led, (v) => (el.tile.dataset.led = v));
+    this._set(c, "ledAf", s.ledAf || "off", (v) => (el.tile.dataset.af = v));
+    this._set(c, "ledGf", s.ledGf || "off", (v) => (el.tile.dataset.gf = v));
     this._set(c, "alarm", alarm ? alarm.join(", ") : "", (v) => el.lbl.toggleAttribute("data-alarm", !!v));
     this._set(c, "sub", `${sub.tone}|${sub.text}`, () => {
       if (sub.html) el.sub.innerHTML = sub.html;
@@ -1673,6 +1775,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       pending: t("card.state.switching"),
       unknown: s.kind === "link" ? t("card.label.feeds_sub_panel") : t("card.state.not_monitored"),
     }[s.vis];
+    const cause = s.cause ? t(`card.trip.${s.cause}`) : null;
     // What a screen reader says for this circuit: name, where, rating, state,
     // then the readings or sub-panel (unless that only repeats the state).
     const extra = sub.tone === "" || sub.tone === "link" ? sub.text : null;
@@ -1681,6 +1784,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       this._where(s),
       s.rating ? t("card.label.amp_rating", { amps: s.rating }) : null,
       stateWord,
+      cause,
       extra !== stateWord ? extra : null,
       alarm ? alarm.join(", ") : null,
     ].filter(Boolean);
@@ -1691,6 +1795,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       el.lbl.title = [
         s.name,
         s.rating ? `${s.rating} A` : null,
+        cause ? `${stateWord} · ${cause}` : null,
         alarm ? alarm.join(", ") : null,
         s.kind !== "link" ? null : s.link.name ? t("card.label.feeds", { name: s.link.name }) : t("card.label.feeds_sub_panel"),
       ]
@@ -2042,10 +2147,15 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
             (G.cav[1] - G.cav[0] + 0.1) / G.hero.h
           )}"></button>`
         : "";
-    return `<div class="hero hero--${s.poles}p${smart ? "" : " hero--std"}" data-led="${esc(s.led || "off")}">
-        <img class="hero-img" alt="" draggable="false" src="${art(`hero-${s.poles}${smart ? "s" : "t"}-${s.handle || "on"}`)}">
+    const spot = (led) => ({ left: (cx + led.x) / w, top: y(led.d) });
+    return `<div class="hero hero--${s.poles}p${smart ? "" : " hero--std"}" data-led="${esc(s.led || "off")}" data-af="${esc(
+      s.ledAf || "off"
+    )}" data-gf="${esc(s.ledGf || "off")}">
+        <img class="hero-img" alt="" draggable="false" src="${art(`hero-${s.poles}${s.face}-${s.handle || "on"}`)}">
         ${s.rating ? ratingSvg(w, G.hero.h, cx + G.rating.x, G.hero.top + G.rating.d, 0, String(s.rating), G.rating.size) : ""}
-        ${smart ? `<i class="led" style="left:${pct((cx + G.led.x) / w)};top:${pct(y(G.led.d))}"></i>` : ""}
+        ${smart ? ledHtml("st", spot(G.led)) : ""}
+        ${s.hasAf ? ledHtml("af", spot(G.ledAf)) : ""}
+        ${s.hasGf ? ledHtml("gf", spot(G.ledGf)) : ""}
         ${rocker}
       </div>`;
   }
@@ -2070,6 +2180,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       s.rating ? `<span class="chip">${esc(s.rating)} A</span>` : "",
       `<span class="chip">${esc(t(s.poles === 2 ? "card.detail.two_pole" : "card.detail.one_pole"))}</span>`,
       leg ? `<span class="chip">${esc(leg)}</span>` : "",
+      s.protection ? `<span class="chip" title="${esc(t(`card.protection.${s.protection.key}`))}">${esc(s.protection.short)}</span>` : "",
       s.model ? `<span class="chip">${esc(s.model)}</span>` : "",
     ].join("");
 
@@ -2190,6 +2301,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       [
         d("protection"),
         [
+          s.protection ? { label: d("protection_type"), eid: r.status, attr: "model", fmt: () => this._t(`card.protection.${s.protection.key}`) } : null,
           { label: this._t("card.alarm.over_current"), eid: r.overCurrent, kind: "problem" },
           { label: this._t("card.alarm.over_voltage"), eid: r.overVoltage, kind: "problem" },
           { label: this._t("card.alarm.under_voltage"), eid: r.underVoltage, kind: "problem" },
@@ -2279,8 +2391,10 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const st = this._hass.states;
     const hero = this._dlgDetail.querySelector(".hero");
     if (hero) {
-      this._set(c, "art", `hero-${s.poles}${s.kind === "smart" ? "s" : "t"}-${s.handle || "on"}`, (v) => (hero.querySelector(".hero-img").src = art(v)));
+      this._set(c, "art", `hero-${s.poles}${s.face}-${s.handle || "on"}`, (v) => (hero.querySelector(".hero-img").src = art(v)));
       this._set(c, "led", s.led || "off", (v) => (hero.dataset.led = v));
+      this._set(c, "ledAf", s.ledAf || "off", (v) => (hero.dataset.af = v));
+      this._set(c, "ledGf", s.ledGf || "off", (v) => (hero.dataset.gf = v));
       const rk = hero.querySelector("button.rk");
       if (rk) {
         this._set(c, "rk", `${s.switchOn}|${s.vis}|${s.switchAvailable}`, () => {
@@ -2304,8 +2418,10 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       }[s.vis] || "card.state.unknown"
     );
     if (els.state) {
-      this._set(c, "state", `${s.vis}|${word}`, () => {
-        els.state.textContent = word;
+      // "Tripped · Ground fault" when the breaker says what tripped it.
+      const chip = s.cause ? `${word} · ${t(`card.trip.${s.cause}`)}` : word;
+      this._set(c, "state", `${s.vis}|${chip}`, () => {
+        els.state.textContent = chip;
         els.state.dataset.vis = s.vis;
       });
     }
@@ -2388,7 +2504,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         tone = stateObj.state === "Normal" ? "good" : "bad";
       } else if (def.kind === "raw") {
         text = this._raw(stateObj.state);
-        tone = /trip/i.test(stateObj.state) ? "bad" : "";
+        tone = isTripState(stateObj.state) ? "bad" : "";
       } else if (def.kind === "onoff") {
         text = stateObj.state === "on" ? t("card.state.on") : stateObj.state === "off" ? t("card.state.off") : this._raw(stateObj.state);
       } else text = this._fmtState(stateObj);
@@ -2747,9 +2863,12 @@ button { font: inherit; }
   opacity: 0;
   pointer-events: none;
 }
-[data-led="on"] > .led { opacity: 1; }
-[data-led="blink"] > .led { animation: ldp-blink 1s steps(1, end) infinite; }
+[data-led="on"] > .led--st, [data-af="on"] > .led--af, [data-gf="on"] > .led--gf { opacity: 1; }
+[data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf { animation: ldp-blink 1s steps(1, end) infinite; }
+/* A miswired neutral: one flash every three seconds. */
+[data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf { animation: ldp-blink-slow 3s steps(1, end) infinite; }
 @keyframes ldp-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes ldp-blink-slow { 0% { opacity: 1; } 17% { opacity: 0; } }
 
 /* Space numbers, printed down the middle of the dead front. */
 .num {
@@ -2868,7 +2987,8 @@ button { font: inherit; }
 :host([narrow]) .m-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 @media (prefers-reduced-motion: reduce) {
-  [data-led="blink"] > .led, .lbl[data-vis="pending"] .lbl-sub { animation: none; opacity: 1; }
+  [data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf,
+  [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf, .lbl[data-vis="pending"] .lbl-sub { animation: none; opacity: 1; }
   .lbl-bar i { transition: none; }
 }
 

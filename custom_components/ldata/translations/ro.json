@@ -164,6 +164,21 @@
                 "over_voltage": "Supratensiune",
                 "under_voltage": "Subtensiune"
             },
+            "trip": {
+                "ground_fault": "Punere la pământ",
+                "arc_fault": "Defect de arc",
+                "parallel_arc_fault": "Arc paralel",
+                "miswire": "Nul conectat greșit",
+                "overload": "Suprasarcină",
+                "short_circuit": "Scurtcircuit",
+                "over_current": "Supracurent"
+            },
+            "protection": {
+                "afci": "Arc electric (AFCI)",
+                "gfci": "Punere la pământ (GFCI)",
+                "dual": "Arc electric și punere la pământ (AFCI/GFCI)",
+                "gfpe": "Punere la pământ, protecția echipamentelor (GFPE)"
+            },
             "raw": {
                 "manualon": "Pornit manual",
                 "manualoff": "Oprit manual",
@@ -254,6 +269,7 @@
                 "lifetime": "Total",
                 "lifetime_import": "Total, import",
                 "protection": "Protecție",
+                "protection_type": "Tip de protecție",
                 "operational_state": "Stare de funcționare",
                 "diagnostics": "Diagnostic",
                 "breaker_state": "Starea disjunctorului",

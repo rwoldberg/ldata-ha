@@ -164,6 +164,21 @@
                 "over_voltage": "过压",
                 "under_voltage": "欠压"
             },
+            "trip": {
+                "ground_fault": "接地故障",
+                "arc_fault": "电弧故障",
+                "parallel_arc_fault": "并联电弧故障",
+                "miswire": "零线接线错误",
+                "overload": "过载",
+                "short_circuit": "短路",
+                "over_current": "过流"
+            },
+            "protection": {
+                "afci": "电弧故障（AFCI）",
+                "gfci": "接地故障（GFCI）",
+                "dual": "电弧故障和接地故障（AFCI/GFCI）",
+                "gfpe": "接地故障，设备保护（GFPE）"
+            },
             "raw": {
                 "manualon": "手动合闸",
                 "manualoff": "手动分闸",
@@ -254,6 +269,7 @@
                 "lifetime": "累计",
                 "lifetime_import": "累计输入",
                 "protection": "保护",
+                "protection_type": "保护类型",
                 "operational_state": "运行状态",
                 "diagnostics": "诊断",
                 "breaker_state": "断路器状态",

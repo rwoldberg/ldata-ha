@@ -164,6 +164,21 @@
                 "over_voltage": "Överspänning",
                 "under_voltage": "Underspänning"
             },
+            "trip": {
+                "ground_fault": "Jordfel",
+                "arc_fault": "Ljusbågsfel",
+                "parallel_arc_fault": "Parallellt ljusbågsfel",
+                "miswire": "Fel på neutralledare",
+                "overload": "Överbelastning",
+                "short_circuit": "Kortslutning",
+                "over_current": "Överström"
+            },
+            "protection": {
+                "afci": "Ljusbågsfel (AFCI)",
+                "gfci": "Jordfel (GFCI)",
+                "dual": "Ljusbågsfel och jordfel (AFCI/GFCI)",
+                "gfpe": "Jordfel, skydd av utrustning (GFPE)"
+            },
             "raw": {
                 "manualon": "Manuellt på",
                 "manualoff": "Manuellt av",
@@ -254,6 +269,7 @@
                 "lifetime": "Totalt",
                 "lifetime_import": "Totalt, import",
                 "protection": "Skydd",
+                "protection_type": "Skyddstyp",
                 "operational_state": "Drifttillstånd",
                 "diagnostics": "Diagnostik",
                 "breaker_state": "Dvärgbrytarens tillstånd",

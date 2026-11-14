@@ -164,6 +164,21 @@
                 "over_voltage": "Túlfeszültség",
                 "under_voltage": "Alulfeszültség"
             },
+            "trip": {
+                "ground_fault": "Földzárlat",
+                "arc_fault": "Ívzárlat",
+                "parallel_arc_fault": "Párhuzamos ívzárlat",
+                "miswire": "Nullavezető-hiba",
+                "overload": "Túlterhelés",
+                "short_circuit": "Rövidzárlat",
+                "over_current": "Túláram"
+            },
+            "protection": {
+                "afci": "Ívzárlat (AFCI)",
+                "gfci": "Földzárlat (GFCI)",
+                "dual": "Ívzárlat és földzárlat (AFCI/GFCI)",
+                "gfpe": "Földzárlat, készülékvédelem (GFPE)"
+            },
             "raw": {
                 "manualon": "Be (kézzel)",
                 "manualoff": "Ki (kézzel)",
@@ -254,6 +269,7 @@
                 "lifetime": "Összesen",
                 "lifetime_import": "Összesen, import",
                 "protection": "Védelem",
+                "protection_type": "Védelem típusa",
                 "operational_state": "Üzemállapot",
                 "diagnostics": "Diagnosztika",
                 "breaker_state": "Megszakító állapota",

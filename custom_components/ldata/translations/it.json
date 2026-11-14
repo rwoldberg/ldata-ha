@@ -164,6 +164,21 @@
                 "over_voltage": "Sovratensione",
                 "under_voltage": "Sottotensione"
             },
+            "trip": {
+                "ground_fault": "Guasto a terra",
+                "arc_fault": "Guasto d'arco",
+                "parallel_arc_fault": "Arco in parallelo",
+                "miswire": "Neutro mal collegato",
+                "overload": "Sovraccarico",
+                "short_circuit": "Cortocircuito",
+                "over_current": "Sovracorrente"
+            },
+            "protection": {
+                "afci": "Guasto d'arco (AFCI)",
+                "gfci": "Guasto a terra (GFCI)",
+                "dual": "Guasto d'arco e guasto a terra (AFCI/GFCI)",
+                "gfpe": "Guasto a terra, protezione delle apparecchiature (GFPE)"
+            },
             "raw": {
                 "manualon": "Acceso manualmente",
                 "manualoff": "Spento manualmente",
@@ -254,6 +269,7 @@
                 "lifetime": "Totale",
                 "lifetime_import": "Importata in totale",
                 "protection": "Protezione",
+                "protection_type": "Tipo di protezione",
                 "operational_state": "Stato operativo",
                 "diagnostics": "Diagnostica",
                 "breaker_state": "Stato dell'interruttore",

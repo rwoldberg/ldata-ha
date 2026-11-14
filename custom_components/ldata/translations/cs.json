@@ -164,6 +164,21 @@
                 "over_voltage": "Přepětí",
                 "under_voltage": "Podpětí"
             },
+            "trip": {
+                "ground_fault": "Zemní spojení",
+                "arc_fault": "Poruchový oblouk",
+                "parallel_arc_fault": "Paralelní oblouk",
+                "miswire": "Chyba vodiče N",
+                "overload": "Přetížení",
+                "short_circuit": "Zkrat",
+                "over_current": "Nadproud"
+            },
+            "protection": {
+                "afci": "Poruchový oblouk (AFCI)",
+                "gfci": "Zemní spojení (GFCI)",
+                "dual": "Poruchový oblouk a zemní spojení (AFCI/GFCI)",
+                "gfpe": "Zemní spojení, ochrana zařízení (GFPE)"
+            },
             "raw": {
                 "manualon": "Zapnutý ručně",
                 "manualoff": "Vypnutý ručně",
@@ -254,6 +269,7 @@
                 "lifetime": "Celkem",
                 "lifetime_import": "Celkem, import",
                 "protection": "Ochrana",
+                "protection_type": "Typ ochrany",
                 "operational_state": "Provozní stav",
                 "diagnostics": "Diagnostika",
                 "breaker_state": "Stav jističe",

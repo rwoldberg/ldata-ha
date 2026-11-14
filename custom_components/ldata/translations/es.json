@@ -164,6 +164,21 @@
                 "over_voltage": "Sobretensión",
                 "under_voltage": "Subtensión"
             },
+            "trip": {
+                "ground_fault": "Fallo a tierra",
+                "arc_fault": "Fallo de arco",
+                "parallel_arc_fault": "Arco en paralelo",
+                "miswire": "Error de neutro",
+                "overload": "Sobrecarga",
+                "short_circuit": "Cortocircuito",
+                "over_current": "Sobreintensidad"
+            },
+            "protection": {
+                "afci": "Fallo de arco (AFCI)",
+                "gfci": "Fallo a tierra (GFCI)",
+                "dual": "Fallo de arco y fallo a tierra (AFCI/GFCI)",
+                "gfpe": "Fallo a tierra, protección de equipos (GFPE)"
+            },
             "raw": {
                 "manualon": "Encendido manual",
                 "manualoff": "Apagado manual",
@@ -254,6 +269,7 @@
                 "lifetime": "Total acumulado",
                 "lifetime_import": "Total acumulado, importación",
                 "protection": "Protección",
+                "protection_type": "Tipo de protección",
                 "operational_state": "Estado operativo",
                 "diagnostics": "Diagnóstico",
                 "breaker_state": "Estado del magnetotérmico",

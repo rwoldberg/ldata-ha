@@ -164,6 +164,21 @@
         "over_voltage": "Over voltage",
         "under_voltage": "Under voltage"
       },
+      "trip": {
+        "ground_fault": "Ground fault",
+        "arc_fault": "Arc fault",
+        "parallel_arc_fault": "Parallel arc fault",
+        "miswire": "Miswired neutral",
+        "overload": "Overload",
+        "short_circuit": "Short circuit",
+        "over_current": "Over current"
+      },
+      "protection": {
+        "afci": "Arc fault (AFCI)",
+        "gfci": "Ground fault (GFCI)",
+        "dual": "Arc fault and ground fault (AFCI/GFCI)",
+        "gfpe": "Ground fault, equipment protection (GFPE)"
+      },
       "raw": {
         "manualon": "Manual on",
         "manualoff": "Manual off",
@@ -254,6 +269,7 @@
         "lifetime": "Lifetime",
         "lifetime_import": "Lifetime, import",
         "protection": "Protection",
+        "protection_type": "Protection type",
         "operational_state": "Operational state",
         "diagnostics": "Diagnostics",
         "breaker_state": "Breaker state",

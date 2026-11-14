@@ -164,6 +164,21 @@
                 "over_voltage": "Przepięcie",
                 "under_voltage": "Za niskie napięcie"
             },
+            "trip": {
+                "ground_fault": "Zwarcie doziemne",
+                "arc_fault": "Zwarcie łukowe",
+                "parallel_arc_fault": "Łuk równoległy",
+                "miswire": "Błąd przewodu N",
+                "overload": "Przeciążenie",
+                "short_circuit": "Zwarcie",
+                "over_current": "Przetężenie"
+            },
+            "protection": {
+                "afci": "Zwarcie łukowe (AFCI)",
+                "gfci": "Zwarcie doziemne (GFCI)",
+                "dual": "Zwarcie łukowe i doziemne (AFCI/GFCI)",
+                "gfpe": "Zwarcie doziemne, ochrona urządzeń (GFPE)"
+            },
             "raw": {
                 "manualon": "Włączony ręcznie",
                 "manualoff": "Wyłączony ręcznie",
@@ -254,6 +269,7 @@
                 "lifetime": "Łącznie",
                 "lifetime_import": "Łącznie, import",
                 "protection": "Zabezpieczenia",
+                "protection_type": "Typ zabezpieczenia",
                 "operational_state": "Stan pracy",
                 "diagnostics": "Diagnostyka",
                 "breaker_state": "Stan wyłącznika",

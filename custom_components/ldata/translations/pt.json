@@ -164,6 +164,21 @@
                 "over_voltage": "Sobretensão",
                 "under_voltage": "Subtensão"
             },
+            "trip": {
+                "ground_fault": "Defeito à terra",
+                "arc_fault": "Defeito de arco",
+                "parallel_arc_fault": "Arco em paralelo",
+                "miswire": "Neutro mal ligado",
+                "overload": "Sobrecarga",
+                "short_circuit": "Curto-circuito",
+                "over_current": "Sobrecorrente"
+            },
+            "protection": {
+                "afci": "Defeito de arco (AFCI)",
+                "gfci": "Defeito à terra (GFCI)",
+                "dual": "Defeito de arco e defeito à terra (AFCI/GFCI)",
+                "gfpe": "Defeito à terra, proteção de equipamentos (GFPE)"
+            },
             "raw": {
                 "manualon": "Ligado manualmente",
                 "manualoff": "Desligado manualmente",
@@ -254,6 +269,7 @@
                 "lifetime": "Total acumulado",
                 "lifetime_import": "Total acumulado, importação",
                 "protection": "Proteção",
+                "protection_type": "Tipo de proteção",
                 "operational_state": "Estado operacional",
                 "diagnostics": "Diagnóstico",
                 "breaker_state": "Estado do disjuntor",

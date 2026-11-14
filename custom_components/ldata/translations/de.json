@@ -164,6 +164,21 @@
                 "over_voltage": "Überspannung",
                 "under_voltage": "Unterspannung"
             },
+            "trip": {
+                "ground_fault": "Fehlerstrom",
+                "arc_fault": "Fehlerlichtbogen",
+                "parallel_arc_fault": "Paralleler Lichtbogen",
+                "miswire": "Neutralleiterfehler",
+                "overload": "Überlast",
+                "short_circuit": "Kurzschluss",
+                "over_current": "Überstrom"
+            },
+            "protection": {
+                "afci": "Fehlerlichtbogen (AFCI)",
+                "gfci": "Fehlerstrom (GFCI)",
+                "dual": "Fehlerlichtbogen und Fehlerstrom (AFCI/GFCI)",
+                "gfpe": "Fehlerstrom, Geräteschutz (GFPE)"
+            },
             "raw": {
                 "manualon": "Ein (manuell)",
                 "manualoff": "Aus (manuell)",
@@ -254,6 +269,7 @@
                 "lifetime": "Gesamt",
                 "lifetime_import": "Gesamt, Einspeisung",
                 "protection": "Schutz",
+                "protection_type": "Schutztyp",
                 "operational_state": "Betriebszustand",
                 "diagnostics": "Diagnose",
                 "breaker_state": "Zustand der Sicherung",
