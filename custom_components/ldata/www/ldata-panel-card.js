@@ -1486,18 +1486,24 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const handle = tripped || failed || (heldOff && s.gen1) ? "trip" : isOn || heldOff ? "on" : "off";
     s.handle = !available ? this._handles.get(r.status) || "on" : handle;
     if (available) this._handles.set(r.status, s.handle);
-    // A Gen 1 breaker's LED only blinks for Identify: it has no OFF LED to
-    // light when switched off, or to blink while a switch is under way.
-    s.led = s.blinkOn || (vis === "pending" && !s.gen1) ? "blink" : vis === "remote-off" && !s.gen1 ? "on" : "off";
+    // Identify blinks 1.5 s on, 1.5 s off, on Gen 1 and Gen 2 breakers alike
+    // (seen on real ones). A Gen 1 breaker's LED only blinks for Identify: it
+    // has no OFF LED to light when switched off, or to blink while a switch
+    // is under way.
+    s.led = s.blinkOn ? "ident" : vis === "pending" && !s.gen1 ? "blink" : vis === "remote-off" && !s.gen1 ? "on" : "off";
     // The cause LEDs are fed from the line side: they stay lit after a trip.
     const lit = available && tripped && cause;
     s.failed = failed;
     s.cause = lit && !failed ? cause.key : null;
     // Identify blinks a protected Gen 1 breaker's AF and GF LEDs together,
     // unless they are showing a fault.
-    const ident = s.gen1 && s.blinkOn ? "blink" : "off";
+    const ident = s.gen1 && s.blinkOn ? "ident" : "off";
     const rate = (v) => (s.gen1 && GEN1_BLINK[v]) || v;
-    s.ledAf = !s.hasAf ? "off" : failed ? "fast" : lit ? rate(cause.af) : ident;
+    // Leviton signals a miswired neutral with "the" LED blinking every three
+    // seconds on AFCI, GFCI and dual function breakers alike: GF where there
+    // is one, so AF on an AFCI-only breaker.
+    const afCause = lit && cause.key === "miswire" && !s.hasGf ? cause.gf : lit ? cause.af : null;
+    s.ledAf = !s.hasAf ? "off" : failed ? "fast" : lit ? rate(afCause) : ident;
     s.ledGf = !s.hasGf ? "off" : failed ? "fast" : lit ? rate(cause.gf) : ident;
     s.watts = cfg.show_power ? this._num(r.watts) : null;
     s.amps = cfg.show_power ? this._num(r.amps) : null;
@@ -2999,6 +3005,8 @@ button { font: inherit; }
 }
 [data-led="on"] > .led--st, [data-af="on"] > .led--af, [data-gf="on"] > .led--gf { opacity: 1; }
 [data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf { animation: ldp-blink 1s steps(1, end) infinite; }
+/* Identify: 1.5 s on, 1.5 s off. */
+[data-led="ident"] > .led--st, [data-af="ident"] > .led--af, [data-gf="ident"] > .led--gf { animation: ldp-blink 3s steps(1, end) infinite; }
 /* A miswired neutral: one flash every three seconds. */
 [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf { animation: ldp-blink-slow 3s steps(1, end) infinite; }
 /* A failed self-test: both flash five times a second. */
@@ -3126,6 +3134,7 @@ button { font: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   [data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf,
+  [data-led="ident"] > .led--st, [data-af="ident"] > .led--af, [data-gf="ident"] > .led--gf,
   [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf, [data-af="fast"] > .led--af, [data-gf="fast"] > .led--gf,
   [data-af="quick"] > .led--af, [data-gf="quick"] > .led--gf,
   .lbl[data-vis="pending"] .lbl-sub { animation: none; opacity: 1; }

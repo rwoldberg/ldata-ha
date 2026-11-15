@@ -120,6 +120,20 @@ def test_led_blink_rates_follow_levitons_tables() -> None:
 
     assert period("blink") == 1
     assert period("quick") == 0.5
+    # Identify: 1.5 s on, 1.5 s off, on Gen 1 and Gen 2 breakers alike.
+    assert period("ident") == 3
     assert period("fast") == 0.2
     assert period("slow") == 3
     assert re.search(r'const GEN1_BLINK = \{ blink: "quick" \};', CARD)
+
+
+def test_identify_and_a_miswire_on_an_afci_only_breaker() -> None:
+    source = re.sub(r"\s+", " ", CARD)
+    # Identify uses its own rate on the status LED and on a Gen 1 breaker's AF/GF.
+    assert 's.led = s.blinkOn ? "ident"' in source
+    assert 'const ident = s.gen1 && s.blinkOn ? "ident" : "off";' in source
+    # Leviton: "Blinking LED (3-sec): Neutral miswire (AF/GF/Dual-Function)".
+    # Without a GF LED, the AF LED gives the miswire's three-second blink.
+    assert 'cause.key === "miswire" && !s.hasGf ? cause.gf' in source
+    miswire = re.search(r'\[/\^AFCIMiswire\$/i, "miswire", "(\w+)", "(\w+)"\]', CARD)
+    assert miswire is not None and miswire.groups() == ("off", "slow")
