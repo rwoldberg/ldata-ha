@@ -293,7 +293,7 @@ If you add a new Decora device to your account, reload the integration to pick i
 
 Your panel and any Decora devices each get a firmware `update` entity (Settings > Devices & Services > your device) that reports when Leviton has a newer firmware version available — installing it still happens in the My Leviton app, this is detection only.
 
-Each smart breaker has one too, found the same way the My Leviton app finds it: a breaker on an LDATA hub when Leviton offers it an update, a breaker on an LWHEM when the panel has downloaded newer firmware for it. These are **disabled by default**, because Leviton updates every breaker of a model at once and the blueprint below would send a notification for each. To use one, open the breaker's device page, select the hidden entities and enable its Firmware Update entity.
+Each smart breaker has one too, found the same way the My Leviton app finds it: a breaker on an LDATA hub when Leviton offers it an update, a breaker on an LWHEM when the panel has downloaded newer firmware for it. Its installed version is always the breaker's main firmware, as on its device page; when an update waits, the release notes name each part of the firmware that changes, with its old and new version. These are **disabled by default**, because Leviton updates every breaker of a model at once and the blueprint below would send a notification for each. To use one, open the breaker's device page, select the hidden entities and enable its Firmware Update entity.
 
 To get notified when one becomes available, import this blueprint and create an automation from it — it automatically covers every current and future LDATA `update.*` entity, no per-device setup required:
 

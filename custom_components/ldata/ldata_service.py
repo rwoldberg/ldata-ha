@@ -108,16 +108,21 @@ def _breaker_firmware_versions(
 ) -> tuple[str | None, str | None, str | None]:
     """Return a breaker's installed and available firmware, and what changes.
 
-    The same rules as the My Leviton app. A breaker on an LDATA hub has an
-    update when updateAvailability says UPDATE_AVAILABLE, to updateVersion. A
-    breaker on an LWHEM has one when the panel has downloaded a newer build of
-    any of its firmware images than the breaker runs; updateAvailability stays
-    UP_TO_DATE there. The third value names each image that would change.
+    Installed is always the breaker's main (meter) firmware, the version its
+    device page shows, so it doesn't change with what is waiting. Available is
+    the new version Leviton has for it, found with the My Leviton app's rules:
+    a breaker on an LDATA hub has an update when updateAvailability says
+    UPDATE_AVAILABLE, to updateVersion. A breaker on an LWHEM has one when the
+    panel has downloaded a newer build of any of its firmware images than the
+    breaker runs (updateAvailability stays UP_TO_DATE there); the first in the
+    app's order gives the version, and the third value names each image that
+    would change, old and new.
     """
     if ldata:
-        installed = fields.get("firmwareVersionSiLabs") or firmware or None
+        running = fields.get("firmwareVersionSiLabs") or None
+        installed = firmware or running
         available = fields.get("updateVersion") or None
-        if fields.get("updateAvailability") != "UPDATE_AVAILABLE" or available == installed:
+        if fields.get("updateAvailability") != "UPDATE_AVAILABLE" or available in (running, installed):
             available = None
         return installed, available, None
 
@@ -129,9 +134,9 @@ def _breaker_firmware_versions(
             pending.append((name, fields[installed_key], fields[downloaded_key]))
     if not pending:
         return firmware or None, None, None
-    _name, installed, available = pending[0]
+    _name, running, available = pending[0]
     summary = ", ".join(f"{name} {old} → {new}" for name, old, new in pending)
-    return installed, available, summary
+    return firmware or running, available, summary
 
 
 def _apply_breaker_firmware(breaker: dict, raw: dict) -> None:

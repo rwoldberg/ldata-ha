@@ -73,7 +73,8 @@ def _parse(panel_type: str, breaker: dict) -> dict:
 def test_lwhem_breaker_has_the_newer_downloaded_build() -> None:
     parsed = _parse("WHEMS", _whem_breaker())
 
-    assert parsed["installed_firmware"] == "FWC2422000001"
+    # Installed stays the breaker's main firmware, as on its device page.
+    assert parsed["installed_firmware"] == "FWB7108000100"
     assert parsed["available_firmware"] == "FWC2422000100"
     assert parsed["firmware_update_summary"] == "SiLabs FWC2422000001 → FWC2422000100"
 
@@ -100,8 +101,9 @@ def test_lwhem_breaker_ignores_update_availability() -> None:
 def test_lwhem_breaker_lists_every_image_that_changes() -> None:
     parsed = _parse("WHEMS", _whem_breaker(downloadedBLE="FWC0778000105"))
 
-    # BLE comes first in the app's order, so it is the version shown.
-    assert parsed["installed_firmware"] == "FWC0778000102"
+    # BLE comes first in the app's order, so its new build is the version
+    # offered; installed doesn't move to the BLE image.
+    assert parsed["installed_firmware"] == "FWB7108000100"
     assert parsed["available_firmware"] == "FWC0778000105"
     assert parsed["firmware_update_summary"] == (
         "BLE FWC0778000102 → FWC0778000105, SiLabs FWC2422000001 → FWC2422000100"
@@ -111,7 +113,7 @@ def test_lwhem_breaker_lists_every_image_that_changes() -> None:
 def test_ldata_breaker_follows_update_availability() -> None:
     parsed = _parse("LDATA", _ldata_breaker())
 
-    assert parsed["installed_firmware"] == "FWB4073000100"
+    assert parsed["installed_firmware"] == "FWB3760000100"
     assert parsed["available_firmware"] == "FWB4073000101"
     assert parsed["firmware_update_summary"] is None
 
@@ -121,7 +123,7 @@ def test_ldata_breaker_up_to_date() -> None:
         parsed = _parse("LDATA", _ldata_breaker(updateAvailability=availability))
 
         assert parsed["available_firmware"] is None
-        assert parsed["installed_firmware"] == "FWB4073000100"
+        assert parsed["installed_firmware"] == "FWB3760000100"
 
 
 def test_ldata_breaker_ignores_downloaded_images() -> None:
@@ -158,7 +160,7 @@ def _entity(breaker: dict) -> LDATABreakerFirmwareUpdateEntity:
 def test_entity_reports_an_update_without_offering_to_install_it() -> None:
     entity = _entity(_parse("WHEMS", _whem_breaker()))
 
-    assert entity.installed_version == "FWC2422000001"
+    assert entity.installed_version == "FWB7108000100"
     assert entity.latest_version == "FWC2422000100"
     assert entity.release_summary == "SiLabs FWC2422000001 → FWC2422000100"
     assert entity.state == "on"
@@ -172,7 +174,7 @@ def test_entity_reports_an_update_without_offering_to_install_it() -> None:
 def test_entity_is_off_when_up_to_date() -> None:
     entity = _entity(_parse("LDATA", _ldata_breaker(updateAvailability="UP_TO_DATE")))
 
-    assert entity.latest_version == entity.installed_version == "FWB4073000100"
+    assert entity.latest_version == entity.installed_version == "FWB3760000100"
     assert entity.state == "off"
 
 
@@ -211,3 +213,31 @@ async def test_setup_adds_one_for_each_breaker() -> None:
     breakers = [e for e in entities if isinstance(e, LDATABreakerFirmwareUpdateEntity)]
     assert sorted(e.entity_data["id"] for e in breakers) == ["1A2B3C4D5E6F", "4C4557E12770"]
     assert len({e.unique_id for e in entities}) == len(entities)
+
+
+def test_installed_version_stays_put_while_updates_arrive_and_land() -> None:
+    """MrToast99's sequence on PR #119: installed must not follow the images."""
+    service = LDATAService("", "", None)
+    breaker = _parse("WHEMS", _whem_breaker(downloadedSiLabs=""))
+    seen = [(breaker["installed_firmware"], breaker["available_firmware"])]
+
+    service._apply_breaker_update(breaker["id"], breaker, {"downloadedSiLabs": "FWC2422000100"}, source="WS")
+    seen.append((breaker["installed_firmware"], breaker["available_firmware"]))
+    service._apply_breaker_update(breaker["id"], breaker, {"downloadedBLE": "FWC0778000105"}, source="WS")
+    seen.append((breaker["installed_firmware"], breaker["available_firmware"]))
+    service._apply_breaker_update(
+        breaker["id"], breaker, {"firmwareVersionSiLabs": "FWC2422000100", "firmwareVersionBLE": "FWC0778000105"}, source="WS"
+    )
+    seen.append((breaker["installed_firmware"], breaker["available_firmware"]))
+
+    assert seen == [
+        ("FWB7108000100", None),
+        ("FWB7108000100", "FWC2422000100"),
+        ("FWB7108000100", "FWC0778000105"),
+        ("FWB7108000100", None),
+    ]
+
+
+def test_ldata_breaker_offered_the_version_it_runs_is_up_to_date() -> None:
+    for version in ("FWB4073000100", "FWB3760000100"):
+        assert _parse("LDATA", _ldata_breaker(updateVersion=version))["available_firmware"] is None

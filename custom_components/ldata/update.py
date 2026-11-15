@@ -160,12 +160,17 @@ class LDATABreakerFirmwareUpdateEntity(LDATAEntity, UpdateEntity):
 
     @property
     def installed_version(self) -> StateType:
-        """Return the firmware the breaker runs."""
+        """Return the breaker's main firmware, the version its device page shows."""
         return self._breaker.get("installed_firmware") or self._breaker.get("firmware")
 
     @property
     def latest_version(self) -> StateType:
-        """Return the firmware waiting for it, or the installed one if none."""
+        """Return the new version waiting for it, or the installed one if none.
+
+        On an LWHEM the update may be to another of the breaker's firmware
+        images than the main one; release_summary names each image and its
+        old and new version.
+        """
         return self._breaker.get("available_firmware") or self.installed_version
 
     @property
