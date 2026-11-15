@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Dos cuadros eléctricos no pueden alimentarse entre sí. Revisa las opciones elegidas en Subcuadros."
+            "sub_panel_loop": "Dos cuadros eléctricos no pueden alimentarse entre sí. Revisa las opciones elegidas en Subcuadros.",
+            "sub_panel_same_breaker": "Dos cuadros eléctricos no pueden alimentarse desde el mismo magnetotérmico. Revisa las opciones elegidas en Subcuadros."
         }
     },
     "selector": {

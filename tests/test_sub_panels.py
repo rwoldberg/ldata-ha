@@ -17,6 +17,7 @@ from custom_components.ldata.sub_panels import (
     feeder_rating,
     feeds_of,
     looped,
+    shared,
     sub_panel_feeds,
 )
 
@@ -123,6 +124,16 @@ def test_load_centers_that_feed_each_other_are_left_out() -> None:
     assert looped({**pair, "d": ("a", 4)}) == {"a", "b"}
     assert sub_panel_feeds(_stored(**pair, d=("a", 4))) == {"d": ("a", 4)}
     assert looped({"casita": ("main", 38), "shed": ("casita", 5)}) == set()
+
+
+def test_load_centers_given_the_same_feeding_breaker_are_left_out() -> None:
+    """The form refuses it; options restored or edited by hand can still have it."""
+    feeds = {"casita": ("main", 38), "shed": ("main", 38), "garage": ("main", 29)}
+
+    assert shared(feeds) == {"casita", "shed"}
+    assert sub_panel_feeds(_stored(**feeds)) == {"garage": ("main", 29)}
+    # The same position in another load center is another breaker.
+    assert shared({"casita": ("main", 38), "shed": ("garage", 38)}) == set()
 
 
 # ── The feeding panel's Cloud Connected entity ────────────────────────────

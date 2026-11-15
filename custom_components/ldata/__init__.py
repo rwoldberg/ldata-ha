@@ -23,16 +23,14 @@ from homeassistant.helpers import entity_platform
 import homeassistant.helpers.config_validation as cv
 
 from .card import CARD_URL, FRONTEND_URL_PATH, PANEL_CARD_FILENAME, async_serve_card
-from .card import card_digest as _card_digest  # noqa: F401  (kept importable from here)
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER, PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
-from .sidebar import async_update_sidebar_panel
+from .sidebar import async_follow_entries, async_update_sidebar_panel
 from .ldata_service import (
     LDATAAuthError,
     LDATAConnectionError,
     LDATAService,
     TwoFactorRequired,
-    VERSION,
 )
 
 PLATFORMS: list[Platform] = [
@@ -1100,6 +1098,8 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             await async_update_sidebar_panel(hass)
 
     hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _on_core_config_update)
+    # An entry that is not loaded has no options listener of its own.
+    async_follow_entries(hass)
 
     if hass.state == CoreState.running:
         await _async_register_frontend(hass)

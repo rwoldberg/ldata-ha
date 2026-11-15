@@ -375,6 +375,60 @@ async def test_feed_from_a_breaker_leviton_no_longer_lists_stays_on_offer() -> N
     assert result["data"]["sub_panels"] == {"casita": {"panel": "main", "position": 12}}
 
 
+async def test_feed_from_a_load_center_leviton_no_longer_lists_stays_on_offer() -> None:
+    entry = _entry({"sub_panels": {"casita": {"panel": "garage", "position": 5}}})
+
+    form = await _flow(entry, _two_load_centers()).async_step_init()
+
+    # Named by its id: the form only knows the names of what Leviton lists.
+    marker, selector_ = _feed_field(form, "Casita")
+    assert marker.default() == "garage|5"
+    assert selector_.config["options"][-1] == {"value": "garage|5", "label": "garage · 5"}
+    result = await _flow(entry, _two_load_centers()).async_step_init(
+        {HA_INFORM_RATE: 5.0, "sub_panels": {"Casita": "garage|5", "Main Panel": "none"}}
+    )
+    assert result["data"]["sub_panels"] == {"casita": {"panel": "garage", "position": 5}}
+
+
+def _three_load_centers() -> SimpleNamespace:
+    coordinator = _two_load_centers()
+    coordinator.data["panels"].append({"id": "shed", "name": "Shed", "dumb_breakers": []})
+    return coordinator
+
+
+async def test_two_load_centers_cannot_be_fed_from_the_same_breaker() -> None:
+    entry = _entry(_stored_options())
+
+    result = await _flow(entry, _three_load_centers()).async_step_init(
+        {"sub_panels": {"Casita": "main|38", "Main Panel": "none", "Shed": "main|38"}}
+    )
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "sub_panel_same_breaker"}
+    assert _feed_field(result, "Casita")[0].default() == "main|38"
+    assert _feed_field(result, "Shed")[0].default() == "main|38"
+
+    # Each from a breaker of its own is fine.
+    result = await _flow(entry, _three_load_centers()).async_step_init(
+        {"sub_panels": {"Casita": "main|38", "Main Panel": "none", "Shed": "main|25"}}
+    )
+    assert result["data"]["sub_panels"] == {
+        "casita": {"panel": "main", "position": 38},
+        "shed": {"panel": "main", "position": 25},
+    }
+
+
+async def test_breaker_feeding_a_load_center_the_form_cannot_show_is_taken() -> None:
+    # Leviton doesn't list the shed right now; its feed is kept, and counts.
+    entry = _entry({"sub_panels": {"shed": {"panel": "main", "position": 38}}})
+
+    result = await _flow(entry, _two_load_centers()).async_step_init(
+        {"sub_panels": {"Casita": "main|38", "Main Panel": "none"}}
+    )
+
+    assert result["errors"] == {"base": "sub_panel_same_breaker"}
+
+
 async def test_load_centers_with_the_same_name_get_their_own_fields() -> None:
     twins = SimpleNamespace(
         data={

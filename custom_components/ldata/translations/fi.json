@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Kaksi sähkökeskusta ei voi syöttää toisiaan. Tarkista Alakeskukset-kohdan valinnat."
+            "sub_panel_loop": "Kaksi sähkökeskusta ei voi syöttää toisiaan. Tarkista Alakeskukset-kohdan valinnat.",
+            "sub_panel_same_breaker": "Kahta sähkökeskusta ei voi syöttää samasta johdonsuojasta. Tarkista Alakeskukset-kohdan valinnat."
         }
     },
     "selector": {

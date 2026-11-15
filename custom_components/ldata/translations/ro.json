@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Două tablouri electrice nu se pot alimenta unul pe celălalt. Verifică alegerile de la Tablouri secundare."
+            "sub_panel_loop": "Două tablouri electrice nu se pot alimenta unul pe celălalt. Verifică alegerile de la Tablouri secundare.",
+            "sub_panel_same_breaker": "Două tablouri electrice nu pot fi alimentate din același disjunctor. Verifică alegerile de la Tablouri secundare."
         }
     },
     "selector": {

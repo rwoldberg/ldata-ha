@@ -7,7 +7,9 @@ import pytest
 from homeassistant.components.lovelace.const import LOVELACE_DATA, MODE_STORAGE
 
 from custom_components import ldata
+from custom_components.ldata.card import card_digest
 from custom_components.ldata.const import DOMAIN
+from custom_components.ldata.ldata_service import VERSION
 
 pytestmark = pytest.mark.asyncio
 
@@ -74,7 +76,7 @@ async def test_loads_collection_before_reading_it() -> None:
     # The user's own resources survive, plus exactly one card entry.
     assert resources.data["hacs"] == other
     assert len(_card_urls(resources)) == 1
-    assert _card_urls(resources)[0].startswith(f"{CARD}?v={ldata.VERSION}-")
+    assert _card_urls(resources)[0].startswith(f"{CARD}?v={VERSION}-")
 
 
 async def test_existing_entry_is_pointed_at_the_current_card() -> None:
@@ -119,11 +121,11 @@ async def test_current_entry_is_left_alone() -> None:
 async def test_url_changes_with_the_card_contents(tmp_path) -> None:
     card = tmp_path / "card.js"
     card.write_text("one")
-    first = ldata._card_digest(card)
+    first = card_digest(card)
     card.write_text("two")
 
-    assert first and ldata._card_digest(card) != first
-    assert ldata._card_digest(tmp_path / "missing.js") is None
+    assert first and card_digest(card) != first
+    assert card_digest(tmp_path / "missing.js") is None
 
 
 async def test_registration_runs_once_per_process() -> None:

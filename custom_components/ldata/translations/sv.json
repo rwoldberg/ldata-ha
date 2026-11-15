@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Två elcentraler kan inte mata varandra. Kontrollera valen under Undercentraler."
+            "sub_panel_loop": "Två elcentraler kan inte mata varandra. Kontrollera valen under Undercentraler.",
+            "sub_panel_same_breaker": "Två elcentraler kan inte matas från samma dvärgbrytare. Kontrollera valen under Undercentraler."
         }
     },
     "selector": {

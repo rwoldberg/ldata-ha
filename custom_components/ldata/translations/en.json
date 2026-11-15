@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Two load centers cannot feed each other. Check the choices under Sub-panels."
+            "sub_panel_loop": "Two load centers cannot feed each other. Check the choices under Sub-panels.",
+            "sub_panel_same_breaker": "Two load centers cannot be fed from the same breaker. Check the choices under Sub-panels."
         }
     },
     "selector": {

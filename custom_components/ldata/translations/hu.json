@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Két elosztótábla nem táplálhatja egymást. Ellenőrizze az Alelosztók alatti beállításokat."
+            "sub_panel_loop": "Két elosztótábla nem táplálhatja egymást. Ellenőrizze az Alelosztók alatti beállításokat.",
+            "sub_panel_same_breaker": "Két elosztótáblát nem táplálhat ugyanaz a megszakító. Ellenőrizze az Alelosztók alatti beállításokat."
         }
     },
     "selector": {

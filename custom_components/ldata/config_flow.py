@@ -42,7 +42,7 @@ from .const import (
     RESIDENCE_IMPORT_SOURCE,
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
-from .sub_panels import NOT_FED, SUB_PANELS, amps, feed_ratings, looped, sub_panel_feeds
+from .sub_panels import NOT_FED, SUB_PANELS, amps, feed_ratings, looped, shared, sub_panel_feeds
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -426,11 +426,12 @@ class _SubPanelSection:
             for panel_id in names:
                 if panel_id != sub_id:
                     offered.extend(breakers[panel_id])
-            # A stored link to a breaker Leviton no longer lists stays on
-            # offer, or saving the form for another reason would drop it.
+            # A stored link to a breaker, or a load center, that Leviton no
+            # longer lists stays on offer, or saving the form for another
+            # reason would drop it.
             feed = self.stored.get(sub_id)
-            if feed and feed[0] in names and self._value(*feed) not in self._choices:
-                offered.append(self._choice(feed[0], names[feed[0]], feed[1], {}))
+            if feed and self._value(*feed) not in {option["value"] for option in offered}:
+                offered.append(self._choice(feed[0], names.get(feed[0], str(feed[0])), feed[1], {}))
             self._offered[sub_id] = offered
 
     @staticmethod
@@ -535,6 +536,9 @@ class OptionsFlow(config_entries.OptionsFlow):
                 sizes = sub_panels.read_ratings(chosen_feeds, feeds)
                 if looped(feeds):
                     errors["base"] = "sub_panel_loop"
+                elif shared(feeds):
+                    # A breaker feeds one load center; the card shows that one.
+                    errors["base"] = "sub_panel_same_breaker"
                 else:
                     user_input[SUB_PANELS] = {
                         sub_id: {"panel": panel_id, "position": position}

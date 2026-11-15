@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Due quadri elettrici non possono alimentarsi a vicenda. Controlla le scelte in Sottoquadri."
+            "sub_panel_loop": "Due quadri elettrici non possono alimentarsi a vicenda. Controlla le scelte in Sottoquadri.",
+            "sub_panel_same_breaker": "Due quadri elettrici non possono essere alimentati dallo stesso interruttore. Controlla le scelte in Sottoquadri."
         }
     },
     "selector": {

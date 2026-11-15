@@ -96,6 +96,21 @@ try {
 }
 const art = (name) => `${artBase}${name}.webp?v=${ART_REV}`;
 
+// The cards on the page, so that moving to the integration's own copy of the
+// artwork (see _onArtError) reaches all of them, not only the one that found
+// its images missing. Their CSS backgrounds never report an error themselves.
+const artCards = new Set();
+let artProbe = null;
+function useServedArt() {
+  if (artProbe || artBase === ART_SERVED) return;
+  artProbe = new Image();
+  artProbe.onload = () => {
+    artBase = ART_SERVED;
+    for (const card of artCards) card._artMoved();
+  };
+  artProbe.src = `${ART_SERVED}cover.webp?v=${ART_REV}`;
+}
+
 // Geometry of the artwork in inches, where one breaker space is 1. These
 // mirror geometry.json from tools/panel_card_art; the stylesheet repeats the
 // layout numbers it needs, the code below uses the rest to place overlays.
@@ -765,6 +780,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   }
 
   connectedCallback() {
+    artCards.add(this);
+    // The artwork moved while this card was off the page.
+    if (this._artAt && this._artAt !== artBase) this._artMoved();
     if (!this._ro && window.ResizeObserver) {
       this._ro = new ResizeObserver((entries) => this._onResize(entries[0].contentRect.width));
     }
@@ -772,6 +790,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   }
 
   disconnectedCallback() {
+    artCards.delete(this);
     if (this._ro) this._ro.disconnect();
     this._forgetLanguage();
     for (const t of this._timers) clearTimeout(t);
@@ -874,14 +893,28 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   // Point the stylesheet at the artwork. Called again if the images turn out
   // not to be where this file was loaded from.
   _applyArt() {
+    this._artAt = artBase;
     for (const name of ["cover", "frame", "screw-a", "screw-b"]) {
       this.style.setProperty(`--art-${name}`, `url("${art(name)}")`);
     }
   }
 
+  // Draw again from where the artwork is now.
+  _artMoved() {
+    this._applyArt();
+    this._preloaded = null;
+    this._structKey = null;
+    this._update(true);
+  }
+
   _onArtError(ev) {
     const img = ev.target;
-    if (!(img instanceof HTMLImageElement) || !img.src.startsWith(artBase)) return;
+    if (!(img instanceof HTMLImageElement)) return;
+    if (!img.src.startsWith(artBase)) {
+      // Drawn before the artwork moved.
+      if (this._artAt !== artBase) this._artMoved();
+      return;
+    }
     // A blip on the network shouldn't leave a hole in the panel: try once more.
     if (!img.dataset.retry) {
       img.dataset.retry = "1";
@@ -895,16 +928,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     // If this file was loaded from somewhere that has no ./img beside it (a
     // hand-copied card, say), use the copy the integration always serves —
     // but only once that copy is known to be there.
-    if (artBase === ART_SERVED || this._artProbe) return;
-    const probe = new Image();
-    this._artProbe = probe;
-    probe.onload = () => {
-      artBase = ART_SERVED;
-      this._applyArt();
-      this._structKey = null;
-      this._update(true);
-    };
-    probe.src = `${ART_SERVED}cover.webp?v=${ART_REV}`;
+    useServedArt();
   }
 
   // Hovering a breaker or its label marks both, so it's clear which belong together.
@@ -1874,7 +1898,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       on: t("card.state.on"),
       off: t("card.state.off"),
       "remote-off": t("card.state.off_remote"),
-      tripped: t("card.state.tripped"),
+      tripped: t(s.failed ? "card.state.service" : "card.state.tripped"),
       unavailable: t("card.state.unavailable"),
       pending: t("card.state.switching"),
       unknown: s.kind === "link" ? t("card.label.feeds_sub_panel") : t("card.state.not_monitored"),
@@ -1899,7 +1923,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       el.lbl.title = [
         s.name,
         s.rating ? `${s.rating} A` : null,
-        cause ? `${stateWord} · ${cause}` : null,
+        cause ? `${stateWord} · ${cause}` : s.vis === "tripped" ? stateWord : null,
         alarm ? alarm.join(", ") : null,
         s.kind !== "link" ? null : s.link.name ? t("card.label.feeds", { name: s.link.name }) : t("card.label.feeds_sub_panel"),
       ]
@@ -2242,11 +2266,18 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       </div>
       <div class="sub-b"></div>`;
     const card = document.createElement("ldata-panel-card");
+    // Shown the way this card shows its own panel. Settings that belong to
+    // this panel (its orientation, main breaker and sub_panels) stay here.
+    const cfg = this._config;
     card.setConfig({
       device_id: deviceId,
       title: name || undefined,
-      appearance: this._config.appearance,
-      confirm: this._config.confirm,
+      appearance: cfg.appearance,
+      confirm: cfg.confirm,
+      toggle: cfg.toggle,
+      show_power: cfg.show_power,
+      show_alarms: cfg.show_alarms,
+      show_panel_info: cfg.show_panel_info,
     });
     card.hass = this._hass;
     inner.querySelector(".sub-b").appendChild(card);
@@ -3861,15 +3892,21 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
   }
 
   // "1.5×" on the button, written the way the user's language writes numbers.
+  // Runs on every state change in the house, so the number is only formatted
+  // again when the zoom or the language changes.
   _labelZoom() {
     const hass = this._hass;
     const lang = hass ? (hass.locale && hass.locale.language) || hass.language : undefined;
-    let factor;
-    try {
-      factor = `${new Intl.NumberFormat(lang || undefined).format(this._zoom)}×`;
-    } catch (err) {
-      factor = `${this._zoom}×`;
+    const numberKey = `${lang}|${this._zoom}`;
+    if (numberKey !== this._zoomNumberKey) {
+      this._zoomNumberKey = numberKey;
+      try {
+        this._zoomFactor = `${new Intl.NumberFormat(lang || undefined).format(this._zoom)}×`;
+      } catch (err) {
+        this._zoomFactor = `${this._zoom}×`;
+      }
     }
+    const factor = this._zoomFactor;
     const label = this._t("sidebar.zoom", { factor });
     const key = `${factor}|${label}`;
     if (key === this._zoomKey) return;

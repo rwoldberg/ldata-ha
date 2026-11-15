@@ -17,7 +17,7 @@ from .const import DECORA_MODELS_GFCI, DOMAIN, ENABLE_DECORA, ENABLE_DECORA_DEFA
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 from .ldata_base_entity import add_entities_grouped_by_panel, find_panel, is_breaker_on
 from .ldata_entity import LDATAEntity
-from .sub_panels import feeder_rating, feeds_of, panel_device, sub_panel_feeds
+from .sub_panels import feed_ratings, feeder_rating, feeds_of, panel_device, sub_panel_feeds
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -205,54 +205,49 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         attributes["orientation"] = self.panel_data.get("orientation", 0)
         attributes["panel_size"] = self.panel_data.get("panel_size")
         attributes["dumb_breakers"] = self.panel_data.get("dumb_breakers", [])
-        attributes["sub_panels"] = self._sub_panels()
-        attributes["fed_from"] = self._fed_from()
+        attributes["sub_panels"], attributes["fed_from"] = self._feeds()
         return attributes
 
-    def _sub_panels(self) -> list[dict[str, Any]]:
-        """Return this panel's breakers that feed another load center.
+    def _feeds(self) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """Return this panel's breakers that feed another load center, and what feeds it.
 
         Set by the user in the integration's options (see sub_panels.py). The
-        panel card reads it here, as it does dumb_breakers, to show a
-        sub-panel's load on the breaker that feeds it.
+        panel card reads both here, as it does dumb_breakers: the first to show
+        a sub-panel's load on the breaker that feeds it, the second, with the
+        feeding breaker's size, to show how much of that breaker a sub-panel
+        uses.
+
+        Runs on every update of this entity, so the options are read once and
+        nothing more is done when no sub-panel is set.
         """
         entry = getattr(self.coordinator, "config_entry", None)
         if self.hass is None or entry is None:
-            return []
-        dev_reg = dr.async_get(self.hass)
+            return [], None
+        options = entry.options
+        feeds = sub_panel_feeds(options)
+        if not feeds:
+            return [], None
+        ratings = feed_ratings(options, feeds)
         data = getattr(self.coordinator, "data", None)
+        dev_reg = dr.async_get(self.hass)
+        panel_id = self.panel_data.get("id")
+
+        def rated(link: dict[str, Any], sub_id: str) -> dict[str, Any]:
+            rating = feeder_rating(options, data, sub_id, feeds=feeds, ratings=ratings)
+            if rating is not None:
+                link["rating"] = rating
+            return link
+
         linked = []
-        for position, sub_id in feeds_of(entry.options, self.panel_data.get("id")):
+        for position, sub_id in feeds_of(options, panel_id, feeds):
             device = panel_device(dev_reg, entry, sub_id)
             if device is not None:
-                link = {"position": position, "device_id": device.id}
-                rating = feeder_rating(entry.options, data, sub_id)
-                if rating is not None:
-                    link["rating"] = rating
-                linked.append(link)
-        return linked
-
-    def _fed_from(self) -> dict[str, Any] | None:
-        """Return the breaker that feeds this load center, if it is a sub-panel.
-
-        With the breaker's size, the panel card shows how much of it the
-        sub-panel uses.
-        """
-        entry = getattr(self.coordinator, "config_entry", None)
-        if self.hass is None or entry is None:
-            return None
-        sub_id = self.panel_data.get("id")
-        feed = sub_panel_feeds(entry.options).get(sub_id)
-        if feed is None:
-            return None
-        device = panel_device(dr.async_get(self.hass), entry, feed[0])
-        if device is None:
-            return None
-        fed = {"device_id": device.id, "position": feed[1]}
-        rating = feeder_rating(entry.options, getattr(self.coordinator, "data", None), sub_id)
-        if rating is not None:
-            fed["rating"] = rating
-        return fed
+                linked.append(rated({"position": position, "device_id": device.id}, sub_id))
+        fed = None
+        feed = feeds.get(panel_id)
+        if feed is not None and (device := panel_device(dev_reg, entry, feed[0])) is not None:
+            fed = rated({"device_id": device.id, "position": feed[1]}, panel_id)
+        return linked, fed
 
 
 # ── Panel alarm sensors ──────────────────────────────────────────────

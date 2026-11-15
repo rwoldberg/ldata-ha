@@ -147,3 +147,22 @@ def test_standard_and_smart_breakers_are_printed_in_the_same_ink() -> None:
     assert '"ink": material("ink", INK,' in scene
     # The rating the card prints on a breaker has one colour for every kind.
     assert len(re.findall(r"\.ink text[^{]*\{[^}]*\bfill:", CARD)) == 1
+
+
+def test_every_card_follows_the_artwork_to_the_served_copy() -> None:
+    """A card file copied by hand has no img/ beside it; every card on the page moves over.
+
+    Not only the one that found its images missing: the others' cover, frame
+    and screws are CSS backgrounds, which never report an error themselves.
+    """
+    source = re.sub(r"\s+", " ", CARD)
+    # One check for the page, which then tells every card on it.
+    assert "for (const card of artCards) card._artMoved();" in source
+    assert "this._artProbe" not in source
+    # A card is on the list while it is on the page, and catches up if the
+    # artwork moved while it was away (a sidebar tab not on show).
+    assert "connectedCallback() { artCards.add(this);" in source
+    assert "if (this._artAt && this._artAt !== artBase) this._artMoved();" in source
+    assert "disconnectedCallback() { artCards.delete(this);" in source
+    moved = re.search(r"_artMoved\(\) \{(.*?)\}", source)
+    assert moved is not None and "this._applyArt();" in moved.group(1) and "this._update(true);" in moved.group(1)

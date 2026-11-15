@@ -10,7 +10,8 @@ is kept as
 "rating" is optional: the size of the feeding breaker in amps, which the user
 gives when that breaker isn't a smart one (Leviton knows a smart breaker's).
 
-A load center has one feed at most. The link is used in two places:
+A load center has one feed at most, and a breaker feeds one load center at
+most. The link is used in two places:
 
 - The feeding panel's Cloud Connected entity lists its breakers that feed
   another load center, and the sub-panel's says what feeds it
@@ -51,12 +52,22 @@ def looped(feeds: Mapping[str, tuple[str, int]]) -> set[str]:
     return bad
 
 
+def shared(feeds: Mapping[str, tuple[str, int]]) -> set[str]:
+    """Return the load centers whose feeding breaker also feeds another one."""
+    claims: dict[tuple[str, int], list[str]] = {}
+    for sub_id, feed in feeds.items():
+        claims.setdefault(feed, []).append(sub_id)
+    return {sub_id for subs in claims.values() if len(subs) > 1 for sub_id in subs}
+
+
 def sub_panel_feeds(options: Mapping[str, Any]) -> dict[str, tuple[str, int]]:
     """Return {sub-panel id: (feeding panel id, breaker position)}.
 
     Anything malformed is left out, and so is every link of a loop (A fed
-    from B, B fed from A). The options form refuses a loop, but options can
-    also be restored from a backup or edited by hand.
+    from B, B fed from A) and every load center fed from a breaker that is
+    also given as another one's feed. The options form refuses both, but
+    options can also be restored from a backup, edited by hand, or saved by a
+    test build that allowed two load centers on one breaker.
     """
     raw = options.get(SUB_PANELS)
     feeds: dict[str, tuple[str, int]] = {}
@@ -74,6 +85,8 @@ def sub_panel_feeds(options: Mapping[str, Any]) -> dict[str, tuple[str, int]]:
             feeds[sub_id] = (panel_id, position)
     for sub_id in looped(feeds):
         feeds.pop(sub_id)
+    for sub_id in shared(feeds):
+        feeds.pop(sub_id)
     return feeds
 
 
@@ -88,10 +101,16 @@ def amps(value: Any) -> float | None:
     return size if math.isfinite(size) and size > 0 else None
 
 
-def feed_ratings(options: Mapping[str, Any]) -> dict[str, float]:
-    """Return {sub-panel id: amps} for the feeds whose breaker size the user gave."""
+def feed_ratings(
+    options: Mapping[str, Any], feeds: Mapping[str, tuple[str, int]] | None = None
+) -> dict[str, float]:
+    """Return {sub-panel id: amps} for the feeds whose breaker size the user gave.
+
+    feeds is sub_panel_feeds(options), for a caller that has it already.
+    """
     raw = options.get(SUB_PANELS)
-    feeds = sub_panel_feeds(options)
+    if feeds is None:
+        feeds = sub_panel_feeds(options)
     sizes: dict[str, float] = {}
     if isinstance(raw, Mapping):
         for sub_id, feed in raw.items():
@@ -102,16 +121,28 @@ def feed_ratings(options: Mapping[str, Any]) -> dict[str, float]:
     return sizes
 
 
-def feeder_rating(options: Mapping[str, Any], data: Any, sub_id: str) -> float | None:
+def feeder_rating(
+    options: Mapping[str, Any],
+    data: Any,
+    sub_id: str,
+    *,
+    feeds: Mapping[str, tuple[str, int]] | None = None,
+    ratings: Mapping[str, float] | None = None,
+) -> float | None:
     """Return the size in amps of the breaker that feeds a sub-panel.
 
     The size the user gave wins; otherwise Leviton's rating of the breaker,
-    which only a smart breaker has.
+    which only a smart breaker has. feeds and ratings are sub_panel_feeds()
+    and feed_ratings() of the options, for a caller that has them already.
     """
-    given = feed_ratings(options).get(sub_id)
+    if feeds is None:
+        feeds = sub_panel_feeds(options)
+    if ratings is None:
+        ratings = feed_ratings(options, feeds)
+    given = ratings.get(sub_id)
     if given is not None:
         return given
-    feed = sub_panel_feeds(options).get(sub_id)
+    feed = feeds.get(sub_id)
     if feed is None or not isinstance(data, Mapping):
         return None
     panel_id, position = feed
@@ -128,11 +159,20 @@ def feeder_rating(options: Mapping[str, Any], data: Any, sub_id: str) -> float |
     return None
 
 
-def feeds_of(options: Mapping[str, Any], panel_id: str) -> list[tuple[int, str]]:
-    """Return [(breaker position, sub-panel id)] for one panel's feeder breakers."""
+def feeds_of(
+    options: Mapping[str, Any],
+    panel_id: str,
+    feeds: Mapping[str, tuple[str, int]] | None = None,
+) -> list[tuple[int, str]]:
+    """Return [(breaker position, sub-panel id)] for one panel's feeder breakers.
+
+    feeds is sub_panel_feeds(options), for a caller that has it already.
+    """
+    if feeds is None:
+        feeds = sub_panel_feeds(options)
     return sorted(
         (position, sub_id)
-        for sub_id, (feeder, position) in sub_panel_feeds(options).items()
+        for sub_id, (feeder, position) in feeds.items()
         if feeder == panel_id
     )
 

@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Deux panneaux électriques ne peuvent pas s'alimenter l'un l'autre. Vérifiez les choix sous Panneaux secondaires."
+            "sub_panel_loop": "Deux panneaux électriques ne peuvent pas s'alimenter l'un l'autre. Vérifiez les choix sous Panneaux secondaires.",
+            "sub_panel_same_breaker": "Deux panneaux électriques ne peuvent pas être alimentés par le même disjoncteur. Vérifiez les choix sous Panneaux secondaires."
         }
     },
     "selector": {

@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Dwie rozdzielnice nie mogą zasilać się nawzajem. Sprawdź wybór w sekcji Podrozdzielnice."
+            "sub_panel_loop": "Dwie rozdzielnice nie mogą zasilać się nawzajem. Sprawdź wybór w sekcji Podrozdzielnice.",
+            "sub_panel_same_breaker": "Dwie rozdzielnice nie mogą być zasilane z tego samego wyłącznika. Sprawdź wybór w sekcji Podrozdzielnice."
         }
     },
     "selector": {

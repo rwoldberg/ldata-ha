@@ -262,14 +262,15 @@ def test_second_pole_operational_state_reaches_the_sensor() -> None:
     coordinator = FakeCoordinator(breaker)
     entity = sensor.LDATABreakerOperationalStateSensor(coordinator, breaker)
     assert entity.native_value == "Normal"
-    assert entity.extra_state_attributes == {"second_pole_state": "GFCIErrorPhase2Failed"}
+    # Next to the leg every breaker entity reports.
+    assert entity.extra_state_attributes == {"leg": "both", "second_pole_state": "GFCIErrorPhase2Failed"}
     assert entity.icon == "mdi:alert-circle"
 
     # A live update can clear it again.
     entity.async_write_ha_state = MagicMock()
     service._apply_breaker_update("breaker-test", breaker, {"operationalState2": "Normal"}, source="WS")
     entity._state_update()
-    assert entity.extra_state_attributes == {"second_pole_state": "Normal"}
+    assert entity.extra_state_attributes == {"leg": "both", "second_pole_state": "Normal"}
     assert entity.icon == "mdi:check-circle-outline"
 
 
@@ -284,5 +285,5 @@ def test_one_pole_breaker_has_no_second_pole_operational_state() -> None:
     breaker = _service().parse_panels([panel])["breakers"]["breaker-test"]
 
     entity = sensor.LDATABreakerOperationalStateSensor(FakeCoordinator(breaker), breaker)
-    assert entity.extra_state_attributes == {"second_pole_state": None}
+    assert entity.extra_state_attributes == {"leg": "1", "second_pole_state": None}
     assert entity.icon == "mdi:check-circle-outline"

@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from homeassistant import loader
 from homeassistant.components import frontend
-from homeassistant.config_entries import ConfigEntryDisabler
+from homeassistant.config_entries import ConfigEntryDisabler, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import (
@@ -27,6 +27,7 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components import ldata
 from custom_components.ldata import card, sidebar
 from custom_components.ldata.const import DOMAIN, PANEL_SUBENTRY_TYPE, SHOW_SIDEBAR_PANEL
+from custom_components.ldata.ldata_service import VERSION
 from custom_components.ldata.sidebar import (
     SIDEBAR_ELEMENT,
     SIDEBAR_URL_PATH,
@@ -84,7 +85,19 @@ def _loaded(hass: HomeAssistant, entry: MockConfigEntry, panel_ids) -> None:
 
 
 def _device_id(hass: HomeAssistant, panel_id: str) -> str:
-    return dr.async_get(hass).async_get_device(identifiers={(DOMAIN, panel_id)}).id
+    """Return the device registry id of one of the LDATA entries' load centers."""
+    registry = dr.async_get(hass)
+    by_identifier = getattr(registry, "async_get_device_by_identifier", None)
+    if by_identifier is None:
+        # Cores before 2026.8, where finding a device by identifier alone is
+        # not deprecated yet.
+        return registry.async_get_device(identifiers={(DOMAIN, panel_id)}).id
+    # Newer cores look a device up within its entry; the deprecated lookup
+    # would raise in a test core, which has nowhere to report it.
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if device := by_identifier((DOMAIN, panel_id), entry.entry_id):
+            return device.id
+    raise AssertionError(f"no device for {panel_id}")
 
 
 def _panel(hass: HomeAssistant) -> dict | None:
@@ -149,7 +162,7 @@ async def test_page_loads_the_same_file_as_the_dashboard_card() -> None:
 
         module_url = _panel(hass)["config"]["_panel_custom"]["module_url"]
         assert module_url == await card.async_serve_card(hass)
-        assert module_url.startswith(f"/ldata_static/ldata-panel-card.js?v={ldata.VERSION}-")
+        assert module_url.startswith(f"/ldata_static/ldata-panel-card.js?v={VERSION}-")
         assert "js_url" not in _panel(hass)["config"]["_panel_custom"]
         source = (Path(ldata.__file__).parent / "www" / "ldata-panel-card.js").read_text()
         assert f'customElements.define("{SIDEBAR_ELEMENT}"' in source
@@ -178,6 +191,38 @@ async def test_registered_before_the_entry_has_loaded() -> None:
         # Nothing is loaded; the panels come from what an earlier run found.
         assert DOMAIN not in hass.config_entries.async_loaded_entries(DOMAIN)
         assert _panel(hass)["config"]["panels"] == [{"device_id": _device_id(hass, "p1")}]
+
+
+async def test_option_takes_effect_on_an_entry_that_is_not_loaded() -> None:
+    """Its setup is being retried, or it waits to be signed in again."""
+    async with _home_assistant() as hass:
+        entry = _entry(hass, panels=[("p1", "Main Panel")])
+        entry.mock_state(hass, ConfigEntryState.SETUP_RETRY)
+        assert await ldata.async_setup(hass, {})
+        assert _panel(hass) is None
+
+        hass.config_entries.async_update_entry(entry, options={SHOW_SIDEBAR_PANEL: True})
+        await hass.async_block_till_done()
+        assert _panel(hass)["config"]["panels"] == [{"device_id": _device_id(hass, "p1")}]
+
+        hass.config_entries.async_update_entry(entry, options={SHOW_SIDEBAR_PANEL: False})
+        await hass.async_block_till_done()
+        assert _panel(hass) is None
+
+
+async def test_loaded_entry_is_left_to_its_own_reload() -> None:
+    """A loaded entry reloads for new options, and that updates the item."""
+    async with _home_assistant() as hass:
+        entry = _entry(hass, panels=[("p1", "Main Panel")])
+        entry.mock_state(hass, ConfigEntryState.LOADED)
+        _loaded(hass, entry, ["p1"])
+        assert await ldata.async_setup(hass, {})
+
+        with patch.object(sidebar, "async_update_sidebar_panel", AsyncMock()) as update:
+            hass.config_entries.async_update_entry(entry, options={SHOW_SIDEBAR_PANEL: True})
+            await hass.async_block_till_done()
+
+        update.assert_not_called()
 
 
 async def test_reload_leaves_the_panel_alone() -> None:
@@ -374,7 +419,7 @@ async def test_device_is_looked_up_within_its_entry_where_home_assistant_can() -
     """Newer cores deprecate finding a device by identifier alone."""
     async with _home_assistant() as hass:
         entry = _entry(hass, options={SHOW_SIDEBAR_PANEL: True}, panels=[("p1", "Main Panel")])
-        device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, "p1")})
+        device = dr.async_get(hass).async_get(_device_id(hass, "p1"))
         calls: list = []
 
         def by_identifier(identifier, config_entry_id):

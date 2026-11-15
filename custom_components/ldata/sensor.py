@@ -2663,8 +2663,11 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the second pole's operational state (None on a 1-pole breaker)."""
-        return {"second_pole_state": self._second}
+        """Return the breaker's leg and its second pole's operational state.
+
+        The second pole's state is None on a 1-pole breaker.
+        """
+        return {**super().extra_state_attributes, "second_pole_state": self._second}
 
     @property
     def name_suffix(self) -> str | None:

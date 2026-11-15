@@ -8,7 +8,8 @@ The item follows the config entries, not whether they are loaded. It is
 there as soon as the integration is set up and stays through a reload or a
 cloud outage, because the frontend sends anyone looking at a panel that
 disappears back to their default dashboard — a wall tablet left on this page
-would not come back by itself.
+would not come back by itself. For the same reason, turning the option on or
+off takes effect on an entry that is not loaded too.
 
 The page is the <ldata-sidebar-panel> element defined in the card's own file,
 loaded from the same URL as the Lovelace card (see card.py).
@@ -21,10 +22,16 @@ import logging
 from typing import Any
 
 from homeassistant.components import frontend, panel_custom
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import (
+    SIGNAL_CONFIG_ENTRY_CHANGED,
+    ConfigEntry,
+    ConfigEntryChange,
+    ConfigEntryState,
+)
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import translation
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .card import async_serve_card
 from .const import (
@@ -52,6 +59,13 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 _STATE_KEY = "_sidebar"  # what is registered right now, or absent
 _LOCK_KEY = "_sidebar_lock"
 
+# An entry in one of these states brings the item up to date itself: a loaded
+# one reloads when its options change, and setup and unload end with an update.
+_UPDATES_ITSELF = (
+    ConfigEntryState.LOADED,
+    ConfigEntryState.SETUP_IN_PROGRESS,
+    ConfigEntryState.UNLOAD_IN_PROGRESS,
+)
 
 
 def _safe_area_arguments() -> dict[str, bool]:
@@ -171,13 +185,41 @@ async def _async_title(hass: HomeAssistant) -> str:
     return strings.get(SIDEBAR_TITLE_KEY) or SIDEBAR_TITLE
 
 
+@callback
+def async_follow_entries(hass: HomeAssistant) -> CALLBACK_TYPE:
+    """Update the item when an entry that is not loaded changes.
+
+    An entry whose setup is being retried, or that waits to be signed in
+    again, has nothing running that would notice its options change. Without
+    this, turning the sidebar option on or off there (or changing which
+    breaker feeds a sub-panel) would only show once the entry loads.
+    """
+
+    @callback
+    def _changed(change: ConfigEntryChange, entry: ConfigEntry) -> None:
+        if (
+            change is ConfigEntryChange.UPDATED
+            and entry.domain == DOMAIN
+            and entry.state not in _UPDATES_ITSELF
+            and not hass.is_stopping
+        ):
+            # Not eagerly: this runs inside Home Assistant's own bookkeeping
+            # of the entry.
+            hass.async_create_task(
+                async_update_sidebar_panel(hass), "ldata sidebar panel update", eager_start=False
+            )
+
+    return async_dispatcher_connect(hass, SIGNAL_CONFIG_ENTRY_CHANGED, _changed)
+
+
 async def async_update_sidebar_panel(
     hass: HomeAssistant, *, removed_entry_id: str | None = None
 ) -> None:
     """Add, refresh or remove the sidebar item so it matches the config entries.
 
-    Called when the integration is set up and whenever an entry is set up,
-    unloaded or removed. removed_entry_id names an entry that is being
+    Called when the integration is set up, whenever an entry is set up,
+    unloaded or removed, and when one that is not loaded changes (see
+    async_follow_entries). removed_entry_id names an entry that is being
     deleted, which Home Assistant still lists at that point. Never raises: a
     problem here must not stop a config entry from loading.
     """

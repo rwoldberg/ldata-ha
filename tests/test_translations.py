@@ -207,7 +207,7 @@ def test_translations_cover_the_integration() -> None:
 
     assert {"name", "description"} == set(ENGLISH["options"]["step"]["init"]["sections"][SUB_PANELS])
     assert set(ENGLISH["selector"]["sub_panel_feed"]["options"]) == {NOT_FED}
-    assert "sub_panel_loop" in ENGLISH["options"]["error"]
+    assert set(ENGLISH["options"]["error"]) == {"sub_panel_loop", "sub_panel_same_breaker"}
 
     services = yaml.safe_load((COMPONENT / "services.yaml").read_text(encoding="utf-8"))
     assert set(ENGLISH["services"]) == set(services)

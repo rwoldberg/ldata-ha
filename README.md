@@ -208,7 +208,7 @@ What you get:
 - With the feeder's rating known (a smart feeder's own, or the size you entered), the sub-panel's header shows how much of it is in use under **Panel load**, e.g. *16% of 100 A*, with the same colors as the circuit bars. It is the busier leg's current against the feeder's rating. A main panel shows the same against its main breaker when the card has `main_breaker` set.
 - On a dashboard the sub-panel opens in a popup; on the sidebar page it opens the sub-panel's own tab.
 
-A load center has one feed, a sub-panel can feed another sub-panel, and two load centers cannot feed each other.
+A load center has one feed and a breaker feeds one load center. A sub-panel can feed another sub-panel, but two load centers cannot feed each other.
 
 #### Per-card extras in YAML
 
@@ -227,7 +227,7 @@ Add one entry per breaker — a single card can link more than one, e.g. if a pa
 
 Leviton's API never reports a rating for a dumb breaker (it's not a smart device, so there's no data on it at all) — if you know the breaker's own max amp rating (e.g. it's a 50A double-pole feeding the sub-panel), add `rating` and it shows on the label the same way a smart breaker's does.
 
-Clicking the linked breaker opens that sub-panel's own full breaker layout right there in a popup — a live, independent `ldata-panel-card` for the sub-panel's `device_id`, with nothing more to configure than what's already in the entry above. Close it with ✕, Escape, or by clicking outside it.
+Clicking the linked breaker opens that sub-panel's own full breaker layout right there in a popup — a live, independent `ldata-panel-card` for the sub-panel's `device_id`, with nothing more to configure than what's already in the entry above. It is shown with this card's settings (`toggle`, `confirm`, `show_power`, `show_alarms`, `show_panel_info` and `appearance`). Close it with ✕, Escape, or by clicking outside it.
 
 If you'd rather leave this card entirely and jump to a real dashboard view instead — say the sub-panel already has its own `ldata-panel-card` on some other dashboard — add `view_path` with the URL path to it (open that dashboard/view in your browser and copy the path after the domain, e.g. `/lovelace/DASHBOARD_NAME`) and it replaces the popup with a normal page navigation:
 

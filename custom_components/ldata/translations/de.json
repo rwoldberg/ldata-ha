@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Zwei Sicherungskästen können sich nicht gegenseitig versorgen. Prüfe die Auswahl unter Unterverteilungen."
+            "sub_panel_loop": "Zwei Sicherungskästen können sich nicht gegenseitig versorgen. Prüfe die Auswahl unter Unterverteilungen.",
+            "sub_panel_same_breaker": "Zwei Sicherungskästen können nicht von derselben Sicherung versorgt werden. Prüfe die Auswahl unter Unterverteilungen."
         }
     },
     "selector": {

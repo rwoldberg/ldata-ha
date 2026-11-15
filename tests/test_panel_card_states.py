@@ -137,3 +137,23 @@ def test_identify_and_a_miswire_on_an_afci_only_breaker() -> None:
     assert 'cause.key === "miswire" && !s.hasGf ? cause.gf' in source
     miswire = re.search(r'\[/\^AFCIMiswire\$/i, "miswire", "(\w+)", "(\w+)"\]', CARD)
     assert miswire is not None and miswire.groups() == ("off", "slow")
+
+
+def test_a_breaker_that_needs_service_is_announced_that_way() -> None:
+    """Screen readers and the tooltip say what the label shows."""
+    source = re.sub(r"\s+", " ", CARD)
+    assert 'tripped: t(s.failed ? "card.state.service" : "card.state.tripped")' in source
+    # The tooltip names the state of every tripped breaker, with its cause if known.
+    assert 'cause ? `${stateWord} · ${cause}` : s.vis === "tripped" ? stateWord : null' in source
+
+
+def test_sub_panel_popup_shows_it_with_this_cards_settings() -> None:
+    popup = re.search(r"\n  _openSubPanel\(deviceId, name\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
+    assert popup is not None
+    config = re.search(r"card\.setConfig\(\{(.*?)\}\);", popup.group(1), re.DOTALL)
+    assert config is not None
+    given = set(re.findall(r"(\w+): cfg\.(\w+),", config.group(1)))
+    assert given == {(name, name) for name in ("appearance", "confirm", "toggle", "show_power", "show_alarms", "show_panel_info")}
+    # What belongs to this card's own panel stays here.
+    for option in ("rotate_180", "main_breaker", "sub_panels"):
+        assert option not in config.group(1), option

@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Dos centros de carga no pueden alimentarse entre sí. Revise las opciones elegidas en Subpaneles."
+            "sub_panel_loop": "Dos centros de carga no pueden alimentarse entre sí. Revise las opciones elegidas en Subpaneles.",
+            "sub_panel_same_breaker": "Dos centros de carga no pueden alimentarse desde el mismo interruptor. Revise las opciones elegidas en Subpaneles."
         }
     },
     "selector": {

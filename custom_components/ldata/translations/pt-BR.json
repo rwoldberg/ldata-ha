@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "Dois quadros de distribuição não podem alimentar um ao outro. Verifique as escolhas em Quadros secundários."
+            "sub_panel_loop": "Dois quadros de distribuição não podem alimentar um ao outro. Verifique as escolhas em Quadros secundários.",
+            "sub_panel_same_breaker": "Dois quadros de distribuição não podem ser alimentados pelo mesmo disjuntor. Verifique as escolhas em Quadros secundários."
         }
     },
     "selector": {

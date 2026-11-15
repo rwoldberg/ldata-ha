@@ -85,7 +85,8 @@
             }
         },
         "error": {
-            "sub_panel_loop": "To eltavler kan ikke forsyne hinanden. Kontrollér valgene under Undertavler."
+            "sub_panel_loop": "To eltavler kan ikke forsyne hinanden. Kontrollér valgene under Undertavler.",
+            "sub_panel_same_breaker": "To eltavler kan ikke forsynes fra den samme automatsikring. Kontrollér valgene under Undertavler."
         }
     },
     "selector": {
