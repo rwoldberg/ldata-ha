@@ -432,13 +432,19 @@ def text(name, body, cap, loc, mat, face="regular", spacing=1.0, rot_z=0.0, stre
 
 
 # ---- materials -----------------------------------------------------------------
+# Standard and smart breakers are printed in the same ink. Leviton's photos of
+# standard breakers (LB120-T and the rest) show it lighter, but on breakers of
+# both kinds side by side in a panel it is the same.
+INK = (0.062, 0.062, 0.066)
+
+
 def mats(kind):
     return {
         "body": material("body", (0.715, 0.716, 0.712), rough=0.46, sss=0.10),
         "handle": material("handle", (0.722, 0.723, 0.719), rough=0.38, sss=0.12),
         "dark": material("dark", (0.010, 0.010, 0.010), rough=0.7),
         "lens": material("lens", (0.004, 0.004, 0.005), rough=0.10, coat=0.7),
-        "ink": material("ink_" + kind, (0.062, 0.062, 0.066) if kind == "smart" else (0.33, 0.33, 0.33), rough=0.6, spec=0.2),
+        "ink": material("ink", INK, rough=0.6, spec=0.2),
         "steel": material("steel", (0.800, 0.803, 0.800), rough=0.38, coat=0.12),
     }
 

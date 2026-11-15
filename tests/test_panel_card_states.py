@@ -88,3 +88,38 @@ def test_an_undefined_operational_state_is_not_an_alarm() -> None:
 
     assert fine is not None
     assert {"normal", "undefined"} <= set(re.findall(r'"([a-z]*)"', fine.group(1)))
+
+
+def test_every_failing_operational_state_needs_service() -> None:
+    # Leviton's app shows any operational state but Normal and UNDEFINED as
+    # needing service. The breaker locks out: the card draws it tripped, with
+    # the AF and GF LEDs flashing fast, for either pole.
+    fine = re.search(r"const OP_FINE = \[(.*?)\];", CARD)
+    assert fine is not None
+    fine_states = set(re.findall(r'"([a-z]*)"', fine.group(1)))
+    for state in OPERATIONAL_STATES:
+        assert (state.lower() in fine_states) == (state in {"Normal", "UNDEFINED"}), state
+
+    source = re.sub(r"\s+", " ", CARD)
+    assert "const failed = !!ops && (!opIsFine(op) || !opIsFine(op2));" in source
+    assert "ops.attributes.second_pole_state" in source
+    assert 'else if (tripped || failed) vis = "tripped";' in source
+    assert "tripped || failed || (heldOff && s.gen1) ? \"trip\"" in source
+    assert 's.ledAf = !s.hasAf ? "off" : failed ? "fast"' in source
+    assert 's.ledGf = !s.hasGf ? "off" : failed ? "fast"' in source
+
+
+def test_led_blink_rates_follow_levitons_tables() -> None:
+    # Per flash: Gen 2 parallel arc fault once a second (SC-050923), Gen 1
+    # every half second (SC-030123), a failed self-test 0.1 s on and off,
+    # a miswired neutral once every three seconds.
+    def period(name: str) -> float:
+        rule = re.search(rf'\[data-af="{name}"\] > \.led--af[^{{]*\{{ animation: ldp-blink(?:-slow)? ([0-9.]+)s', CARD)
+        assert rule is not None, name
+        return float(rule.group(1))
+
+    assert period("blink") == 1
+    assert period("quick") == 0.5
+    assert period("fast") == 0.2
+    assert period("slow") == 3
+    assert re.search(r'const GEN1_BLINK = \{ blink: "quick" \};', CARD)

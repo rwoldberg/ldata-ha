@@ -17,6 +17,10 @@
  *                                     ground fault (AFCI, GFCI and dual
  *                                     function breakers, which are drawn
  *                                     with those LEDs and an OFF/TEST handle)
+ *   red window, AF and GF flashing .. the breaker failed its self-test (any
+ *     fast                            operational state but Normal, on
+ *                                     either pole): it locks out and needs
+ *                                     service
  * A Gen 1 smart breaker has no "OFF" LED: it can't be switched back on
  * remotely, so switching it off remotely trips it. Its LEDs show through a
  * light strip down the seam; a plain one has a single unlabelled LED there,
@@ -72,7 +76,7 @@ const CARD_VERSION = "3.1.0";
 // tools/panel_card_art. ART_REV is the content hash of that folder (written
 // by build_assets.py); it is part of every image URL, so browsers fetch new
 // artwork after an upgrade instead of serving a cached copy.
-const ART_REV = "258d2efb71";
+const ART_REV = "30073e47f0";
 const ART_SERVED = new URL("/ldata_static/img/", location.href).href; // always served by the integration
 
 // Where this file was loaded from. `import.meta.url` would say, but it is a
@@ -297,14 +301,18 @@ function tripCause(value) {
 // Leviton's own app shows every one of these as tripped, UpstreamFault too.
 const isTripState = (value) => /trip|^UpstreamFault$/i.test(value == null ? "" : String(value)) || !!tripCause(value);
 
-// The breaker's electronics failed their self-test (operational state
-// AFCISelfTestFailure, AFCIGFCISelfTestFailure, GFCISelfTestFailureWithLVST):
-// its cause LEDs flash fast and it has to be replaced.
-const isSelfTestFailure = (value) => /SelfTestFailure/i.test(value == null ? "" : String(value));
 // Operational states that are not a problem. Leviton's app treats UNDEFINED
-// like Normal.
+// like Normal. Any other one (a failed self-test, EndOfLife, a GFCI error),
+// on either pole, means the breaker's own electronics have failed: it locks
+// itself out, and Leviton's app says it needs service. Leviton's tables draw
+// that with a red window and the AF and GF LEDs flashing fast.
 const OP_FINE = ["normal", "undefined", "unknown", "unavailable", ""];
 const opIsFine = (value) => OP_FINE.includes(String(value == null ? "" : value).toLowerCase());
+// A Gen 1 breaker blinks its AF LED twice as fast for a parallel arc fault:
+// every half second in its spec sheet (SC-030123), against once a second on
+// a Gen 2 (SC-050923). Leviton's AFCI/GFCI brochure gives Gen 1 one second;
+// change this row if a real breaker disagrees.
+const GEN1_BLINK = { blink: "quick" };
 
 // Material Design Icons (Apache 2.0) — inlined so the card has no runtime
 // dependency on HA's icon set being loaded.
@@ -396,6 +404,7 @@ const EN = {
       "off": "Off",
       "off_remote": "Off (remote)",
       "tripped": "Tripped",
+      "service": "Needs service",
       "unavailable": "Unavailable",
       "unknown": "Unknown",
       "switching": "Switching…",
@@ -497,6 +506,7 @@ const EN = {
       "breaker_power": "Breaker power",
       "power_on_hint": "On: power is flowing",
       "power_tripped_hint": "Tripped: check the circuit before resetting it",
+      "power_service_hint": "The breaker has failed: have an electrician check or replace it",
       "power_remote_off_hint": "Switched off remotely",
       "gen1_note": "Gen 1 breaker: it can be switched off remotely but must be reset by hand at the panel.",
       "control_disabled": "Remote control is off. Turn on {option} in the LDATA integration options to switch breakers from Home Assistant.",
@@ -1415,6 +1425,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       s.ledAf = "off";
       s.ledGf = "off";
       s.cause = null;
+      s.failed = false;
       s.alarms = [];
       return;
     }
@@ -1431,10 +1442,14 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const tripped = isTripState(raw) || isTripState(bsa.second_pole_state);
     const cause = tripped ? tripCause(raw) || tripCause(bsa.second_pole_state) : null;
     const remoteOff = bsa.remote_state === "RemoteOFF";
+    const ops = available && r.operationalState ? st[r.operationalState] : null;
+    const op = ops ? ops.state : null;
+    const op2 = ops && ops.attributes ? ops.attributes.second_pole_state : null;
+    const failed = !!ops && (!opIsFine(op) || !opIsFine(op2));
 
     let vis;
     if (!available) vis = "unavailable";
-    else if (tripped) vis = "tripped";
+    else if (tripped || failed) vis = "tripped";
     else if (isOn) vis = "on";
     else if (remoteOff && raw !== "ManualOFF") vis = "remote-off";
     else vis = "off";
@@ -1468,7 +1483,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     // breaker is still where it was: draw it that way under the veil rather
     // than as switched off.
     const heldOff = !isOn && remoteOff && raw !== "ManualOFF";
-    const handle = tripped || (heldOff && s.gen1) ? "trip" : isOn || heldOff ? "on" : "off";
+    const handle = tripped || failed || (heldOff && s.gen1) ? "trip" : isOn || heldOff ? "on" : "off";
     s.handle = !available ? this._handles.get(r.status) || "on" : handle;
     if (available) this._handles.set(r.status, s.handle);
     // A Gen 1 breaker's LED only blinks for Identify: it has no OFF LED to
@@ -1476,14 +1491,14 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     s.led = s.blinkOn || (vis === "pending" && !s.gen1) ? "blink" : vis === "remote-off" && !s.gen1 ? "on" : "off";
     // The cause LEDs are fed from the line side: they stay lit after a trip.
     const lit = available && tripped && cause;
-    const op = available && r.operationalState && st[r.operationalState] ? st[r.operationalState].state : null;
-    const selfTest = isSelfTestFailure(op);
-    s.cause = lit ? cause.key : null;
+    s.failed = failed;
+    s.cause = lit && !failed ? cause.key : null;
     // Identify blinks a protected Gen 1 breaker's AF and GF LEDs together,
     // unless they are showing a fault.
     const ident = s.gen1 && s.blinkOn ? "blink" : "off";
-    s.ledAf = !s.hasAf ? "off" : selfTest ? "fast" : lit ? cause.af : ident;
-    s.ledGf = !s.hasGf ? "off" : selfTest ? "fast" : lit ? cause.gf : ident;
+    const rate = (v) => (s.gen1 && GEN1_BLINK[v]) || v;
+    s.ledAf = !s.hasAf ? "off" : failed ? "fast" : lit ? rate(cause.af) : ident;
+    s.ledGf = !s.hasGf ? "off" : failed ? "fast" : lit ? rate(cause.gf) : ident;
     s.watts = cfg.show_power ? this._num(r.watts) : null;
     s.amps = cfg.show_power ? this._num(r.amps) : null;
 
@@ -1493,6 +1508,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       if (r.overVoltage && st[r.overVoltage] && st[r.overVoltage].state === "on") alarms.push(this._t("card.alarm.over_voltage"));
       if (r.underVoltage && st[r.underVoltage] && st[r.underVoltage].state === "on") alarms.push(this._t("card.alarm.under_voltage"));
       if (op && !opIsFine(op)) alarms.push(this._raw(op));
+      if (op2 && !opIsFine(op2) && op2 !== op) alarms.push(`${this._t("card.detail.second_pole")}: ${this._raw(op2)}`);
     }
     s.alarms = alarms;
 
@@ -1682,8 +1698,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         <div class="meter">
           <button type="button" class="m-main" data-act="more" data-eid="${esc(r.watts || "")}" ${r.watts ? "" : "disabled"}>
             <span class="m-cap">${esc(t("card.meter.panel_load"))}</span>
-            <span class="m-big" data-h="total"></span>
-            <span class="m-amps" data-h="amps"></span>
+            <span class="m-read"><span class="m-big" data-h="total"></span><span class="m-amps" data-h="amps"></span></span>
             <span class="m-use" data-h="use" hidden><span class="m-usebar"><i data-h="useFill"></i></span><span class="m-usecap" data-h="useCap"></span></span>
           </button>
           <div class="m-grid">${cells}</div>
@@ -1797,7 +1812,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       case "tripped":
         // What tripped it, when the breaker says. The line is short and
         // already in the alarm colour, so the cause stands in for "Tripped".
-        return { text: [t(s.cause ? `card.trip.${s.cause}` : "card.state.tripped"), alarm].filter(Boolean).join(" · "), tone: "bad" };
+        return { text: [t(s.failed ? "card.state.service" : s.cause ? `card.trip.${s.cause}` : "card.state.tripped"), alarm].filter(Boolean).join(" · "), tone: "bad" };
       default:
         break;
     }
@@ -2410,6 +2425,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
           { label: this._t("card.alarm.over_voltage"), eid: r.overVoltage, kind: "problem" },
           { label: this._t("card.alarm.under_voltage"), eid: r.underVoltage, kind: "problem" },
           { label: d("operational_state"), eid: r.operationalState, kind: "opstate" },
+          is2p
+            ? { label: d("second_pole"), eid: r.operationalState, attr: "second_pole_state", fmt: raw, tone: (v) => (v === "Normal" ? "good" : opIsFine(v) ? "" : "bad") }
+            : null,
         ],
       ],
       [
@@ -2516,7 +2534,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         on: "card.state.on",
         off: "card.state.off",
         "remote-off": "card.state.off_remote",
-        tripped: "card.state.tripped",
+        tripped: s.failed ? "card.state.service" : "card.state.tripped",
         unavailable: "card.state.unavailable",
         pending: s.pendingTarget === "on" ? "card.state.switching_on" : "card.state.switching_off",
       }[s.vis] || "card.state.unknown"
@@ -2534,13 +2552,13 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     if (els.pbtn) {
       const off = s.switchOn;
       const blocked = !off && !s.canRemoteOn;
-      const key = `${off}|${s.vis}|${s.switchAvailable}|${this._detailConfirm}|${blocked}`;
+      const key = `${off}|${s.vis}|${s.failed}|${s.switchAvailable}|${this._detailConfirm}|${blocked}`;
       this._set(c, "power", key, () => {
         els.pstate.textContent =
           s.vis === "pending"
             ? word
             : s.vis === "tripped"
-            ? t("card.detail.power_tripped_hint")
+            ? t(s.failed ? "card.detail.power_service_hint" : "card.detail.power_tripped_hint")
             : off
             ? t("card.detail.power_on_hint")
             : s.vis === "remote-off"
@@ -2821,9 +2839,13 @@ button { font: inherit; }
 
 .meter { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 0.55em 2em; }
 :host([compact]) .meter { grid-template-columns: minmax(0, 1fr); }
-.m-main { all: unset; display: inline-grid; grid-template-columns: auto auto; justify-content: start; justify-self: start; column-gap: 0.55em; align-items: baseline; cursor: pointer; }
+/* The panel's load and its amps are one line of text, so they can't be laid
+   over each other: as two grid columns, Safari could leave the watts' column
+   narrower than the number once the card's size changed. */
+.m-main { all: unset; display: block; justify-self: start; cursor: pointer; }
 .m-main:disabled { cursor: default; }
-.m-main .m-cap { grid-column: 1 / -1; }
+.m-main .m-cap { display: block; }
+.m-read { display: block; white-space: nowrap; }
 .m-cap {
   color: var(--ink-3);
   font-size: 0.66em;
@@ -2843,9 +2865,10 @@ button { font: inherit; }
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.m-amps { color: var(--ink-2); font-size: 0.98em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.m-amps { margin-left: 0.55em; color: var(--ink-2); font-size: 0.98em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.m-amps:empty { display: none; }
 /* Share of the feeding (or main) breaker in use, coloured as the circuit bars. */
-.m-use { grid-column: 1 / -1; display: flex; align-items: center; gap: 0.5em; margin-top: 0.3em; }
+.m-use { display: flex; align-items: center; gap: 0.5em; margin-top: 0.3em; }
 .m-use[hidden] { display: none; }
 .m-usebar { flex: 0 0 5.5em; height: 3px; border-radius: 2px; background: color-mix(in srgb, var(--ink-2) 22%, transparent); overflow: hidden; }
 .m-usebar i { display: block; width: 0; height: 100%; background: #2f9a4f; transition: width 0.4s ease; }
@@ -2962,7 +2985,6 @@ button { font: inherit; }
 /* Amp rating printed on the breaker. */
 .ink { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; mix-blend-mode: multiply; }
 .ink text { font-family: Arial, Helvetica, sans-serif; fill: #3c3c3c; fill-opacity: 0.88; }
-.bkr--dumb .ink text, .bkr--link .ink text, .hero--std .ink text, .main .ink text { fill: #858585; }
 
 /* The breaker's status LED, when lit: lens plus bloom. */
 .led {
@@ -2981,6 +3003,8 @@ button { font: inherit; }
 [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf { animation: ldp-blink-slow 3s steps(1, end) infinite; }
 /* A failed self-test: both flash five times a second. */
 [data-af="fast"] > .led--af, [data-gf="fast"] > .led--gf { animation: ldp-blink 0.2s steps(1, end) infinite; }
+/* A Gen 1 parallel arc fault: every half second. */
+[data-af="quick"] > .led--af, [data-gf="quick"] > .led--gf { animation: ldp-blink 0.5s steps(1, end) infinite; }
 @keyframes ldp-blink { 0% { opacity: 1; } 50% { opacity: 0; } }
 @keyframes ldp-blink-slow { 0% { opacity: 1; } 17% { opacity: 0; } }
 
@@ -3103,6 +3127,7 @@ button { font: inherit; }
 @media (prefers-reduced-motion: reduce) {
   [data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf,
   [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf, [data-af="fast"] > .led--af, [data-gf="fast"] > .led--gf,
+  [data-af="quick"] > .led--af, [data-gf="quick"] > .led--gf,
   .lbl[data-vis="pending"] .lbl-sub { animation: none; opacity: 1; }
   .lbl-bar i { transition: none; }
 }

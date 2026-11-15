@@ -234,3 +234,55 @@ def test_trip_cause_and_protection_reach_the_panel_card() -> None:
 
     status = LDATABinarySensor(FakeCoordinator(breaker), breaker)
     assert status.extra_state_attributes["model"] == "LB120-GST"
+
+
+def test_second_pole_operational_state_reaches_the_sensor() -> None:
+    """A 2-pole breaker reports each pole's health; the second pole's is kept.
+
+    Leviton's app shows operationalState2 as the breaker's status when only
+    the second pole has failed.
+    """
+    payload = {
+        **_breaker_payload(),
+        "operationalState": "Normal",
+        "operationalState2": "GFCIErrorPhase2Failed",
+    }
+    panel = {
+        "id": "panel-test",
+        "name": "Test Panel",
+        "updateVersion": "2.1.0",
+        "residentialBreakers": [payload],
+    }
+    service = _service()
+    breaker = service.parse_panels([panel])["breakers"]["breaker-test"]
+
+    assert breaker["operationalState"] == "Normal"
+    assert breaker["operationalState2"] == "GFCIErrorPhase2Failed"
+
+    coordinator = FakeCoordinator(breaker)
+    entity = sensor.LDATABreakerOperationalStateSensor(coordinator, breaker)
+    assert entity.native_value == "Normal"
+    assert entity.extra_state_attributes == {"second_pole_state": "GFCIErrorPhase2Failed"}
+    assert entity.icon == "mdi:alert-circle"
+
+    # A live update can clear it again.
+    entity.async_write_ha_state = MagicMock()
+    service._apply_breaker_update("breaker-test", breaker, {"operationalState2": "Normal"}, source="WS")
+    entity._state_update()
+    assert entity.extra_state_attributes == {"second_pole_state": "Normal"}
+    assert entity.icon == "mdi:check-circle-outline"
+
+
+def test_one_pole_breaker_has_no_second_pole_operational_state() -> None:
+    payload = {**_breaker_payload(), "poles": 1, "operationalState": "Normal", "operationalState2": ""}
+    panel = {
+        "id": "panel-test",
+        "name": "Test Panel",
+        "updateVersion": "2.1.0",
+        "residentialBreakers": [payload],
+    }
+    breaker = _service().parse_panels([panel])["breakers"]["breaker-test"]
+
+    entity = sensor.LDATABreakerOperationalStateSensor(FakeCoordinator(breaker), breaker)
+    assert entity.extra_state_attributes == {"second_pole_state": None}
+    assert entity.icon == "mdi:check-circle-outline"

@@ -127,3 +127,23 @@ def test_dark_appearance_keeps_the_cover_white() -> None:
     brightness = re.search(r"brightness\(([0-9.]+)\)", rule.group(1))
     assert brightness is not None
     assert 0.85 <= float(brightness.group(1)) < 1
+
+
+def test_header_load_and_amps_are_one_line_of_text() -> None:
+    # As two grid columns of a button, Safari could leave the watts' column
+    # narrower than the number after the card was resized, and the amps were
+    # drawn over the "W" (PR #118). In one line of text they can't overlap.
+    assert '<span class="m-read"><span class="m-big" data-h="total"></span><span class="m-amps" data-h="amps"></span></span>' in CARD
+    main = re.search(r"\.m-main \{([^}]*)\}", CARD)
+    assert main is not None
+    assert "grid" not in main.group(1)
+
+
+def test_standard_and_smart_breakers_are_printed_in_the_same_ink() -> None:
+    # Leviton's photos of standard breakers show their printing lighter, but
+    # in a panel with both kinds it is the same (PR #118).
+    scene = (WWW.parents[2] / "tools" / "panel_card_art" / "ld_scene.py").read_text()
+    assert re.search(r"^INK = \([0-9., ]+\)$", scene, re.MULTILINE)
+    assert '"ink": material("ink", INK,' in scene
+    # The rating the card prints on a breaker has one colour for every kind.
+    assert len(re.findall(r"\.ink text[^{]*\{[^}]*\bfill:", CARD)) == 1

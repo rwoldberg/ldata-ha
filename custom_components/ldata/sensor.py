@@ -2630,7 +2630,9 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
     """Breaker operational state diagnostic sensor.
 
     Reports the operationalState field from the Leviton API.
-    Normally "Normal"; other values indicate a fault condition.
+    Normally "Normal"; other values indicate a fault condition. The second
+    pole of a 2-pole breaker reports its own (operationalState2), kept in the
+    second_pole_state attribute.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -2640,6 +2642,7 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("operationalState", "Normal")
+        self._second = data.get("operationalState2") or None
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
@@ -2649,6 +2652,7 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
             if breakers := self.coordinator.data.get("breakers"):
                 if new_data := breakers.get(self.breaker_data["id"]):
                     self._state = new_data.get("operationalState", "Normal")
+                    self._second = new_data.get("operationalState2") or None
         except (KeyError, TypeError):
             pass
         self.async_write_ha_state()
@@ -2656,6 +2660,11 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
     @property
     def native_value(self) -> StateType:
         return self._state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the second pole's operational state (None on a 1-pole breaker)."""
+        return {"second_pole_state": self._second}
 
     @property
     def name_suffix(self) -> str | None:
@@ -2668,6 +2677,8 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
     @property
     def icon(self) -> str:
         if self._state and self._state != "Normal":
+            return "mdi:alert-circle"
+        if self._second and self._second not in ("Normal", "UNDEFINED"):
             return "mdi:alert-circle"
         return "mdi:check-circle-outline"
 
