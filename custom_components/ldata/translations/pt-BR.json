@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "A conta já está configurada",
-            "reauth_successful": "A reautenticação foi bem-sucedida"
+            "reauth_successful": "A reautenticação foi bem-sucedida",
+            "unknown": "Erro inesperado"
         },
         "error": {
             "cannot_connect": "Falha ao conectar",

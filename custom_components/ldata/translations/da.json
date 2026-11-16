@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Kontoen er allerede konfigureret",
-            "reauth_successful": "Genautentificering lykkedes"
+            "reauth_successful": "Genautentificering lykkedes",
+            "unknown": "Uventet fejl"
         },
         "error": {
             "cannot_connect": "Forbindelse mislykkedes",

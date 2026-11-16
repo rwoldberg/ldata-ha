@@ -37,7 +37,8 @@
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-      "reauth_successful": "Re-authentication successful"
+      "reauth_successful": "Re-authentication successful",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
     }
   },
   "options": {

@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Эта учётная запись уже добавлена в Home Assistant",
-            "reauth_successful": "Повторная аутентификация выполнена успешно"
+            "reauth_successful": "Повторная аутентификация выполнена успешно",
+            "unknown": "Непредвиденная ошибка"
         },
         "error": {
             "cannot_connect": "Не удалось подключиться",

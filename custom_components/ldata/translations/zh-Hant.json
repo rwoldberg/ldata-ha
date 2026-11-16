@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "帳號已經設定完成",
-            "reauth_successful": "重新認證成功"
+            "reauth_successful": "重新認證成功",
+            "unknown": "未預期錯誤"
         },
         "error": {
             "cannot_connect": "連線失敗",

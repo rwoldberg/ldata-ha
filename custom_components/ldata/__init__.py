@@ -264,6 +264,33 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         _LOGGER.exception("Failed to auto-register the LDATA panel card as a Lovelace resource")
 
 
+async def _async_unregister_frontend(hass: HomeAssistant) -> None:
+    """Take the panel card's Lovelace resource out once no entry is left.
+
+    Without entries the integration is not set up after a restart, so
+    nothing serves the card's file any more; left in, the resource would fail
+    to load on every page of the frontend. Dashboards that still hold the
+    card show it as one that doesn't exist, as they would anyway.
+    """
+    hass.data.get(DOMAIN, {}).pop("_frontend_registered", None)
+    lovelace = hass.data.get(LOVELACE_DATA)
+    if lovelace is None or lovelace.resource_mode != MODE_STORAGE:
+        return
+    resources = lovelace.resources
+    try:
+        # As in _async_register_frontend: read unloaded, the collection
+        # looks empty.
+        if not resources.loaded:
+            await resources.async_load()
+            resources.loaded = True
+        for resource in list(resources.async_items()):
+            if resource["url"].split("?", 1)[0] == CARD_URL:
+                await resources.async_delete_item(resource["id"])
+                _LOGGER.info("Removed the LDATA panel card resource %s", resource["url"])
+    except Exception:
+        _LOGGER.exception("Failed to remove the LDATA panel card's Lovelace resource")
+
+
 def _resolve_panel_id_for_device(
     device,
     existing_panel_ids: set[str],
@@ -1353,6 +1380,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # for one) list them.
     await async_update_sidebar_panel(hass)
 
+    # The card's resource is added once per run (see async_setup) and taken
+    # out with the last entry (async_remove_entry); an entry added after that
+    # puts it back. During startup, async_setup's own call does it.
+    if hass.state == CoreState.running:
+        await _async_register_frontend(hass)
+
     return True
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -1386,8 +1419,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Drop a deleted entry from the sidebar panel."""
+    """Drop a deleted entry from the sidebar panel, and the card with the last one."""
     await async_update_sidebar_panel(hass, removed_entry_id=entry.entry_id)
+    # Newer cores take the entry off their list before calling this, older
+    # ones after.
+    if not any(
+        other.entry_id != entry.entry_id
+        for other in hass.config_entries.async_entries(DOMAIN)
+    ):
+        await _async_unregister_frontend(hass)
 
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""

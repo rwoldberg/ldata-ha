@@ -30,7 +30,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import device_registry as dr
 
-from .const import DOMAIN
+from .const import DOMAIN, PANEL_SUBENTRY_TYPE
 
 SUB_PANELS = "sub_panels"
 # The form's choice for a load center that no other one feeds.
@@ -175,6 +175,20 @@ def feeds_of(
         for sub_id, (feeder, position) in feeds.items()
         if feeder == panel_id
     )
+
+
+def panel_subentries(entry: Any) -> dict[str, Any]:
+    """Return the entry's load center subentries, by the panel id each is for.
+
+    An entry keeps one for every load center it has found, so they also
+    tell the load centers of an entry that is not loaded, and give a name
+    to one that Leviton no longer reports.
+    """
+    return {
+        subentry.unique_id: subentry
+        for subentry in getattr(entry, "subentries", {}).values()
+        if subentry.subentry_type == PANEL_SUBENTRY_TYPE and subentry.unique_id
+    }
 
 
 def panel_device(

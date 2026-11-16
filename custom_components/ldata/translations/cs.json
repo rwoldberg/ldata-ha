@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Účet je již nastaven",
-            "reauth_successful": "Opětovné ověření bylo úspěšné"
+            "reauth_successful": "Opětovné ověření bylo úspěšné",
+            "unknown": "Neočekávaná chyba"
         },
         "error": {
             "cannot_connect": "Nepodařilo se připojit",

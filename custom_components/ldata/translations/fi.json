@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Tili on jo määritetty",
-            "reauth_successful": "Uudelleentodennus onnistui"
+            "reauth_successful": "Uudelleentodennus onnistui",
+            "unknown": "Odottamaton virhe"
         },
         "error": {
             "cannot_connect": "Yhteyden muodostaminen epäonnistui",

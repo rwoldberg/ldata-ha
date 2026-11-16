@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Konto jest już skonfigurowane",
-            "reauth_successful": "Ponowne uwierzytelnienie się powiodło"
+            "reauth_successful": "Ponowne uwierzytelnienie się powiodło",
+            "unknown": "Nieoczekiwany błąd"
         },
         "error": {
             "cannot_connect": "Nie można nawiązać połączenia",

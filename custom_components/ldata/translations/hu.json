@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "A fiók már konfigurálva van",
-            "reauth_successful": "Az újrahitelesítés sikeres volt"
+            "reauth_successful": "Az újrahitelesítés sikeres volt",
+            "unknown": "Váratlan hiba"
         },
         "error": {
             "cannot_connect": "Sikertelen csatlakozás",

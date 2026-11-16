@@ -37,12 +37,12 @@ from .card import async_serve_card
 from .const import (
     DOMAIN,
     LOGGER_NAME,
-    PANEL_SUBENTRY_TYPE,
     SHOW_SIDEBAR_PANEL,
     SHOW_SIDEBAR_PANEL_DEFAULT,
 )
+from .ldata_service import LDATAService
 from .sub_panels import panel_device as _panel_device
-from .sub_panels import sub_panel_feeds
+from .sub_panels import panel_subentries, sub_panel_feeds
 
 # The page's address (/ldata). Dashboards must have a hyphen in theirs, so a
 # user-made dashboard cannot already be using this one.
@@ -58,6 +58,7 @@ _LOGGER = logging.getLogger(LOGGER_NAME)
 
 _STATE_KEY = "_sidebar"  # what is registered right now, or absent
 _LOCK_KEY = "_sidebar_lock"
+_REPORTED_KEY = "_sidebar_reported"  # entry id -> the panels it last reported
 
 # An entry in one of these states brings the item up to date itself: a loaded
 # one reloads when its options change, and setup and unload end with an update.
@@ -104,19 +105,28 @@ def _panel_ids(hass: HomeAssistant, entry: ConfigEntry) -> list[Any]:
     """Return the ids of the entry's load centers.
 
     A loaded entry knows them from Leviton. One that is not loaded (still
-    starting, reloading, cloud unreachable) has the panels an earlier run
-    found recorded as config subentries, so the page keeps showing the same
-    load centers instead of going empty.
+    starting, reloading, cloud unreachable) keeps what it last reported in
+    this run of Home Assistant, so the page keeps showing the same load
+    centers instead of going empty. Before it has reported anything, the
+    panels an earlier run found stand in, recorded as config subentries.
+    Those are never removed, so they are not used once Leviton has spoken:
+    a reload would otherwise put back, for as long as the entry takes to
+    load, a load center Leviton no longer reports.
+
+    A load center left out of a fetch that came back incomplete (Leviton
+    leaves out an LWHEM hub that is offline) keeps its tab.
     """
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    data = getattr(coordinator, "data", None)
-    if data:
-        return [panel["id"] for panel in data.get("panels", []) if panel.get("id")]
-    return [
-        subentry.unique_id
-        for subentry in getattr(entry, "subentries", {}).values()
-        if subentry.subentry_type == PANEL_SUBENTRY_TYPE and subentry.unique_id
-    ]
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    reported = domain_data.setdefault(_REPORTED_KEY, {})
+    data = getattr(domain_data.get(entry.entry_id), "data", None)
+    if not data:
+        return list(reported.get(entry.entry_id) or panel_subentries(entry))
+    ids = [panel["id"] for panel in data.get("panels", []) if panel.get("id")]
+    if LDATAService.FETCH_PANELS in (data.get(LDATAService.INCOMPLETE_FETCHES) or ()):
+        earlier = reported.get(entry.entry_id) or list(panel_subentries(entry))
+        ids += [panel_id for panel_id in earlier if panel_id not in ids]
+    reported[entry.entry_id] = ids
+    return ids
 
 
 def _panel_devices(hass: HomeAssistant, entries: list[ConfigEntry]) -> list[dict[str, str]]:
@@ -220,8 +230,9 @@ async def async_update_sidebar_panel(
     Called when the integration is set up, whenever an entry is set up,
     unloaded or removed, and when one that is not loaded changes (see
     async_follow_entries). removed_entry_id names an entry that is being
-    deleted, which Home Assistant still lists at that point. Never raises: a
-    problem here must not stop a config entry from loading.
+    deleted: newer cores take it off their list first, older ones still list
+    it then. Never raises: a problem here must not stop a config entry from
+    loading.
     """
     domain_data = hass.data.setdefault(DOMAIN, {})
     lock = domain_data.setdefault(_LOCK_KEY, asyncio.Lock())
@@ -236,6 +247,8 @@ async def _async_update(
     hass: HomeAssistant, domain_data: dict[str, Any], removed_entry_id: str | None
 ) -> None:
     registered = domain_data.get(_STATE_KEY)
+    if removed_entry_id is not None:
+        domain_data.get(_REPORTED_KEY, {}).pop(removed_entry_id, None)
     entries = _wanting_entries(hass, removed_entry_id)
 
     if not entries:

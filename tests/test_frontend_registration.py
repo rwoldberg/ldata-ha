@@ -137,3 +137,42 @@ async def test_registration_runs_once_per_process() -> None:
 
     assert hass.data[DOMAIN]["_frontend_registered"] is True
     assert len(resources.created) == 1
+
+
+def _entries(hass: MagicMock, *entry_ids: str) -> None:
+    hass.config_entries.async_entries.return_value = [SimpleNamespace(entry_id=entry_id) for entry_id in entry_ids]
+
+
+async def test_last_entry_takes_the_card_with_it(monkeypatch) -> None:
+    """After a restart nothing would serve the file the resource names."""
+    other = {"id": "hacs", "type": "module", "url": "/hacsfiles/mushroom/mushroom.js"}
+    resources = FakeResources([other])
+    hass = _hass(resources)
+    monkeypatch.setattr(ldata, "async_update_sidebar_panel", AsyncMock())
+    await ldata._async_register_frontend(hass)
+    assert len(_card_urls(resources)) == 1
+
+    # Another entry is left: the card stays.
+    _entries(hass, "home", "cabin")
+    await ldata.async_remove_entry(hass, SimpleNamespace(entry_id="cabin"))
+    assert len(_card_urls(resources)) == 1
+
+    # The last one (older cores still list it while it is removed).
+    _entries(hass, "home")
+    await ldata.async_remove_entry(hass, SimpleNamespace(entry_id="home"))
+    assert _card_urls(resources) == []
+    assert resources.data == {"hacs": other}
+
+    # An entry added later in the same run puts it back.
+    await ldata._async_register_frontend(hass)
+    assert len(_card_urls(resources)) == 1
+
+
+async def test_removal_reads_the_collection_before_deleting() -> None:
+    resources = FakeResources([{"id": "card", "type": "module", "url": f"{CARD}?v=2.0.13"}])
+    hass = _hass(resources)
+
+    await ldata._async_unregister_frontend(hass)
+
+    assert resources.loaded is True
+    assert resources.deleted == ["card"]

@@ -42,7 +42,16 @@ from .const import (
     RESIDENCE_IMPORT_SOURCE,
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
-from .sub_panels import NOT_FED, SUB_PANELS, amps, feed_ratings, looped, shared, sub_panel_feeds
+from .sub_panels import (
+    NOT_FED,
+    SUB_PANELS,
+    amps,
+    feed_ratings,
+    looped,
+    panel_subentries,
+    shared,
+    sub_panel_feeds,
+)
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -294,9 +303,17 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # 2FA was not required, create or update entry
                 return await self._after_auth(info["title"])
 
-        # Pre-fill the form with data if it's a re-auth
         schema = STEP_USER_DATA_SCHEMA
-        if self.user_data:
+        if self.reauth_entry:
+            # A re-authentication stores the new login and nothing else (see
+            # _finalize_entry), so it asks for nothing else: the other
+            # choices are changed in the entry's options.
+            schema = vol.Schema({
+                vol.Required(CONF_USERNAME, default=self.user_data.get(CONF_USERNAME)): str,
+                vol.Required(CONF_PASSWORD): str,
+            })
+        elif self.user_data:
+            # A first setup that was refused comes back as it was filled in.
             schema = vol.Schema({
                 vol.Required(CONF_USERNAME, default=self.user_data.get(CONF_USERNAME)): str,
                 vol.Required(CONF_PASSWORD): str,
@@ -372,36 +389,75 @@ class _SubPanelSection:
     that feeds it, and that breaker's size in amps, which only matters when
     it isn't a smart breaker. Home Assistant labels a field it has no
     translation for with the field's own name, so each field is named after
-    its load center. Offered only while Leviton reports two or more load
-    centers.
+    its load center. Offered while Leviton reports two or more load centers.
+
+    A load center the options give a feed for but that Leviton no longer
+    reports (a hub that was replaced, or one left out of this fetch) gets a
+    field too, offering only that feed and "Not a sub-panel". Its feed holds
+    a breaker that no other load center can then be given, so there has to be
+    a way to take it off.
+
+    Home Assistant checks the answer against the form it showed, so the
+    options flow keeps the section it showed for reading the answer: built
+    again in between, a load center Leviton renamed meanwhile would not find
+    its field, and would lose its feed.
     """
 
-    def __init__(self, coordinator: Any, options: Mapping[str, Any]) -> None:
+    def __init__(self, coordinator: Any, entry: Any, options: Mapping[str, Any]) -> None:
         data = getattr(coordinator, "data", None) or {}
         panels = sorted(
             (panel for panel in data.get("panels", []) if panel.get("id")),
             key=lambda panel: (str(panel.get("name") or "").casefold(), str(panel["id"])),
         )
         self.stored = sub_panel_feeds(options)
-        self.stored_ratings = feed_ratings(options)
+        self.stored_ratings = feed_ratings(options, self.stored)
         self.fields: dict[str, str] = {}  # field -> the load center it is about
         self.rating_fields: dict[str, str] = {}  # its feeder's size -> the load center
         self._choices: dict[str, tuple[str, int]] = {}  # choice -> (feeding panel, position)
         self._offered: dict[str, list[selector.SelectOptionDict]] = {}
-        if len(panels) < 2:
+        # Only a loaded entry knows what Leviton reports; one that is not
+        # loaded shows no section and leaves the feeds alone.
+        reported = {panel["id"] for panel in panels}
+        titles = {panel_id: subentry.title for panel_id, subentry in panel_subentries(entry).items()}
+        self._unreported = (
+            sorted(
+                (sub_id for sub_id in self.stored if sub_id not in reported),
+                key=lambda sub_id: (str(titles.get(sub_id) or sub_id).casefold(), sub_id),
+            )
+            if data
+            else []
+        )
+        asked = panels if len(panels) >= 2 else []
+        if not asked and not self._unreported:
             return
 
+        # A field's name is taken together with its size field's: next to a
+        # load center called "Garage", one called "Garage (A)" gets its id
+        # added, as does the second of two with the same name.
+        taken: set[str] = set()
         names: dict[str, str] = {}
-        for panel in panels:
-            name = str(panel.get("name") or panel["id"])
-            if name in names.values():
-                name = f"{name} ({panel['id']})"
-            names[panel["id"]] = name
+
+        def field_for(panel_id: str, label: str) -> str:
+            name, tries = label, 1
+            while name in taken or f"{name} (A)" in taken:
+                tries += 1
+                name = f"{label} ({panel_id})" if tries == 2 else f"{label} ({panel_id} {tries})"
+            taken.update((name, f"{name} (A)"))
+            names[panel_id] = name
+            return name
+
+        for panel in asked:
+            name = field_for(panel["id"], str(panel.get("name") or panel["id"]))
             self.fields[name] = panel["id"]
             self.rating_fields[f"{name} (A)"] = panel["id"]
+        for sub_id in self._unreported:
+            self.fields[field_for(sub_id, str(titles.get(sub_id) or sub_id))] = sub_id
+
+        def panel_name(panel_id: Any) -> str:
+            return names.get(panel_id) or str(titles.get(panel_id) or panel_id)
 
         breakers: dict[str, list[selector.SelectOptionDict]] = {}
-        for panel in panels:
+        for panel in asked:
             found = [
                 breaker
                 for breaker in (data.get("breakers") or {}).values()
@@ -421,17 +477,23 @@ class _SubPanelSection:
             ]
 
         none = selector.SelectOptionDict(value=NOT_FED, label="Not a sub-panel")
-        for sub_id in names:
+        listed_choices = {option["value"]: option for choices in breakers.values() for option in choices}
+        for sub_id in self.fields.values():
             offered = [none]
-            for panel_id in names:
-                if panel_id != sub_id:
-                    offered.extend(breakers[panel_id])
+            if sub_id in breakers:
+                for panel_id, choices in breakers.items():
+                    if panel_id != sub_id:
+                        offered.extend(choices)
             # A stored link to a breaker, or a load center, that Leviton no
             # longer lists stays on offer, or saving the form for another
-            # reason would drop it.
+            # reason would drop it. For a load center Leviton doesn't report,
+            # it is the only choice besides "Not a sub-panel".
             feed = self.stored.get(sub_id)
             if feed and self._value(*feed) not in {option["value"] for option in offered}:
-                offered.append(self._choice(feed[0], names.get(feed[0], str(feed[0])), feed[1], {}))
+                offered.append(
+                    listed_choices.get(self._value(*feed))
+                    or self._choice(feed[0], panel_name(feed[0]), feed[1], {})
+                )
             self._offered[sub_id] = offered
 
     @staticmethod
@@ -469,8 +531,12 @@ class _SubPanelSection:
                     translation_key="sub_panel_feed",
                 )
             )
-            # Suggested rather than default, so that it can be emptied.
             rating_field = f"{field} (A)"
+            if rating_field not in self.rating_fields:
+                # A load center Leviton doesn't report: its feed can only be
+                # kept or taken off, and its size is kept with it.
+                continue
+            # Suggested rather than default, so that it can be emptied.
             rating = (chosen or {}).get(rating_field) if chosen else self.stored_ratings.get(sub_id)
             fields[vol.Optional(rating_field, description={"suggested_value": rating})] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -491,7 +557,12 @@ class _SubPanelSection:
         shown = set(self.fields.values())
         feeds = {sub_id: feed for sub_id, feed in self.stored.items() if sub_id not in shown}
         for field, sub_id in self.fields.items():
-            feed = self._choices.get((chosen or {}).get(field, NOT_FED))
+            choice = (chosen or {}).get(field)
+            if choice is None and sub_id in self._unreported:
+                # Left out of an answer that did not come from Home Assistant's
+                # own form: a load center that isn't reported keeps its feed.
+                choice = self._value(*self.stored[sub_id])
+            feed = self._choices.get(choice if choice is not None else NOT_FED)
             if feed and feed[0] != sub_id:
                 feeds[sub_id] = feed
         return feeds
@@ -512,11 +583,15 @@ class OptionsFlow(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
+        # The sub-panel section as the form showed it (see _SubPanelSection).
+        self._sub_panels: _SubPanelSection | None = None
 
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Return the options form."""
         coordinator = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
-        sub_panels = _SubPanelSection(coordinator, self.config_entry.options)
+        if user_input is None or self._sub_panels is None:
+            self._sub_panels = _SubPanelSection(coordinator, self.config_entry, self.config_entry.options)
+        sub_panels = self._sub_panels
         errors: dict[str, str] = {}
         chosen_feeds = None
         if user_input is not None:

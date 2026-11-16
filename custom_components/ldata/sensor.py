@@ -2632,7 +2632,8 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
     Reports the operationalState field from the Leviton API.
     Normally "Normal"; other values indicate a fault condition. The second
     pole of a 2-pole breaker reports its own (operationalState2), kept in the
-    second_pole_state attribute.
+    second_pole_state attribute. A fault on the second pole alone is the
+    breaker's state too, as Leviton's app shows it.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -2657,8 +2658,19 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
             pass
         self.async_write_ha_state()
 
+    @staticmethod
+    def _fine(state: Any) -> bool:
+        """Return whether a pole's operational state is no fault.
+
+        Leviton reports UNDEFINED for a pole that has nothing to say.
+        """
+        return not state or str(state).casefold() in ("normal", "undefined")
+
     @property
     def native_value(self) -> StateType:
+        """Return the first pole's state, or the second's when only it is faulted."""
+        if self._fine(self._state) and not self._fine(self._second):
+            return self._second
         return self._state
 
     @property
@@ -2679,9 +2691,7 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
 
     @property
     def icon(self) -> str:
-        if self._state and self._state != "Normal":
-            return "mdi:alert-circle"
-        if self._second and self._second not in ("Normal", "UNDEFINED"):
+        if not (self._fine(self._state) and self._fine(self._second)):
             return "mdi:alert-circle"
         return "mdi:check-circle-outline"
 

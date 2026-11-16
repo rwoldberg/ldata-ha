@@ -261,7 +261,9 @@ def test_second_pole_operational_state_reaches_the_sensor() -> None:
 
     coordinator = FakeCoordinator(breaker)
     entity = sensor.LDATABreakerOperationalStateSensor(coordinator, breaker)
-    assert entity.native_value == "Normal"
+    # The breaker's state is the failed pole's, so an automation watching it
+    # sees the fault.
+    assert entity.native_value == "GFCIErrorPhase2Failed"
     # Next to the leg every breaker entity reports.
     assert entity.extra_state_attributes == {"leg": "both", "second_pole_state": "GFCIErrorPhase2Failed"}
     assert entity.icon == "mdi:alert-circle"
@@ -270,7 +272,29 @@ def test_second_pole_operational_state_reaches_the_sensor() -> None:
     entity.async_write_ha_state = MagicMock()
     service._apply_breaker_update("breaker-test", breaker, {"operationalState2": "Normal"}, source="WS")
     entity._state_update()
+    assert entity.native_value == "Normal"
     assert entity.extra_state_attributes == {"leg": "both", "second_pole_state": "Normal"}
+    assert entity.icon == "mdi:check-circle-outline"
+
+
+def test_first_pole_fault_is_the_breakers_state() -> None:
+    """A fault on the first pole stays the state, whatever the second says."""
+    payload = {
+        **_breaker_payload(),
+        "operationalState": "AFCIGFCISelfTestFailure",
+        "operationalState2": "GFCIErrorPhase2Failed",
+    }
+    breaker = _service().parse_panels(
+        [{"id": "panel-test", "name": "Test Panel", "updateVersion": "2.1.0", "residentialBreakers": [payload]}]
+    )["breakers"]["breaker-test"]
+
+    entity = sensor.LDATABreakerOperationalStateSensor(FakeCoordinator(breaker), breaker)
+
+    assert entity.native_value == "AFCIGFCISelfTestFailure"
+    assert entity.icon == "mdi:alert-circle"
+    # A second pole with nothing to say is no fault.
+    entity._state, entity._second = "Normal", "UNDEFINED"
+    assert entity.native_value == "Normal"
     assert entity.icon == "mdi:check-circle-outline"
 
 

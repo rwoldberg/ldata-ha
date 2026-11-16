@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Kontot är redan konfigurerat",
-            "reauth_successful": "Återautentiseringen lyckades"
+            "reauth_successful": "Återautentiseringen lyckades",
+            "unknown": "Oväntat fel"
         },
         "error": {
             "cannot_connect": "Det gick inte att ansluta",

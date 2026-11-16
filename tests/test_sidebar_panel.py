@@ -276,6 +276,47 @@ async def test_loaded_entry_lists_only_what_leviton_reports() -> None:
         assert _panel(hass)["config"]["panels"] == [{"device_id": _device_id(hass, "p1")}]
 
 
+async def test_load_center_that_left_the_account_stays_off_through_a_reload() -> None:
+    """Its subentry stays behind, but the page goes by what Leviton last said."""
+    async with _home_assistant() as hass:
+        entry = _entry(
+            hass, options={SHOW_SIDEBAR_PANEL: True}, panels=[("p1", "Main Panel"), ("gone", "Old Panel")]
+        )
+        _loaded(hass, entry, ["p1"])
+        await async_update_sidebar_panel(hass)
+        before = _panel(hass)
+        events = await _events(hass)
+
+        hass.data[DOMAIN].pop(entry.entry_id)
+        await async_update_sidebar_panel(hass)
+        assert _panel(hass) == before
+        _loaded(hass, entry, ["p1"])
+        await async_update_sidebar_panel(hass)
+
+        assert _panel(hass) == before
+        assert await _events(hass) == events
+
+
+async def test_load_center_left_out_of_an_incomplete_fetch_keeps_its_tab() -> None:
+    async with _home_assistant() as hass:
+        entry = _entry(hass, options={SHOW_SIDEBAR_PANEL: True}, panels=[("p1", "Main Panel"), ("p2", "Garage")])
+        _loaded(hass, entry, ["p1", "p2"])
+        await async_update_sidebar_panel(hass)
+        both = _panel(hass)["config"]["panels"]
+        assert len(both) == 2
+
+        # Leviton leaves out an LWHEM hub that is offline, and says so.
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        coordinator.data = {"panels": [{"id": "p1"}], "incomplete_fetches": ["panels"]}
+        await async_update_sidebar_panel(hass)
+        assert _panel(hass)["config"]["panels"] == both
+
+        # A complete answer without it takes the tab away.
+        coordinator.data = {"panels": [{"id": "p1"}], "incomplete_fetches": []}
+        await async_update_sidebar_panel(hass)
+        assert _panel(hass)["config"]["panels"] == [{"device_id": _device_id(hass, "p1")}]
+
+
 async def test_one_page_for_every_entry_that_asks() -> None:
     async with _home_assistant() as hass:
         home = _entry(hass, options={SHOW_SIDEBAR_PANEL: True}, panels=[("p1", "Main Panel")], title="Home")

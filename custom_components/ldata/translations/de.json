@@ -2,7 +2,8 @@
     "config": {
         "abort": {
             "already_configured": "Konto ist bereits konfiguriert",
-            "reauth_successful": "Die erneute Authentifizierung war erfolgreich"
+            "reauth_successful": "Die erneute Authentifizierung war erfolgreich",
+            "unknown": "Unerwarteter Fehler"
         },
         "error": {
             "cannot_connect": "Verbindung fehlgeschlagen",

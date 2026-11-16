@@ -8,7 +8,12 @@ import voluptuous as vol
 from homeassistant.config_entries import SOURCE_USER, ConfigEntry
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 
-from custom_components.ldata.config_flow import STEP_USER_DATA_SCHEMA, OptionsFlow
+from custom_components.ldata.config_flow import (
+    STEP_USER_DATA_SCHEMA,
+    CannotConnect,
+    ConfigFlow,
+    OptionsFlow,
+)
 from custom_components.ldata.const import (
     DOMAIN,
     GAP_HANDLING,
@@ -16,6 +21,7 @@ from custom_components.ldata.const import (
     GAP_HANDLING_LABELS,
     GAP_THRESHOLD,
     HA_INFORM_RATE,
+    PANEL_SUBENTRY_TYPE,
     SHOW_SIDEBAR_PANEL,
     THREE_PHASE,
 )
@@ -26,7 +32,7 @@ CONFIRMED_SOLAR = ["breaker-1_daily_import", "breaker-1_lifetime_import"]
 SUPPRESSED = ["breaker-2_daily_import", "breaker-2_lifetime_import"]
 
 
-def _entry(options: dict) -> ConfigEntry:
+def _entry(options: dict, subentries: list[dict] | None = None) -> ConfigEntry:
     return ConfigEntry(
         data={
             CONF_USERNAME: "user@example.com",
@@ -39,7 +45,7 @@ def _entry(options: dict) -> ConfigEntry:
         minor_version=1,
         options=options,
         source=SOURCE_USER,
-        subentries_data=None,
+        subentries_data=subentries,
         title="Leviton LDATA (Home)",
         unique_id="user@example.com",
         version=1,
@@ -419,7 +425,8 @@ async def test_two_load_centers_cannot_be_fed_from_the_same_breaker() -> None:
 
 
 async def test_breaker_feeding_a_load_center_the_form_cannot_show_is_taken() -> None:
-    # Leviton doesn't list the shed right now; its feed is kept, and counts.
+    # Leviton doesn't list the shed right now; an answer that leaves its field
+    # out keeps its feed, which counts.
     entry = _entry({"sub_panels": {"shed": {"panel": "main", "position": 38}}})
 
     result = await _flow(entry, _two_load_centers()).async_step_init(
@@ -481,3 +488,130 @@ async def test_refused_form_comes_back_with_the_size_that_was_typed() -> None:
     assert result["errors"] == {"base": "sub_panel_loop"}
     size = next(m for m in _section(result).schema.schema if str(m) == "Casita (A)")
     assert size.description == {"suggested_value": 70}
+
+
+async def test_feed_of_a_load_center_leviton_no_longer_reports_can_be_taken_off() -> None:
+    """A hub that was replaced keeps a field, so its feed doesn't hold a breaker for good."""
+    entry = _entry(
+        {"sub_panels": {"shed": {"panel": "main", "position": 38, "rating": 60}}},
+        subentries=[{"data": {}, "subentry_type": PANEL_SUBENTRY_TYPE, "title": "Shed", "unique_id": "shed"}],
+    )
+    flow = _flow(entry, _two_load_centers())
+
+    form = await flow.async_step_init()
+
+    # Named after the load center's subentry, after the ones Leviton reports;
+    # without a size field, and offering only its feed and "Not a sub-panel".
+    assert [str(m) for m in _section(form).schema.schema] == [
+        "Casita", "Casita (A)", "Main Panel", "Main Panel (A)", "Shed"
+    ]
+    assert _section(form).options == {"collapsed": False}
+    marker, selector_ = _feed_field(form, "Shed")
+    assert marker.default() == "main|38"
+    assert selector_.config["options"] == [
+        {"value": "none", "label": "Not a sub-panel"},
+        {"value": "main|38", "label": "Main Panel · 38/40 · Casita Feed"},
+    ]
+
+    # Kept, it keeps its size too.
+    result = await _flow(entry, _two_load_centers()).async_step_init(
+        {"sub_panels": {"Casita": "none", "Main Panel": "none", "Shed": "main|38"}}
+    )
+    assert result["data"]["sub_panels"] == {"shed": {"panel": "main", "position": 38, "rating": 60.0}}
+
+    # Taken off, its breaker can feed the casita.
+    result = await flow.async_step_init(
+        {"sub_panels": {"Casita": "main|38", "Main Panel": "none", "Shed": "none"}}
+    )
+    assert result["type"] == "create_entry"
+    assert result["data"]["sub_panels"] == {"casita": {"panel": "main", "position": 38}}
+
+
+async def test_feed_of_a_load_center_leviton_no_longer_reports_has_a_field_with_one_left() -> None:
+    """With one load center left, the section is there for the old feed alone."""
+    entry = _entry({"sub_panels": {"shed": {"panel": "main", "position": 38}}})
+    one = SimpleNamespace(data={"panels": [{"id": "main", "name": "Main Panel"}], "breakers": {}})
+
+    form = await _flow(entry, one).async_step_init()
+
+    # Without a subentry, it goes by its id.
+    assert [str(m) for m in _section(form).schema.schema] == ["shed"]
+    result = await _flow(entry, one).async_step_init({"sub_panels": {"shed": "none"}})
+    assert result["data"]["sub_panels"] == {}
+
+
+async def test_load_center_named_like_a_size_field_gets_its_own_field() -> None:
+    panels = SimpleNamespace(
+        data={
+            "panels": [{"id": "g", "name": "Garage"}, {"id": "g2", "name": "Garage (A)"}],
+            "breakers": {"b1": {"panel_id": "g", "position": 3, "poles": 1, "name": "Feed", "rating": 60}},
+        }
+    )
+
+    form = await _flow(_entry({}), panels).async_step_init()
+
+    # "Garage (A)" is the size field of "Garage", so the other load center
+    # called that gets its id added.
+    assert [str(m) for m in _section(form).schema.schema] == [
+        "Garage", "Garage (A)", "Garage (A) (g2)", "Garage (A) (g2) (A)"
+    ]
+    result = await _flow(_entry({}), panels).async_step_init(
+        {"sub_panels": {"Garage": "none", "Garage (A) (g2)": "g|3", "Garage (A) (g2) (A)": 100}}
+    )
+    assert result["data"]["sub_panels"] == {"g2": {"panel": "g", "position": 3, "rating": 100.0}}
+
+
+async def test_load_center_renamed_while_the_form_is_open_keeps_its_feed() -> None:
+    """The answer is read against the form that was shown."""
+    entry = _entry({"sub_panels": {"casita": {"panel": "main", "position": 38, "rating": 100}}})
+    coordinator = _two_load_centers()
+    flow = _flow(entry, coordinator)
+    await flow.async_step_init()
+
+    coordinator.data["panels"][1]["name"] = "Guest House"
+    result = await flow.async_step_init(
+        {"sub_panels": {"Casita": "main|38", "Casita (A)": 100, "Main Panel": "none"}}
+    )
+
+    assert result["data"]["sub_panels"] == {"casita": {"panel": "main", "position": 38, "rating": 100.0}}
+
+
+def _config_flow(entry: ConfigEntry) -> ConfigFlow:
+    flow = ConfigFlow()
+    flow.hass = MagicMock()
+    flow.hass.config_entries.async_get_entry.return_value = entry
+    flow.handler = DOMAIN
+    flow.flow_id = "flow-1"
+    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
+    return flow
+
+
+async def test_reauth_asks_for_the_login_only() -> None:
+    """A re-authentication stores the new login and nothing else, so it shows nothing else."""
+    entry = _entry({SHOW_SIDEBAR_PANEL: True})
+
+    form = await _config_flow(entry).async_step_reauth(dict(entry.data))
+
+    assert [str(m) for m in form["data_schema"].schema] == [CONF_USERNAME, CONF_PASSWORD]
+    assert _marker(form, CONF_USERNAME).default() == "user@example.com"
+
+
+async def test_refused_first_setup_comes_back_as_it_was_filled_in() -> None:
+    flow = _config_flow(_entry({}))
+    flow.context = {"source": SOURCE_USER}
+    flow._validate_input = MagicMock(side_effect=CannotConnect)
+    answer = STEP_USER_DATA_SCHEMA(
+        {
+            CONF_USERNAME: "user@example.com",
+            CONF_PASSWORD: "secret",
+            THREE_PHASE: False,
+            "allow_breaker_control": True,
+            SHOW_SIDEBAR_PANEL: True,
+        }
+    )
+
+    form = await flow.async_step_user(answer)
+
+    assert form["errors"] == {"base": "cannot_connect"}
+    assert _marker(form, SHOW_SIDEBAR_PANEL).default() is True
+    assert _marker(form, THREE_PHASE).default() is False
