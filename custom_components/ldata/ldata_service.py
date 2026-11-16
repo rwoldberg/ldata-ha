@@ -1133,17 +1133,21 @@ class LDATAService:
                         
                         # Apply WHEMS specific mapping
                         if panel_type == "WHEMS":
+                            # A disconnected panel can be listed without its
+                            # voltages and firmware version. It is kept, with
+                            # those unknown, rather than skipped: nothing
+                            # lists panels again after setup, so a panel left
+                            # out here stayed missing until a reload. Once it
+                            # connects, its WebSocket notifications fill them in.
                             if "rmsVoltageA" not in panel or "rmsVoltageB" not in panel or "version" not in panel:
                                 _LOGGER.warning(
                                     f"[v{self.version}] Panel '{panel.get('name', panel.get('id', '?'))}' "
                                     f"WHEMS response is missing rmsVoltageA/rmsVoltageB/version "
-                                    f"(e.g. a disconnected panel) — skipping this panel for this poll cycle."
+                                    f"(e.g. a disconnected panel) — adding it with those unknown."
                                 )
-                                self._incomplete_fetches.add(self.FETCH_PANELS)
-                                continue
-                            panel["rmsVoltage"] = panel["rmsVoltageA"]
-                            panel["rmsVoltage2"] = panel["rmsVoltageB"]
-                            panel["updateVersion"] = panel["version"]
+                            panel["rmsVoltage"] = panel.get("rmsVoltageA")
+                            panel["rmsVoltage2"] = panel.get("rmsVoltageB")
+                            panel["updateVersion"] = panel.get("version")
                             # Brief delay after toggle to let the cloud receive
                             # fresh values from the panel hardware before we fetch.
                             if is_connected and toggle_bandwidth:
@@ -1228,8 +1232,7 @@ class LDATAService:
 
         Reads the same listings as get_ldata_panels()/get_iotWhemsPanels(),
         but without the bandwidth toggle (which knocks the panel off the
-        cloud for 10-20 s) and without skipping WHEMS panels that lack
-        voltage fields: a panel the listing returns exists, whatever its
+        cloud for 10-20 s): a panel the listing returns exists, whatever its
         live readings. Breakers and CTs are filtered as in parse_panels().
         Returns False if any listing could not be read.
         """
@@ -2312,6 +2315,13 @@ class LDATAService:
                 fw_major = int(fw_str.split(".")[0])
             except (ValueError, IndexError):
                 fw_major = 0
+            if panel.get("ModuleType") == "WHEMS" and not panel.get("version"):
+                # A WHEMS panel listed without its firmware (disconnected at
+                # setup, see _fetch_panels) is treated as current firmware:
+                # no REST polling, power×time energy. Guessing v1 instead
+                # would toggle its bandwidth every poll once it connects. A
+                # reload re-checks it.
+                fw_major = 2
             
             # _panel_needs_rest_poll tracks CT panels only.
             # CT energy counters need a bandwidth toggle to refresh (hardware requirement).
