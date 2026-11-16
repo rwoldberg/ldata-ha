@@ -875,11 +875,6 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
         await super().async_added_to_hass()
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
-
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes for state restoration."""
@@ -1433,11 +1428,6 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
 
         await super().async_added_to_hass()
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
-
     @property
     def name_suffix(self) -> str | None:
         """Suffix to append to the LDATA device's name."""
@@ -1748,7 +1738,6 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         self.leg_to_total = which_leg
         super().__init__(data=data, coordinator=coordinator)
         self._state = self.total_values()
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     def _panel_leg_totals(self) -> dict:
         """Sum power/current across all breakers on this panel, once per coordinator update.
@@ -1875,7 +1864,6 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
             self._state = float(val) if val is not None else None
         except (ValueError, TypeError):
             self._state = None
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2055,11 +2043,6 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self.async_write_ha_state()
 
     @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
-
-    @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
@@ -2213,7 +2196,6 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
             self._state = float(value) if value is not None else None
         except (TypeError, ValueError):
             self._state = 0.0
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2267,7 +2249,6 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
             self._state = 0.0
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2380,14 +2361,15 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass to restore state on startup."""
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-        await super().async_added_to_hass()
-        # Restore the last known state from the database.
+        # Restore the last known state from the database before super() runs
+        # the first update, as the daily sensors do, so that update compares
+        # against the restored total.
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
+        await super().async_added_to_hass()
 
     def _use_pxt_mode(self) -> bool:
         """Return True if this CT's panel has no hw counters — use power×time integration."""
@@ -2640,7 +2622,6 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("operationalState", "Normal")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2689,7 +2670,6 @@ class LDATABreakerBleRSSISensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("bleRSSI")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2737,7 +2717,6 @@ class LDATABreakerPositionSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("position")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2784,7 +2763,6 @@ class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
         self.panel_data = data
         self._panel_id = data["data"]["id"]
         self._state = data["data"].get("rssi")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):

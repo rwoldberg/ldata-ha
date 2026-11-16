@@ -124,7 +124,6 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         self._last_known_is_on = self._state
 
         # Subscribe to updates.
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -224,7 +223,6 @@ class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state: bool = data.get("blinkLED", False)
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):

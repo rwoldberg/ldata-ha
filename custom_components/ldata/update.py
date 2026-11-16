@@ -88,7 +88,6 @@ class LDATAPanelFirmwareUpdateEntity(LDATAEntity, UpdateEntity):
             "installed_firmware", data.get("firmware")
         )
         self._available = data["data"].get("available_firmware")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
