@@ -425,7 +425,7 @@ const EN = {
       "switching": "Switching…",
       "switching_on": "Switching on…",
       "switching_off": "Switching off…",
-      "not_monitored": "Not monitored",
+      "not_monitored": "Unmonitored",
       "switch_failed": "Couldn't switch"
     },
     "alarm": {
