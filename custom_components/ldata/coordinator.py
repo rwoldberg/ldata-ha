@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
+from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, BREAKER_POLL_INTERVAL, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
 from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -166,6 +166,14 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
         )
 
+    def _breaker_poll_interval(self) -> float:
+        """Return the breaker REST poll interval: its own, or the inform rate if longer.
+
+        See BREAKER_POLL_INTERVAL. A shorter inform rate no longer makes the
+        poll toggle the panels' bandwidth more often.
+        """
+        return max(BREAKER_POLL_INTERVAL, self._inform_rate())
+
     async def _fallback_poll_loop(self, *, loop_name, get_interval, needs_poll, fetch, merge):
         """Shared sleep/refresh/exception scaffolding for the REST poll loops.
 
@@ -240,7 +248,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
 
         await self._fallback_poll_loop(
             loop_name="REST poll",
-            get_interval=self._inform_rate,
+            get_interval=self._breaker_poll_interval,
             needs_poll=lambda: self._service.needs_breaker_poll,
             fetch=self._service.fetch_breaker_poll,
             merge=self._service.merge_rest_poll,

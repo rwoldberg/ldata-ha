@@ -41,6 +41,16 @@ HA_INFORM_RATE_DEFAULT = 60.0
 HA_INFORM_RATE_MIN = 2.0
 HA_INFORM_RATE_MAX = 600.0
 
+# Breaker REST poll interval (seconds) — v1 firmware panels only, for the
+# energyConsumption/energyImport counters the WebSocket never sends. Each poll
+# is a bandwidth toggle (three PATCHes) and a GET per panel. It used to follow
+# the HA inform rate, so lowering that to its 2 s minimum meant four requests
+# to Leviton every two seconds per panel. 60 s is the inform rate's default,
+# so installs on the defaults poll as often as before, and the counters keep
+# their one-minute resolution. A longer inform rate stretches it: results only
+# reach Home Assistant at the next push anyway.
+BREAKER_POLL_INTERVAL = 60.0
+
 # CT REST poll interval (seconds) — v1 firmware panels only.
 # On v2+ firmware, CT energy counters are period counters (not lifetime totals)
 # and CT REST polling is disabled entirely; CT power arrives via WS IotCt events.
