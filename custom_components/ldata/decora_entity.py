@@ -2,10 +2,12 @@
 
 import logging
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER
 from .coordinator import LDATAUpdateCoordinator
+from .ldata_service import LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -70,6 +72,30 @@ class DecoraEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         if self.coordinator.data and "decora_devices" in self.coordinator.data:
             return self.coordinator.data["decora_devices"].get(self._dev_id)
         return None
+
+    async def _async_send_command(self, data: dict, action: str) -> None:
+        """Send a command (an iotSwitch update) to this device.
+
+        Raises HomeAssistantError when it is not carried out, so the service
+        call fails visibly in the UI and in automations instead of returning
+        as if the device had done it. action completes "Could not ... <name>".
+        """
+        device = self._get_device_data()
+        if not device:
+            raise HomeAssistantError(f"Could not {action} {self.name}: the device is not available")
+        try:
+            done = await self.coordinator.hass.async_add_executor_job(
+                self.coordinator.service.set_iot_switch,
+                device.get("residenceId"),
+                self._dev_id,
+                data,
+            )
+        except LDATAAuthError as ex:
+            raise HomeAssistantError(
+                f"Could not {action} {self.name}: Leviton refused the request"
+            ) from ex
+        if not done:
+            raise HomeAssistantError(f"Could not {action} {self.name}: Leviton did not accept the command")
 
     @property
     def available(self) -> bool:

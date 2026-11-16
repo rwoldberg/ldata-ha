@@ -291,23 +291,11 @@ class DecoraSelectEntity(DecoraEntity, SelectEntity):
         if option not in self._reverse_map:
             return
 
-        device = self._get_device_data()
-        if not device:
-            return
-
-        api_value = self._reverse_map[option]
-        residence_id = device.get("residenceId")
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {self._api_field: api_value},
-        )
-        if result:
-            self._current = option
-            self.async_write_ha_state()
-            await asyncio.sleep(1)
-            await self.coordinator.async_request_refresh()
+        await self._async_send_command({self._api_field: self._reverse_map[option]}, "set")
+        self._current = option
+        self.async_write_ha_state()
+        await asyncio.sleep(1)
+        await self.coordinator.async_request_refresh()
 
     @property
     def name_suffix(self) -> str | None:

@@ -54,15 +54,9 @@ class DecoraIdentifyButton(DecoraEntity, ButtonEntity):
         # Platform setup already excludes bridges, but keep the mutation
         # boundary defensive in case an entity survives a classification
         # change or is instantiated outside the normal setup path.
-        if not device or is_decora_bridge(device):
+        if device and is_decora_bridge(device):
             return
-        residence_id = device.get("residenceId")
-        await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"identify": 10},
-        )
+        await self._async_send_command({"identify": 10}, "press")
 
     @property
     def name_suffix(self) -> str | None:
@@ -85,16 +79,7 @@ class DecoraSilenceBuzzerButton(DecoraEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Press the button."""
-        device = self._get_device_data()
-        if not device:
-            return
-        residence_id = device.get("residenceId")
-        await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"silenceBuzzer": True},
-        )
+        await self._async_send_command({"silenceBuzzer": True}, "press")
 
     @property
     def name_suffix(self) -> str | None:

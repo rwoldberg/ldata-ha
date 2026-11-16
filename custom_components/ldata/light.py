@@ -97,49 +97,27 @@ class DecoraLight(DecoraEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
-        device = self._get_device_data()
-        if not device:
-            return
-
-        residence_id = device.get("residenceId")
         if ATTR_BRIGHTNESS in kwargs:
             brightness_pct = int(kwargs[ATTR_BRIGHTNESS] * 100 / 255)
             payload = {"power": POWER_ON, "brightness": brightness_pct}
         else:
             payload = {"power": POWER_ON}
 
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            payload,
-        )
-        if result:
-            self._state = True
-            if ATTR_BRIGHTNESS in kwargs:
-                self._brightness = int(kwargs[ATTR_BRIGHTNESS] * 100 / 255)
-            self.async_write_ha_state()
-            await asyncio.sleep(1)
-            await self.coordinator.async_request_refresh()
+        await self._async_send_command(payload, "turn on")
+        self._state = True
+        if ATTR_BRIGHTNESS in kwargs:
+            self._brightness = int(kwargs[ATTR_BRIGHTNESS] * 100 / 255)
+        self.async_write_ha_state()
+        await asyncio.sleep(1)
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        device = self._get_device_data()
-        if not device:
-            return
-
-        residence_id = device.get("residenceId")
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"power": POWER_OFF},
-        )
-        if result:
-            self._state = False
-            self.async_write_ha_state()
-            await asyncio.sleep(1)
-            await self.coordinator.async_request_refresh()
+        await self._async_send_command({"power": POWER_OFF}, "turn off")
+        self._state = False
+        self.async_write_ha_state()
+        await asyncio.sleep(1)
+        await self.coordinator.async_request_refresh()
 
     @property
     def name_suffix(self) -> str | None:
