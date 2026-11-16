@@ -15,6 +15,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
+from homeassistant.helpers.service import async_register_admin_service
 import homeassistant.helpers.config_validation as cv
 
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER, PANEL_SUBENTRY_TYPE
@@ -1296,7 +1297,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 summary = _reset_energy_entity(target_entity, entity_id)
                 _LOGGER.warning("reset_energy_baseline: %s", summary)
 
-        hass.services.async_register(
+        # Admin only, like the other ways to change these sensors' history:
+        # a reset rewrites energy totals the Energy dashboard records.
+        async_register_admin_service(
+            hass,
             DOMAIN,
             SERVICE_RESET_ENERGY,
             handle_reset_energy,
@@ -1308,7 +1312,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             """Handle the reset_panel_energy service call."""
             await _async_reset_panel_energy(hass, call.data[ATTR_DEVICE_ID])
 
-        hass.services.async_register(
+        async_register_admin_service(
+            hass,
             DOMAIN,
             SERVICE_RESET_PANEL,
             handle_reset_panel_energy,
