@@ -911,7 +911,7 @@ class LDATAService:
             dev_id = sw["id"]
             devices[dev_id] = {
                 "id": dev_id,
-                "name": sw.get("name", f"Decora {dev_id}"),
+                "name": sw.get("name") or f"Decora {dev_id}",
                 "model": model,
                 "manufacturer": sw.get("manufacturer", "Leviton"),
                 "serial": sw.get("serial"),
@@ -964,7 +964,7 @@ class LDATAService:
             devices[f"bridge_{dev_id}"] = {
                 "id": f"bridge_{dev_id}",
                 "device_type": DEVICE_TYPE_BRIDGE,
-                "name": b.get("name", f"Wi-Fi Bridge {dev_id}"),
+                "name": b.get("name") or f"Wi-Fi Bridge {dev_id}",
                 "model": "MLWSB",
                 "manufacturer": "Leviton",
                 "serial": b.get("serial"),
@@ -2285,7 +2285,7 @@ class LDATAService:
             panel_data["firmware"] = panel_data["installed_firmware"]
             panel_data["model"] = panel.get("model", "unknown")
             panel_data["id"] = panel.get("id")
-            panel_data["name"] = panel.get("name", "Unknown Panel")
+            panel_data["name"] = panel.get("name") or "Unknown Panel"
             panel_data["serialNumber"] = panel.get("id")
             
             if not panel_data["id"]:
@@ -2370,13 +2370,17 @@ class LDATAService:
                 if fw_major < 2:
                     self._panel_needs_rest_poll[panel["id"]] = True
                 for ct in panel["CTs"]:
-                    if ct["usageType"] != "NOT_USED":
+                    if ct.get("id") is None:
+                        continue
+                    if ct.get("usageType") != "NOT_USED":
                         # Create the CT data
                         ct_data = {}
-                        ct_data["name"] = ct["usageType"]
+                        # Entity names are built from this; a null must not
+                        # stop the platforms from loading.
+                        ct_data["name"] = ct.get("usageType") or f"CT {ct.get('channel', ct['id'])}"
                         ct_data["id"] = str(ct["id"])
                         ct_data["panel_id"] = panel["id"]
-                        ct_data["channel"] = str(ct["channel"])
+                        ct_data["channel"] = str(ct.get("channel"))
                         # Store individual power values for WebSocket partial update caching
                         ct_data["power1"] = self.none_to_zero(ct, "activePower")
                         ct_data["power2"] = self.none_to_zero(ct, "activePower2")
@@ -2426,30 +2430,42 @@ class LDATAService:
                 dumb_breakers = []
                 for breaker in panel["residentialBreakers"]:
                     if (
-                        breaker["model"] is not None
+                        breaker.get("model") is not None
                         and breaker["model"] != "NONE-2"
                         and breaker["model"] != "NONE-1"
                     ):
+                        if not breaker.get("id"):
+                            # Nothing could key, subscribe to or name it.
+                            continue
                         breaker_data = {}
                         breaker_data["panel_id"] = panel["id"]
-                        breaker_data["rating"] = breaker["currentRating"]
-                        breaker_data["position"] = breaker["position"]
-                        breaker_data["name"] = breaker["name"]
-                        breaker_data["state"] = breaker["currentState"]
+                        breaker_data["rating"] = breaker.get("currentRating")
+                        breaker_data["position"] = breaker.get("position")
+                        # Entity names are built from the name and each
+                        # entity's leg from the pole count, so a null in
+                        # either (e.g. a breaker not yet set up in the
+                        # Leviton app) stopped every platform from loading.
+                        # Defaults as for the standard breakers below.
+                        breaker_data["name"] = breaker.get("name") or (
+                            f"Breaker {breaker_data['position']}"
+                            if breaker_data["position"] is not None
+                            else "Breaker"
+                        )
+                        breaker_data["state"] = breaker.get("currentState")
                         breaker_data["id"] = breaker["id"]
                         breaker_data["stable_id"] = self._stable_breaker_id(breaker["id"], panel["id"])
                         breaker_data["model"] = breaker["model"]
-                        breaker_data["poles"] = breaker["poles"]
-                        breaker_data["serialNumber"] = breaker["serialNumber"]
-                        breaker_data["hardware"] = breaker["hwVersion"]
-                        breaker_data["firmware"] = breaker["firmwareVersionMeter"]
+                        breaker_data["poles"] = breaker.get("poles") or 1
+                        breaker_data["serialNumber"] = breaker.get("serialNumber")
+                        breaker_data["hardware"] = breaker.get("hwVersion")
+                        breaker_data["firmware"] = breaker.get("firmwareVersionMeter")
                         breaker_data["panel_type"] = panel_data["panel_type"]
                         _apply_breaker_firmware(breaker_data, breaker)
-                        if breaker["canRemoteOn"] is not None:
+                        if breaker.get("canRemoteOn") is not None:
                             breaker_data["canRemoteOn"] = breaker["canRemoteOn"]
                         else:
                             breaker_data["canRemoteOn"] = False
-                        if breaker["remoteState"] is not None:
+                        if breaker.get("remoteState") is not None:
                             breaker_data["remoteState"] = breaker["remoteState"]
                             if breaker_data["remoteState"] == "":
                                 breaker_data["remoteState"] = "RemoteON"
@@ -2486,10 +2502,10 @@ class LDATAService:
                         _f2 = self.none_to_zero(breaker, "lineFrequency2")
 
                         breaker_data["voltage"] = self._combine_leg_voltage(
-                            _v1, _v2, three_phase=three_phase and breaker["poles"] != 1, average=False
+                            _v1, _v2, three_phase=three_phase and breaker_data["poles"] != 1, average=False
                         )
 
-                        if breaker["poles"] == 2:
+                        if breaker_data["poles"] == 2:
                             breaker_data["frequency"] = (_f1 + _f2) / 2.0
                             _c1_raw = self._none_or_float(breaker, "rmsCurrent")
                             _c2_raw = self._none_or_float(breaker, "rmsCurrent2")
@@ -2507,7 +2523,7 @@ class LDATAService:
                                 breaker_data["current"] = None
                             else:
                                 breaker_data["current"] = (_c1_raw or 0.0) + (_c2_raw or 0.0)
-                        if breaker["position"] in _LEG1_POSITIONS:
+                        if breaker_data["position"] in _LEG1_POSITIONS:
                             breaker_data["leg"] = 1
                             breaker_data["power1"] = self._none_or_float(breaker, "power")
                             breaker_data["power2"] = self._none_or_float(breaker, "power2")
