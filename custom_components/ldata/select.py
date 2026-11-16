@@ -2,7 +2,6 @@
 
 import asyncio
 import logging
-from typing import Any
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry

@@ -1129,11 +1129,9 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         
         if panel_cts:
             data_to_sum = panel_cts
-            source_name = "CT"
         else:
             breakers = self.coordinator.data.get("breakers", {})
             data_to_sum = {b_id: b_data for b_id, b_data in breakers.items() if b_data.get("panel_id") == self.panel_id}
-            source_name = "breaker"
 
         if not data_to_sum:
             return
