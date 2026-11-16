@@ -68,7 +68,6 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     def __init__(self, coordinator, data) -> None:
         """Init LDATABinarySensor."""
         super().__init__(data=data, coordinator=coordinator)
-        self._attr_unique_id = f"{data['id']}_status"
         self.breaker_data = data
         # `data` is the same breaker dict entry the coordinator already holds
         # at construction time (see async_setup_entry) — use it directly

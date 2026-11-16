@@ -20,6 +20,7 @@ import homeassistant.helpers.config_validation as cv
 
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER, PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
+from .ldata_base_entity import subentry_ids_by_unique_id
 from .ldata_service import (
     LDATAAuthError,
     LDATAConnectionError,
@@ -717,16 +718,8 @@ async def _async_reconcile_subentries(
     if not coordinator.data:
         return
 
-    existing_panel = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
-    }
-    existing_room = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == DECORA_ROOM_SUBENTRY_TYPE and se.unique_id
-    }
+    existing_panel = subentry_ids_by_unique_id(entry, PANEL_SUBENTRY_TYPE)
+    existing_room = subentry_ids_by_unique_id(entry, DECORA_ROOM_SUBENTRY_TYPE)
 
     for panel in coordinator.data.get("panels", []):
         panel_id = panel.get("id")
@@ -973,11 +966,7 @@ def _async_ensure_panel_devices(
         return
 
     dev_reg = dr.async_get(hass)
-    subentry_by_panel = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
-    }
+    subentry_by_panel = subentry_ids_by_unique_id(entry, PANEL_SUBENTRY_TYPE)
     for panel in coordinator.data.get("panels", []):
         panel_id = panel.get("id")
         if not panel_id:

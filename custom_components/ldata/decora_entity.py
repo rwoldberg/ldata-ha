@@ -7,6 +7,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER
 from .coordinator import LDATAUpdateCoordinator
+from .ldata_base_entity import subentry_ids_by_unique_id
 from .ldata_service import LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -24,11 +25,7 @@ def add_entities_grouped_by_decora_room(config_entry, async_add_entities, entiti
     """
     if not entities:
         return
-    subentry_by_room = {
-        se.unique_id: se.subentry_id
-        for se in getattr(config_entry, "subentries", {}).values()
-        if se.subentry_type == DECORA_ROOM_SUBENTRY_TYPE and se.unique_id
-    }
+    subentry_by_room = subentry_ids_by_unique_id(config_entry, DECORA_ROOM_SUBENTRY_TYPE)
     groups: dict[str | None, list] = {}
     for entity in entities:
         room_id = entity.entity_data.get("residentialRoomId")

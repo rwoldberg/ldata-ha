@@ -113,7 +113,6 @@ GAP_HANDLING_LABELS = {
     GAP_HANDLING_EXTRAPOLATE: "Extrapolate — Assume last known power continued",
     GAP_HANDLING_AVERAGE: "Average — Use mean of last and recovery power",
 }
-GAP_HANDLING_OPTIONS = list(GAP_HANDLING_LABELS)
 
 GAP_THRESHOLD = "gap_threshold"      # Gap threshold in minutes
 GAP_THRESHOLD_DEFAULT = 5.0          # 5 minutes — well above normal update intervals

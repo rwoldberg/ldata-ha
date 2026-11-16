@@ -7,6 +7,20 @@ from .const import PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
 
 
+def subentry_ids_by_unique_id(config_entry, subentry_type: str) -> dict[str, str]:
+    """Map each subentry of one type to its subentry id, by its unique_id.
+
+    The unique_id is a panel id for panel subentries and a residentialRoomId
+    for Decora room subentries. Empty on an HA core old enough not to have
+    config subentries.
+    """
+    return {
+        se.unique_id: se.subentry_id
+        for se in getattr(config_entry, "subentries", {}).values()
+        if se.subentry_type == subentry_type and se.unique_id
+    }
+
+
 def add_entities_grouped_by_panel(config_entry, async_add_entities, entities) -> None:
     """Call async_add_entities once per panel, scoped to that panel's subentry.
 
@@ -28,11 +42,7 @@ def add_entities_grouped_by_panel(config_entry, async_add_entities, entities) ->
     """
     if not entities:
         return
-    subentry_by_panel = {
-        se.unique_id: se.subentry_id
-        for se in getattr(config_entry, "subentries", {}).values()
-        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
-    }
+    subentry_by_panel = subentry_ids_by_unique_id(config_entry, PANEL_SUBENTRY_TYPE)
     groups: dict[str | None, list] = {}
     for entity in entities:
         panel_id = entity.entity_data.get("panel_id") or entity.entity_data.get("id")

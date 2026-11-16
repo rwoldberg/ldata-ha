@@ -59,6 +59,23 @@ defaultHeaders = {
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
+# The two panel types and where Leviton's API keeps them: an LDATA hub is a
+# ResidentialBreakerPanel, an LWHEM hub an IotWhem.
+_API = "https://my.leviton.com/api"
+_PANEL_TYPES = ("LDATA", "WHEMS")
+
+
+def _panel_url(panel_id: str, panel_type: str) -> str:
+    """Return the REST URL of one panel."""
+    collection = "ResidentialBreakerPanels" if panel_type == "LDATA" else "IotWhems"
+    return f"{_API}/{collection}/{panel_id}"
+
+
+def _panel_listing_url(residence_id, panel_type: str) -> str:
+    """Return the REST URL listing a residence's panels of one type."""
+    listing = "residentialBreakerPanels" if panel_type == "LDATA" else "iotWhems"
+    return f"{_API}/Residences/{residence_id}/{listing}"
+
 
 class _DeadlineSession(requests.Session):
     """A requests.Session whose requests can share one deadline per thread.
@@ -303,11 +320,6 @@ class LDATAService:
         self._hw_counter_seen: dict[tuple[str, str], tuple[float, float]] = {}
         self._hw_counter_evidence: dict[str, int] = {}
         self._hw_counter_evidence_at: dict[str, float] = {}
-        # Track how many IotWhem WS messages we've seen per panel without breaker data
-        self._ws_iotwhem_count: dict[str, int] = {}
-        # Detection threshold (still used for logging, but no longer triggers breaker REST poll)
-        _WS_DETECTION_THRESHOLD = 5
-        self._WS_DETECTION_THRESHOLD = _WS_DETECTION_THRESHOLD
 
         # ── Unified zero-transition protection ────────────────────────
         # On V2 firmware the cloud sporadically sends zero power *and/or*
@@ -1039,7 +1051,7 @@ class LDATAService:
         """Get the whemns CTs for the panel module."""
         return self._get_whems_resource(panel_id, "iotCts", "CTs")
 
-    def _fetch_panels(self, url_template: str, panel_type: str, toggle_bandwidth: bool = True) -> object:
+    def _fetch_panels(self, panel_type: str, toggle_bandwidth: bool = True) -> object:
         """Helper to fetch panels of a specific type (LDATA or WHEMS).
 
         toggle_bandwidth: force each connected panel to push fresh values
@@ -1055,7 +1067,7 @@ class LDATAService:
             else:
                 headers["filter"] = "{}"
 
-            url = url_template.format(residenceId=residenceId)
+            url = _panel_listing_url(residenceId, panel_type)
             
             try:
                 result = self.session.get(
@@ -1239,10 +1251,10 @@ class LDATAService:
         base = "https://my.leviton.com/api"
         for residence_id in residence_ids:
             ldata = self._inventory_get(
-                f"{base}/Residences/{residence_id}/residentialBreakerPanels",
+                _panel_listing_url(residence_id, "LDATA"),
                 filter='{"include":["residentialBreakers"]}',
             )
-            whems = self._inventory_get(f"{base}/Residences/{residence_id}/iotWhems", filter="{}")
+            whems = self._inventory_get(_panel_listing_url(residence_id, "WHEMS"), filter="{}")
             if ldata is None or whems is None:
                 return False
             panels = [(panel, panel.get("residentialBreakers"), None) for panel in ldata]
@@ -1337,11 +1349,11 @@ class LDATAService:
 
     def get_iotWhemsPanels(self, toggle_bandwidth: bool = True) -> object:
         """Get the whemns modules for all the residences the user has access to."""
-        return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/iotWhems", "WHEMS", toggle_bandwidth)
+        return self._fetch_panels("WHEMS", toggle_bandwidth)
 
     def get_ldata_panels(self, toggle_bandwidth: bool = True) -> object:
         """Get the ldata modules for all the residences the user has access to."""
-        return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels", "LDATA", toggle_bandwidth)
+        return self._fetch_panels("LDATA", toggle_bandwidth)
 
     def _put_request(self, url: str, json_data: dict, context_str: str, referer: str = None, method: str = "PUT") -> object:
         """Helper to handle PUT/PATCH requests with standardized error handling."""
@@ -1374,19 +1386,6 @@ class LDATAService:
             _LOGGER.exception(f"[v{self.version}] Exception during {context_str}: {e}")
         
         return None
-
-    def put_residential_breaker_panels(self, panel_id: str, panel_type: str) -> None:
-        """Force an update of the power values via a bandwidth PATCH.
-
-        v1.66.0 HAR confirms the official app switched this endpoint from PUT
-        to PATCH (same {"bandwidth": 1} body); PUT no longer appears in traffic.
-        """
-        if panel_type == "LDATA":
-            url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-        else:
-            url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-
-        self._put_request(url, {"bandwidth": 1}, "put_residential_breaker_panels", method="PATCH")
 
     def remote_off(self, breaker_id):
         """Turn off a breaker."""
@@ -2330,7 +2329,6 @@ class LDATAService:
             # deliver these fields (confirmed by HAR traffic analysis).
             if panel["id"] not in self._panel_needs_rest_poll:
                 self._panel_needs_rest_poll[panel["id"]] = False
-                self._ws_iotwhem_count[panel["id"]] = 0
             _LOGGER.info(
                 f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' "
                 f"({panel_data['panel_type']}) firmware {fw_str} "
@@ -2728,11 +2726,7 @@ class LDATAService:
         # bandwidth:0 window.
         self._panels_in_bandwidth_toggle.add(panel_id)
 
-        if panel_type == "LDATA":
-            url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-        else:
-            url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-
+        url = _panel_url(panel_id, panel_type)
         headers = self._auth_headers()
 
         try:
@@ -3247,20 +3241,16 @@ class LDATAService:
 
     def _fetch_panel_status_locked(self) -> dict:
         """Inner implementation of fetch_panel_status, called under _rest_poll_lock."""
-        urls = {
-            "LDATA": "https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels",
-            "WHEMS": "https://my.leviton.com/api/Residences/{residenceId}/iotWhems",
-        }
         panel_types = {p.get("panel_type", "WHEMS") for p in self.status_data["panels"]}
         raw_by_id: dict[str, tuple[str, dict]] = {}
         requested_at = time.monotonic()
 
         for residence_id in self.residence_id_list:
             for panel_type in panel_types:
-                if panel_type not in urls:
+                if panel_type not in _PANEL_TYPES:
                     continue
                 result = self._get_retry_dropped_connection(
-                    urls[panel_type].format(residenceId=residence_id),
+                    _panel_listing_url(residence_id, panel_type),
                     headers=self._auth_headers(filter="{}"),
                     timeout=15,
                 )
@@ -3425,38 +3415,8 @@ class LDATAService:
         # carry panel fields plus embedded ResidentialBreaker (and, for
         # IotWhem, IotCt) arrays in the same shape.
         elif model_name in ("IotWhem", "ResidentialBreakerPanel"):
-             panel_id = data.get("id")
              has_breaker_data = "ResidentialBreaker" in data
-             has_ct_data = "IotCt" in data
-             
-             # --- Auto-detection of REST polling need ---
-             # WS-first strategy: track whether IotWhem WS messages contain
-             # breaker ELECTRICAL data (power/current/voltage).
-             # The cloud sends two kinds of embedded breaker updates:
-             #   1. Status-only: {env, bleRSSI, connected, lastUpdated} — NOT useful
-             #   2. Electrical:  {power, rmsCurrent, rmsVoltage, ...} — useful
-             # Only type (2) should count as "WS is delivering breaker data".
-             has_electrical_data = False
-             if has_breaker_data:
-                 for b_check in data["ResidentialBreaker"]:
-                     if any(k in b_check for k in ("power", "power2", "rmsCurrent", "rmsCurrent2", "rmsVoltage", "rmsVoltage2")):
-                         has_electrical_data = True
-                         break
-             
-             if panel_id and panel_id in self._ws_iotwhem_count:
-                 if has_electrical_data:
-                     self._ws_iotwhem_count[panel_id] = 0
-                 else:
-                     self._ws_iotwhem_count[panel_id] = self._ws_iotwhem_count.get(panel_id, 0) + 1
-                     # Log for diagnostics but don't enable breaker REST polling —
-                     # breaker energyConsumption arrives via WS, no REST needed.
-                     if self._ws_iotwhem_count[panel_id] == self._WS_DETECTION_THRESHOLD:
-                         _LOGGER.debug(
-                             f"[v{self.version}] Panel {panel_id}: {self._ws_iotwhem_count[panel_id]} "
-                             f"IotWhem WS messages without breaker electrical data (expected for FW 2.0+ — "
-                             f"breaker data arrives via individual subscriptions)"
-                         )
-             
+
              if has_breaker_data:
                   breakers = new_status_data["breakers"].copy()
                   panels_with_power_change = set()
@@ -3675,12 +3635,8 @@ class LDATAService:
         for _round in range(2):
             for panel_id, panel_type in panel_info:
                 try:
-                    if panel_type == "LDATA":
-                        url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-                    else:
-                        url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
                     async with session.patch(
-                        url,
+                        _panel_url(panel_id, panel_type),
                         headers=headers,
                         json={"bandwidth": 1},
                         timeout=aiohttp.ClientTimeout(total=10)

@@ -2899,4 +2899,3 @@ class DecoraGFCIStatusSensor(DecoraEntity, SensorEntity):
     @property
     def unique_id_suffix(self) -> str | None:
         return "fault_status"
-        return "mdi:wifi-strength-off-outline"
