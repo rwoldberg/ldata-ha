@@ -212,6 +212,11 @@ class LDATAService:
         self._panel_status_poll_warned = False
         # Cache for the latest status data to support WebSocket updates
         self.status_data = None
+        # time.monotonic() at which a WebSocket notification last set each
+        # raw field of a breaker, CT or panel, keyed by ("breaker" | "ct" |
+        # "panel", id). The REST poll merges skip the fields the WebSocket
+        # set after their request went out (see _rest_fields_not_superseded).
+        self._ws_field_times: dict[tuple[str, str], dict[str, float]] = {}
         # Sources whose fetch failed during the current status() call.
         self._incomplete_fetches: set[str] = set()
         # True when the residence_id_list in use came from a legacy discovery
@@ -2646,52 +2651,54 @@ class LDATAService:
             # the flag was already removed (shouldn't happen, but defensive).
             self._panels_in_bandwidth_toggle.discard(panel_id)
 
-    def refresh_breaker_data(self) -> bool:
-        """Re-fetch breaker data from the REST API and merge into status_data.
+    def fetch_breaker_poll(self) -> list[dict] | None:
+        """Read fresh breaker (and CT) records from the REST API.
 
         Runs for ALL panels that have real breakers — energyConsumption/energyImport
         only arrive via GET /residentialBreakers (after a bandwidth toggle) and are
-        never delivered by WebSocket.  CT data is also refreshed here for panels that
+        never delivered by WebSocket.  CT data is also read here for panels that
         have CTs (_panel_needs_rest_poll), since the bandwidth toggle is already done.
 
-        Returns True if data was successfully refreshed.
+        Runs in the executor and only reads: merge_rest_poll() applies the
+        result on the event loop. Returns None when there was nothing to poll.
         """
         if not self.status_data or not self.status_data.get("panels"):
-            return False
+            return None
 
         if not self.auth_token:
-            return False
+            return None
 
         # Check if any panel has real breakers that need polling
         if not any(self._panel_needs_breaker_poll.values()):
-            return False
+            return None
         
         # Serialize with CT poll to prevent bandwidth:0 toggle from corrupting
         # breaker data mid-fetch.
         acquired = self._rest_poll_lock.acquire(timeout=30)
         if not acquired:
             _LOGGER.warning(f"[v{self.version}] Breaker poll timed out waiting for lock — skipping this cycle")
-            return False
+            return None
         try:
-            return self._refresh_breaker_data_locked()
+            return self._fetch_breaker_poll_locked()
         finally:
             self._rest_poll_lock.release()
 
-    def _fetch_and_merge_cts(self, panel_id: str, cts: dict, log_ctx: str = "") -> bool:
-        """Settle-delay, fetch-with-retry, and merge fresh CT data for one panel into `cts`.
+    def _fetch_cts(self, panel_id: str, log_ctx: str = "") -> tuple[list | None, float]:
+        """Settle-delay and fetch-with-retry the CT records of one panel.
 
         Firmware v2.1.0: bandwidth:0 causes the panel to disconnect from the
         cloud. Reconnection after bandwidth:1 takes 10-20s in v2.1.0 (vs.
         near-instant on earlier firmware). Waiting CT_BANDWIDTH_SETTLE_SECS
         before the first fetch avoids most 502 errors without burning a retry.
 
-        Shared by _refresh_breaker_data_locked (which fetches CTs
-        opportunistically after a breaker poll's bandwidth toggle) and
-        _refresh_ct_data_locked (the dedicated CT-only poll). Mutates `cts`
-        in place; returns True if anything was updated.
+        Shared by the breaker poll (which fetches CTs opportunistically after
+        its bandwidth toggle) and the dedicated CT-only poll. Returns the
+        records (None if every attempt failed) and the time.monotonic() at
+        which the request that returned them was sent.
         """
         time.sleep(CT_BANDWIDTH_SETTLE_SECS)
 
+        requested_at = time.monotonic()
         raw_cts = self.get_Whems_CT(panel_id)
         for attempt, delay in enumerate(CT_FETCH_RETRY_DELAYS, start=1):
             if raw_cts is not None:
@@ -2702,22 +2709,12 @@ class LDATAService:
                 f"— waiting {delay}s before retry"
             )
             time.sleep(delay)
+            requested_at = time.monotonic()
             raw_cts = self.get_Whems_CT(panel_id)
+        return raw_cts, requested_at
 
-        updated = False
-        if raw_cts:
-            for ct in raw_cts:
-                if ct.get("usageType") != "NOT_USED":
-                    ct_id = str(ct["id"])
-                    if ct_id in cts:
-                        existing_ct = cts[ct_id].copy()
-                        self._apply_ct_update(existing_ct, ct)
-                        cts[ct_id] = existing_ct
-                        updated = True
-        return updated
-
-    def _refresh_breaker_data_locked(self) -> bool:
-        """Inner implementation of refresh_breaker_data, called under _rest_poll_lock.
+    def _fetch_breaker_poll_locked(self) -> list[dict]:
+        """Inner implementation of fetch_breaker_poll, called under _rest_poll_lock.
 
         Runs a bandwidth toggle + breaker REST fetch for every panel that has real
         breakers (_panel_needs_breaker_poll).  energyConsumption/energyImport are
@@ -2727,14 +2724,8 @@ class LDATAService:
         in the same cycle (the bandwidth toggle is already done, so no extra cost).
         The dedicated _ct_poll_loop runs more frequently for CT-only refreshes.
         """
-
-        new_status_data = self.status_data.copy()
-        breakers = new_status_data.get("breakers", {}).copy()
-        cts = new_status_data.get("cts", {}).copy()
-        updated = False
-        panels_with_power_change = set()
-
-        for panel_data in new_status_data.get("panels", []):
+        results: list[dict] = []
+        for panel_data in list(self.status_data.get("panels", [])):
             panel_id = panel_data.get("id")
             panel_type = panel_data.get("panel_type", "WHEMS")
 
@@ -2758,38 +2749,117 @@ class LDATAService:
 
                 # Fetch fresh breaker data — energyConsumption/energyImport only
                 # arrive here; WebSocket never carries these fields.
-                raw_breakers = self.get_Whems_breakers(panel_id)
-                if raw_breakers:
-                    for breaker in raw_breakers:
-                        if (
-                            breaker.get("model") is not None
-                            and breaker["model"] != "NONE-2"
-                            and breaker["model"] != "NONE-1"
-                        ):
-                            b_id = breaker["id"]
-                            if b_id in breakers:
-                                existing = breakers[b_id].copy()
-                                power_changed = self._apply_breaker_update(
-                                    b_id, existing, breaker, source="REST",
-                                )
-                                if power_changed:
-                                    panels_with_power_change.add(existing.get("panel_id"))
-                                breakers[b_id] = existing
-                                updated = True
+                result: dict[str, typing.Any] = {
+                    "panel_id": panel_id,
+                    "breakers_requested_at": time.monotonic(),
+                }
+                result["breakers"] = self.get_Whems_breakers(panel_id)
 
                 # Fetch CT data only for panels that have CTs.
                 # The bandwidth toggle is already done above; apply the same
                 # settle delay and retry logic used in the dedicated CT poll
                 # so that firmware v2.1.0 reconnection time is absorbed here too.
                 if self._panel_needs_rest_poll.get(panel_id, False):
-                    if self._fetch_and_merge_cts(panel_id, cts, log_ctx=" (breaker poll)"):
-                        updated = True
-                
+                    result["cts"], result["cts_requested_at"] = self._fetch_cts(
+                        panel_id, log_ctx=" (breaker poll)"
+                    )
+                results.append(result)
+
             except LDATAAuthError:
                 raise
             except Exception as e:
                 _LOGGER.warning(f"[v{self.version}] Error refreshing data for panel {panel_id}: {e}")
-        
+
+        return results
+
+    def _note_ws_fields(self, kind: str, item_id, data: dict) -> None:
+        """Remember when the WebSocket last set each field of a breaker, CT or panel."""
+        now = time.monotonic()
+        stamps = self._ws_field_times.setdefault((kind, str(item_id)), {})
+        for key in data:
+            stamps[key] = now
+
+    def _rest_fields_not_superseded(self, kind: str, item_id, raw: dict, requested_at: float) -> dict:
+        """Return the fields of a REST record the WebSocket has not set since it was requested.
+
+        A poll's request goes out seconds (with the CT settle delay, up to a
+        minute) before its result is merged, and the WebSocket keeps
+        updating status_data meanwhile. A field the WebSocket set after the
+        request is newer than the poll's copy of it, so the poll's copy is
+        dropped; every other field, including the energy counters the
+        WebSocket never sends, is applied.
+        """
+        stamps = self._ws_field_times.get((kind, str(item_id)))
+        if not stamps:
+            return raw
+        return {
+            key: value
+            for key, value in raw.items()
+            if stamps.get(key, float("-inf")) < requested_at
+        }
+
+    def _merge_rest_cts(self, cts: dict, raw_cts, requested_at) -> bool:
+        """Merge one panel's REST CT records into cts (a copy); True if any was applied."""
+        updated = False
+        for ct in raw_cts or []:
+            if ct.get("usageType") == "NOT_USED" or ct.get("id") is None:
+                continue
+            ct_id = str(ct["id"])
+            if ct_id not in cts:
+                continue
+            raw = self._rest_fields_not_superseded("ct", ct_id, ct, requested_at)
+            if not raw:
+                continue
+            existing_ct = cts[ct_id].copy()
+            self._apply_ct_update(existing_ct, raw)
+            cts[ct_id] = existing_ct
+            updated = True
+        return updated
+
+    def merge_rest_poll(self, results) -> bool:
+        """Merge breaker and CT poll results into the current status_data.
+
+        Runs on the event loop, where the WebSocket updates are applied too,
+        and works on the status_data as it is now: the polls used to copy it
+        before fetching and write that copy back afterwards, undoing every
+        WebSocket update that arrived in between (a breaker that tripped
+        during a CT poll's settle delay showed as on again). See
+        _rest_fields_not_superseded for the fields the WebSocket keeps.
+
+        Returns True if anything was applied.
+        """
+        if not results or not self.status_data:
+            return False
+
+        new_status_data = self.status_data.copy()
+        breakers = new_status_data.get("breakers", {}).copy()
+        cts = new_status_data.get("cts", {}).copy()
+        updated = False
+        panels_with_power_change = set()
+
+        for result in results:
+            for breaker in result.get("breakers") or []:
+                if breaker.get("model") in (None, "NONE-1", "NONE-2"):
+                    continue
+                b_id = breaker.get("id")
+                if b_id not in breakers:
+                    continue
+                raw = self._rest_fields_not_superseded(
+                    "breaker", b_id, breaker, result["breakers_requested_at"]
+                )
+                if not raw:
+                    continue
+                existing = breakers[b_id].copy()
+                if self._apply_breaker_update(b_id, existing, raw, source="REST"):
+                    panels_with_power_change.add(existing.get("panel_id"))
+                breakers[b_id] = existing
+                updated = True
+
+            if result.get("cts") and self._merge_rest_cts(
+                cts, result["cts"], result["cts_requested_at"]
+            ):
+                updated = True
+
         if updated:
             new_status_data["breakers"] = breakers
             new_status_data["cts"] = cts
@@ -2797,7 +2867,7 @@ class LDATAService:
                 if pid:
                     self._recalc_total_power(new_status_data, pid)
             self.status_data = new_status_data
-        
+
         return updated
 
     @property
@@ -2924,65 +2994,52 @@ class LDATAService:
                 f"Reloading the integration re-checks it."
             )
 
-    def refresh_ct_data(self) -> bool:
-        """Re-fetch only CT data from the REST API and merge into status_data.
+    def fetch_ct_poll(self) -> list[dict] | None:
+        """Read fresh CT records from the REST API.
         
-        FALLBACK mechanism — only runs for panels where WS auto-detection has
-        confirmed that WebSocket does not deliver energyConsumption/energyImport.
+        Only runs for panels whose CT energy counters need a REST poll
+        (_panel_needs_rest_poll, v1 firmware with CTs).
         
-        Lightweight alternative to refresh_breaker_data that only polls the
+        Lightweight alternative to the breaker poll that only polls the
         /iotCts endpoint. Uses bandwidth toggle (1→0→1) to force the panel
         to push fresh energy counter values to the cloud.
         
-        Returns True if data was successfully refreshed.
+        Runs in the executor and only reads: merge_rest_poll() applies the
+        result on the event loop. Returns None when there was nothing to poll.
         """
         if not self.status_data or not self.status_data.get("panels"):
-            return False
+            return None
         
         if not self.auth_token:
-            return False
+            return None
         
         # Serialize with breaker poll so bandwidth:0 toggle doesn't corrupt
         # a concurrent breaker GET.
         acquired = self._rest_poll_lock.acquire(timeout=30)
         if not acquired:
             _LOGGER.warning(f"[v{self.version}] CT poll timed out waiting for lock — skipping this cycle")
-            return False
+            return None
         try:
-            return self._refresh_ct_data_locked()
+            results: list[dict] = []
+            for panel_data in list(self.status_data.get("panels", [])):
+                panel_id = panel_data.get("id")
+
+                if not panel_id or not self._panel_needs_rest_poll.get(panel_id, False):
+                    continue
+
+                try:
+                    self._bandwidth_toggle(panel_id, panel_data.get("panel_type", "WHEMS"))
+                    raw_cts, requested_at = self._fetch_cts(panel_id)
+                    results.append(
+                        {"panel_id": panel_id, "cts": raw_cts, "cts_requested_at": requested_at}
+                    )
+                except LDATAAuthError:
+                    raise
+                except Exception as e:
+                    _LOGGER.warning(f"[v{self.version}] Error refreshing CT data for panel {panel_id}: {e}")
+            return results
         finally:
             self._rest_poll_lock.release()
-
-    def _refresh_ct_data_locked(self) -> bool:
-        """Inner implementation of refresh_ct_data, called under _rest_poll_lock."""
-        
-        new_status_data = self.status_data.copy()
-        cts = new_status_data.get("cts", {}).copy()
-        updated = False
-        
-        for panel_data in new_status_data.get("panels", []):
-            panel_id = panel_data.get("id")
-            
-            if not panel_id or not self._panel_needs_rest_poll.get(panel_id, False):
-                continue
-            
-            try:
-                panel_type = panel_data.get("panel_type", "WHEMS")
-                self._bandwidth_toggle(panel_id, panel_type)
-
-                if self._fetch_and_merge_cts(panel_id, cts):
-                    updated = True
-
-            except LDATAAuthError:
-                raise
-            except Exception as e:
-                _LOGGER.warning(f"[v{self.version}] Error refreshing CT data for panel {panel_id}: {e}")
-        
-        if updated:
-            new_status_data["cts"] = cts
-            self.status_data = new_status_data
-        
-        return updated
 
     # Panel fields refresh_panel_status() re-reads for LDATA panels.
     _REFRESHED_PANEL_FIELDS = (
@@ -2993,7 +3050,16 @@ class LDATAService:
     )
 
     def refresh_panel_status(self) -> bool:
-        """Re-read panel state from the REST panel listing.
+        """Re-read panel state from the REST panel listing, in the calling thread.
+
+        Runs fetch_panel_status() and merge_panel_status() one after the
+        other. The coordinator runs them on their own threads instead: the
+        fetch in the executor, the merge on the event loop.
+        """
+        return self.merge_panel_status(self.fetch_panel_status())
+
+    def fetch_panel_status(self) -> dict | None:
+        """Read panel state from the REST panel listing.
 
         The WebSocket only reports "connected" inside a panel notification, and
         an offline panel sends none, so the cached flag would otherwise keep its
@@ -3013,13 +3079,14 @@ class LDATAService:
         leaves the cached value unchanged, except LDATA rssi: null, which means
         the hub is on Ethernet and is stored as None.
 
-        Returns True if any panel's connected flag or refreshed field changed.
+        Runs in the executor and only reads; merge_panel_status() applies
+        the result. Returns None when the poll was skipped or failed.
         """
         if not self.status_data or not self.status_data.get("panels"):
-            return False
+            return None
 
         if not self.auth_token:
-            return False
+            return None
 
         # Serialize with the breaker/CT polls so this listing GET can't land
         # inside their bandwidth toggle, when the panel briefly drops off the
@@ -3027,12 +3094,12 @@ class LDATAService:
         # this cycle — the next one is only PANEL_STATUS_POLL_INTERVAL away.
         if not self._rest_poll_lock.acquire(timeout=5):
             _LOGGER.debug(f"[v{self.version}] Panel status poll skipped — another REST poll is running")
-            return False
+            return None
         try:
-            changed = self._refresh_panel_status_locked()
+            fetched = self._fetch_panel_status_locked()
         except requests.exceptions.RequestException as ex:
             self._record_panel_status_poll_failure(ex)
-            return False
+            return None
         finally:
             self._rest_poll_lock.release()
 
@@ -3043,7 +3110,7 @@ class LDATAService:
             )
         self._panel_status_poll_failures = 0
         self._panel_status_poll_warned = False
-        return changed
+        return fetched
 
     def _record_panel_status_poll_failure(self, ex: Exception) -> None:
         """Count a failed panel status poll; warn once per failure streak.
@@ -3071,14 +3138,15 @@ class LDATAService:
                 f"(#{self._panel_status_poll_failures} in a row): {error}"
             )
 
-    def _refresh_panel_status_locked(self) -> bool:
-        """Inner implementation of refresh_panel_status, called under _rest_poll_lock."""
+    def _fetch_panel_status_locked(self) -> dict:
+        """Inner implementation of fetch_panel_status, called under _rest_poll_lock."""
         urls = {
             "LDATA": "https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels",
             "WHEMS": "https://my.leviton.com/api/Residences/{residenceId}/iotWhems",
         }
         panel_types = {p.get("panel_type", "WHEMS") for p in self.status_data["panels"]}
         raw_by_id: dict[str, tuple[str, dict]] = {}
+        requested_at = time.monotonic()
 
         for residence_id in self.residence_id_list:
             for panel_type in panel_types:
@@ -3103,11 +3171,28 @@ class LDATAService:
                         continue
                     raw_by_id[panel_id] = (panel_type, panel)
 
+        return {"requested_at": requested_at, "panels": raw_by_id}
+
+    def merge_panel_status(self, fetched) -> bool:
+        """Apply a fetch_panel_status() result to the current status_data.
+
+        Runs on the event loop, like the WebSocket updates, so it works on
+        the panels as they are now. A panel the WebSocket updated after the
+        listing was requested keeps those newer values this cycle.
+
+        Returns True if any panel's connected flag or refreshed field changed.
+        """
+        if not fetched or not self.status_data or not self.status_data.get("panels"):
+            return False
+
+        raw_by_id = fetched["panels"]
+        requested_at = fetched["requested_at"]
         changed = False
         panels = []
         for panel in self.status_data["panels"]:
             panel_type, raw = raw_by_id.get(panel.get("id"), (None, None))
-            if raw is None:
+            stamps = self._ws_field_times.get(("panel", str(panel.get("id"))), {})
+            if raw is None or any(at >= requested_at for at in stamps.values()):
                 panels.append(panel)
                 continue
             connected = self._is_panel_connected(raw)
@@ -3204,6 +3289,7 @@ class LDATAService:
                   breaker = breakers[breaker_id].copy()
                   
                   power_changed = self._apply_breaker_update(breaker_id, breaker, data, source="WS")
+                  self._note_ws_fields("breaker", breaker_id, data)
                   
                   breakers[breaker_id] = breaker
                   new_status_data["breakers"] = breakers
@@ -3223,6 +3309,7 @@ class LDATAService:
                   cts = new_status_data["cts"].copy()
                   ct = cts[ct_id].copy()
                   self._apply_ct_update(ct, data)
+                  self._note_ws_fields("ct", ct_id, data)
                   cts[ct_id] = ct
                   new_status_data["cts"] = cts
                   updated = True
@@ -3273,6 +3360,7 @@ class LDATAService:
                             power_changed = self._apply_breaker_update(
                                 b_id, breaker, b_data, source="WS-bulk"
                             )
+                            self._note_ws_fields("breaker", b_id, b_data)
                             if power_changed:
                                 panels_with_power_change.add(breaker.get("panel_id"))
                             breakers[b_id] = breaker
@@ -3290,6 +3378,7 @@ class LDATAService:
                        if ct_id and ct_id in cts:
                             ct = cts[ct_id].copy()
                             self._apply_ct_update(ct, ct_data_item)
+                            self._note_ws_fields("ct", ct_id, ct_data_item)
                             cts[ct_id] = ct
                             updated = True
                   if updated:
@@ -3301,6 +3390,7 @@ class LDATAService:
                   panels = new_status_data["panels"].copy()
                   for i, panel in enumerate(panels):
                        if panel.get("id") == panel_id:
+                            self._note_ws_fields("panel", panel_id, data)
                             panel = panel.copy()
                             
                             # Update connected status. LDATA panels follow the

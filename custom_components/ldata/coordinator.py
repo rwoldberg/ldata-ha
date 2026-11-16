@@ -166,12 +166,16 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
         )
 
-    async def _fallback_poll_loop(self, *, loop_name, get_interval, needs_poll, refresh):
-        """Shared sleep/refresh/exception scaffolding for the REST and CT fallback poll loops.
+    async def _fallback_poll_loop(self, *, loop_name, get_interval, needs_poll, fetch, merge):
+        """Shared sleep/refresh/exception scaffolding for the REST poll loops.
 
-        Both loops sleep for `get_interval()`, bail out on shutdown, skip the
-        cycle if `needs_poll()` is False, otherwise run `refresh` in the
-        executor and push a debounced update if it returned fresh data.
+        Each loop sleeps for `get_interval()`, bails out on shutdown, skips the
+        cycle if `needs_poll()` is False, otherwise runs `fetch` in the
+        executor and `merge` on the event loop, and pushes a debounced update
+        if the merge applied anything. The merge runs here, not in the
+        executor, so it applies the result to the status_data the WebSocket
+        has kept updating while the fetch ran, instead of writing back a copy
+        taken before it.
         """
         while not self._service._shutdown_requested:
             try:
@@ -183,9 +187,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 if not needs_poll():
                     continue
 
-                refreshed = await self._hass.async_add_executor_job(refresh)
+                fetched = await self._hass.async_add_executor_job(fetch)
 
-                if refreshed:
+                if merge(fetched):
                     self._handle_websocket_update()
 
             except asyncio.CancelledError:
@@ -238,7 +242,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             loop_name="REST poll",
             get_interval=self._inform_rate,
             needs_poll=lambda: self._service.needs_breaker_poll,
-            refresh=self._service.refresh_breaker_data,
+            fetch=self._service.fetch_breaker_poll,
+            merge=self._service.merge_rest_poll,
         )
 
     async def _ct_poll_loop(self):
@@ -267,7 +272,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             loop_name="CT poll",
             get_interval=lambda: CT_POLL_INTERVAL,
             needs_poll=lambda: self._service.needs_rest_poll,
-            refresh=self._service.refresh_ct_data,
+            fetch=self._service.fetch_ct_poll,
+            merge=self._service.merge_rest_poll,
         )
 
     async def _panel_status_poll_loop(self):
@@ -279,7 +285,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             loop_name="Panel status poll",
             get_interval=lambda: PANEL_STATUS_POLL_INTERVAL,
             needs_poll=lambda: True,
-            refresh=self._service.refresh_panel_status,
+            fetch=self._service.fetch_panel_status,
+            merge=self._service.merge_panel_status,
         )
 
     def _handle_websocket_update(self):
