@@ -3631,7 +3631,9 @@ class LDATAService:
                 })
         return subscriptions
 
-    async def async_run_websocket(self, update_callback, connection_callback=None, decora_callback=None):
+    async def async_run_websocket(
+        self, update_callback, connection_callback=None, decora_callback=None, auth_rejected_callback=None
+    ):
         """Run the WebSocket connection loop — PRIMARY data source.
 
         WS-FIRST Strategy:
@@ -3654,6 +3656,11 @@ class LDATAService:
         immediate, no debounce (unlike update_callback, which the coordinator
         debounces via HA_INFORM_RATE). Falls back to update_callback if not
         provided, so Decora updates still surface even without it wired up.
+
+        auth_rejected_callback: called when Leviton rejects the WebSocket
+        login, so the coordinator can log in again for a new token. The loop
+        keeps backing off as for any failed attempt and uses whatever token
+        the service holds at its next attempt.
         """
         uri = "wss://socket.cloud.leviton.com/"
         # Wait before every connect attempt after the first. Each attempt
@@ -3841,6 +3848,11 @@ class LDATAService:
                                     elif "error" in data:
                                         _LOGGER.error(f"[v{self.version}] Auth error: {data}")
                                         failed_attempts += 1
+                                        if auth_rejected_callback:
+                                            try:
+                                                auth_rejected_callback()
+                                            except Exception as e:  # pylint: disable=broad-except
+                                                _LOGGER.error(f"[v{self.version}] Auth rejected callback error: {type(e).__name__}")
                                         break
                                 elif msg.type in (
                                     aiohttp.WSMsgType.CLOSE,

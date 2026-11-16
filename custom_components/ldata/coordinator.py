@@ -2,14 +2,15 @@
 
 import asyncio
 import logging
+import time
 import requests
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
-from .ldata_service import LDATAService, LDATAAuthError
+from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, AUTH_RENEWAL_BACKOFF, AUTH_RENEWAL_BACKOFF_MAX, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
+from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -38,6 +39,13 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._debounce_timer = None
         self._websocket_connected = False
         self._websocket_ever_connected = False
+        # Token renewal after setup, see _async_auth_failed.
+        self._auth_lock = asyncio.Lock()
+        self._auth_retry_at = 0.0
+        self._auth_backoff = AUTH_RENEWAL_BACKOFF
+        # Set when Leviton refused the stored credentials themselves; only
+        # the reauth flow (which reloads the entry) can clear it.
+        self._auth_failed = False
 
         super().__init__(
             hass,
@@ -55,6 +63,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 self._handle_websocket_update,
                 self._handle_connection_change,
                 self._handle_decora_websocket_update,
+                self._handle_websocket_auth_rejected,
             ),
             "ldata_websocket"
         )
@@ -84,6 +93,79 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._panel_status_poll_loop(),
             "ldata_panel_status_poll"
         )
+
+    @callback
+    def _handle_websocket_auth_rejected(self) -> None:
+        """Renew the token after Leviton rejected the WebSocket login."""
+        self.config_entry.async_create_background_task(
+            self._hass,
+            self._async_auth_failed("WebSocket login"),
+            "ldata_auth_renewal",
+        )
+
+    async def _async_auth_failed(self, source: str) -> None:
+        """Log in again with the stored credentials after Leviton refused the token.
+
+        Leviton tokens expire, and a password change revokes them. Nothing
+        else renews one after setup: status() falls back to the stored
+        credentials, but it only runs at setup and on a refresh requested
+        while the WebSocket is down. Without this the WebSocket retried the
+        refused token and the REST polls kept failing, while every entity
+        stayed available showing frozen values.
+
+        Several loops report the same refusal, so reports while a login is
+        under way are dropped, and after a login the next one waits for
+        _auth_retry_at, backing off while logins keep failing. If Leviton
+        refuses the credentials themselves, or the account now needs a 2FA
+        code, nothing here can fix it: that starts Home Assistant's reauth
+        flow, and the entities go unavailable until it completes.
+        """
+        if self._auth_failed or self._auth_lock.locked() or self._service._shutdown_requested:
+            return
+        async with self._auth_lock:
+            if time.monotonic() < self._auth_retry_at:
+                return
+            _LOGGER.warning(
+                f"[v{self._service.version}] Leviton refused the stored token ({source}); "
+                f"logging in again with the stored credentials"
+            )
+            try:
+                await self._hass.async_add_executor_job(self._service.auth_with_credentials)
+            except (LDATAAuthError, TwoFactorRequired):
+                self._auth_failed = True
+                # An empty token stops the WebSocket and the REST polls from
+                # retrying one Leviton refuses; reauth reloads the entry.
+                self._service.clear_tokens()
+                _LOGGER.error(
+                    f"[v{self._service.version}] Leviton refused the stored credentials, or the "
+                    f"account now needs a 2FA code; please reauthenticate the integration"
+                )
+                self.async_set_update_error(
+                    UpdateFailed("Leviton refused the stored credentials")
+                )
+                self.config_entry.async_start_reauth(self._hass)
+                return
+            except Exception as ex:  # pylint: disable=broad-except
+                # The login service could not be reached or failed; try again later.
+                self._auth_retry_at = time.monotonic() + self._auth_backoff
+                _LOGGER.warning(
+                    f"[v{self._service.version}] Logging in again failed ({type(ex).__name__}); "
+                    f"next attempt in {self._auth_backoff:.0f}s"
+                )
+                self._auth_backoff = min(self._auth_backoff * 2, AUTH_RENEWAL_BACKOFF_MAX)
+                if not self._websocket_connected:
+                    # No data is arriving: show that instead of frozen values.
+                    self.async_set_update_error(
+                        UpdateFailed("Leviton refused the stored token and logging in again failed")
+                    )
+                return
+
+            self._auth_backoff = AUTH_RENEWAL_BACKOFF
+            self._auth_retry_at = time.monotonic() + AUTH_RENEWAL_BACKOFF
+            self._persist_refreshed_tokens()
+            _LOGGER.info(f"[v{self._service.version}] Logged in again; using the new token")
+            if not self.last_update_success and self._service.status_data:
+                self.async_set_updated_data(self._service.status_data)
 
     def _handle_connection_change(self, connected: bool):
         """Handle WebSocket connection state changes."""
@@ -192,6 +274,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 break
             except LDATAAuthError as ex:
                 _LOGGER.warning(f"[v{self._service.version}] {loop_name} auth error: {ex}")
+                await self._async_auth_failed(loop_name)
                 await asyncio.sleep(60)
             except Exception as ex:
                 _LOGGER.warning(f"[v{self._service.version}] {loop_name} error: {ex}")
@@ -308,7 +391,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         try:
             data = self._service.status_data
 
-            if not data:
+            # While the credentials are refused, a socket that is still open
+            # must not make the entities available again (see
+            # _async_auth_failed).
+            if not data or self._auth_failed:
                 return
 
             # Log data if enabled
@@ -348,7 +434,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         responsive UI matters more than reducing DB writes.
         """
         data = self._service.status_data
-        if not data:
+        if not data or self._auth_failed:
             return
 
         decora_count = len(data.get("decora_devices", {}))
