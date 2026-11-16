@@ -1,0 +1,23 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+# The tests only read the repository.
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      # Pins Home Assistant 2026.10.4. The plugin's automatic loading is
+      # turned off below: the tests that use it import what they need.
+      - run: pip install pytest-homeassistant-custom-component==0.13.375
+      - run: python -m pytest tests -q -p no:homeassistant
+      - run: node --check custom_components/ldata/www/ldata-panel-card.js
