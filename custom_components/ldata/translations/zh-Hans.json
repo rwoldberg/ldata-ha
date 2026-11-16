@@ -207,6 +207,7 @@
                 "cloud_connected": "已连接到 Leviton 云端",
                 "cloud_offline": "配电箱离线",
                 "cloud_unknown": "云端状态未知",
+                "no_data": "暂时没有来自 Leviton 的数据",
                 "wifi_signal": "Wi-Fi 信号：{dbm} dBm",
                 "wifi_unknown": "Wi-Fi 信号未知",
                 "update_available": "有可用的固件更新（请在 My Leviton 应用中安装）",
@@ -321,7 +322,9 @@
                 "check_linked_any": "已关联到任意配电箱的设备",
                 "check_linked_this": "已关联到此配电箱的设备",
                 "check_breakers": "带有 Status 实体的断路器",
-                "empty_help": "如果未找到配电箱设备，请从配电箱自身的设备页面复制设备 ID，而不是从断路器的设备页面复制。如果已找到配电箱设备，但没有任何设备与其关联，请更新 LDATA 集成并重新启动 Home Assistant；仅重新加载是不够的。"
+                "empty_help": "如果未找到配电箱设备，请从配电箱自身的设备页面复制设备 ID，而不是从断路器的设备页面复制。如果已找到配电箱设备，但没有任何设备与其关联，请更新 LDATA 集成并重新启动 Home Assistant；仅重新加载是不够的。",
+                "no_data_title": "正在等待 Leviton 的数据",
+                "no_data_body": "LDATA 集成暂时无法连接 Leviton，或仍在启动中。集成重新连接后，配电箱会自动显示在这里。如果没有显示，请在“设置 → 设备与服务”中检查该集成。"
             }
         },
         "editor": {

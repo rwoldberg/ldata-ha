@@ -207,6 +207,7 @@
                 "cloud_connected": "Mit der Leviton-Cloud verbunden",
                 "cloud_offline": "Sicherungskasten offline",
                 "cloud_unknown": "Cloud-Status unbekannt",
+                "no_data": "Gerade keine Daten von Leviton",
                 "wifi_signal": "Wi-Fi-Signal: {dbm} dBm",
                 "wifi_unknown": "Wi-Fi-Signal unbekannt",
                 "update_available": "Firmware-Update verfügbar (in der My Leviton-App installieren)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Mit einem Sicherungskasten verknüpfte Geräte",
                 "check_linked_this": "Mit diesem Sicherungskasten verknüpfte Geräte",
                 "check_breakers": "Sicherungen mit einer Status-Entität",
-                "empty_help": "Wenn das Gerät des Sicherungskastens nicht gefunden wird, kopiere die Geräte-ID von der Geräteseite des Sicherungskastens selbst, nicht von der einer Sicherung. Wenn es gefunden wird, aber nichts damit verknüpft ist, aktualisiere die LDATA-Integration und starte Home Assistant neu; ein Neuladen reicht nicht aus."
+                "empty_help": "Wenn das Gerät des Sicherungskastens nicht gefunden wird, kopiere die Geräte-ID von der Geräteseite des Sicherungskastens selbst, nicht von der einer Sicherung. Wenn es gefunden wird, aber nichts damit verknüpft ist, aktualisiere die LDATA-Integration und starte Home Assistant neu; ein Neuladen reicht nicht aus.",
+                "no_data_title": "Warte auf Daten von Leviton",
+                "no_data_body": "Die LDATA-Integration erreicht Leviton gerade nicht oder startet noch. Der Sicherungskasten erscheint hier von selbst, sobald die Integration wieder verbunden ist. Falls nicht, prüfe die Integration unter Einstellungen → Geräte & Dienste."
             }
         },
         "editor": {

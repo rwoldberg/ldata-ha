@@ -207,6 +207,7 @@
                 "cloud_connected": "Połączono z chmurą Leviton",
                 "cloud_offline": "Rozdzielnica offline",
                 "cloud_unknown": "Nieznany stan połączenia z chmurą",
+                "no_data": "Obecnie brak danych z chmury Leviton",
                 "wifi_signal": "Sygnał Wi-Fi: {dbm} dBm",
                 "wifi_unknown": "Nieznana siła sygnału Wi-Fi",
                 "update_available": "Dostępna aktualizacja oprogramowania układowego (zainstaluj ją w aplikacji My Leviton)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Urządzenia powiązane z dowolną rozdzielnicą",
                 "check_linked_this": "Urządzenia powiązane z tą rozdzielnicą",
                 "check_breakers": "Wyłączniki z encją Status",
-                "empty_help": "Jeśli urządzenie rozdzielnicy nie zostało znalezione, skopiuj identyfikator urządzenia ze strony urządzenia samej rozdzielnicy, a nie ze strony wyłącznika. Jeśli zostało znalezione, ale nic nie jest z nim powiązane, zaktualizuj integrację LDATA i uruchom ponownie Home Assistant – samo ponowne wczytanie nie wystarczy."
+                "empty_help": "Jeśli urządzenie rozdzielnicy nie zostało znalezione, skopiuj identyfikator urządzenia ze strony urządzenia samej rozdzielnicy, a nie ze strony wyłącznika. Jeśli zostało znalezione, ale nic nie jest z nim powiązane, zaktualizuj integrację LDATA i uruchom ponownie Home Assistant – samo ponowne wczytanie nie wystarczy.",
+                "no_data_title": "Oczekiwanie na dane z chmury Leviton",
+                "no_data_body": "Integracja LDATA nie może teraz połączyć się z chmurą Leviton albo dopiero się uruchamia. Rozdzielnica pojawi się tutaj sama, gdy integracja ponownie się połączy. Jeśli tak się nie stanie, sprawdź integrację w Ustawienia → Urządzenia oraz usługi."
             }
         },
         "editor": {

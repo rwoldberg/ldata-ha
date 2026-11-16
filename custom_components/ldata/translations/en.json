@@ -207,6 +207,7 @@
                 "cloud_connected": "Connected to the Leviton cloud",
                 "cloud_offline": "Panel offline",
                 "cloud_unknown": "Cloud status unknown",
+                "no_data": "No data from Leviton right now",
                 "wifi_signal": "Wi-Fi signal: {dbm} dBm",
                 "wifi_unknown": "Wi-Fi signal unknown",
                 "update_available": "Firmware update available (install it in the My Leviton app)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Devices linked to any panel",
                 "check_linked_this": "Devices linked to this panel",
                 "check_breakers": "Breakers with a Status entity",
-                "empty_help": "If the panel device is not found, copy the device ID from the panel's own device page, not from a breaker's. If it is found but nothing is linked to it, update the LDATA integration and restart Home Assistant; a reload is not enough."
+                "empty_help": "If the panel device is not found, copy the device ID from the panel's own device page, not from a breaker's. If it is found but nothing is linked to it, update the LDATA integration and restart Home Assistant; a reload is not enough.",
+                "no_data_title": "Waiting for data from Leviton",
+                "no_data_body": "The LDATA integration can't reach Leviton right now, or it is still starting. This panel appears here on its own once the integration reconnects. If it doesn't, check the integration under Settings → Devices & services."
             }
         },
         "editor": {

@@ -120,8 +120,6 @@ const G = {
   slotPad: 0.035,
   strip: 0.85, // dead front between the two columns of tiles
   fieldX: 0.08, // dead front outside the tiles, up to the raised rim
-  fieldY: 0.25, // ... and above/below the pieces that close each column
-  capH: 0.2,
   frameOut: 0.78, // door surround, from the dead front out to flat cover
   coverEdge: 0.32, // chamfered edge of the cover
   cav: [0.374, 1.441], // the rocker, measured from the logo end of the face
@@ -225,6 +223,88 @@ function fallbackRole(match, entityIds, role, test) {
     match.used.add(id);
   }
 }
+
+// ── Last known layout ────────────────────────────────────────────────────
+// Home Assistant leaves an entity's own attributes out of its state while it
+// is unavailable, and the states it restores at startup, before the
+// integration has loaded, carry none of them either. A breaker's position
+// and poles and the panel's size and standard breakers are among those, so
+// a load center out of touch with Leviton would have nothing left to draw.
+// The card keeps the last ones it saw instead: here, for every card on the
+// page, and in this browser's storage, so that a page opened during an
+// outage can still draw the panel. Nothing is kept that the states don't
+// already carry.
+const BREAKER_LAYOUT = ["position", "poles", "model", "hardware", "rating", "canRemoteOn", "leg"];
+const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from"];
+const LAYOUT_STORE = "ldata.layout.v1."; // + the panel's device id
+const layouts = new Map(); // entity id -> what its state last carried, and the handle seen then
+const layoutSeen = new Map(); // entity id -> the state object that was read
+const layoutsRead = new Set(); // panel device ids whose stored layout has been read
+
+const carriesLayout = (attrs) => "position" in attrs || "panel_size" in attrs || "dumb_breakers" in attrs;
+
+// Keep what a breaker's Status or the panel's Cloud Connected state carries.
+// Returns true when that is news, so the caller stores it.
+function rememberLayout(eid, state, keys) {
+  if (!eid || !state || layoutSeen.get(eid) === state) return false;
+  const attrs = state.attributes || {};
+  if (!carriesLayout(attrs)) return false;
+  layoutSeen.set(eid, state);
+  const kept = {};
+  for (const key of keys) if (key in attrs) kept[key] = attrs[key];
+  const old = layouts.get(eid);
+  if (old && old.handle) kept.handle = old.handle;
+  if (old && JSON.stringify(old) === JSON.stringify(kept)) return false;
+  layouts.set(eid, kept);
+  return true;
+}
+
+// Where a breaker's handle was when it was last heard from: it is drawn
+// there while the breaker is out of touch.
+function rememberHandle(eid, handle) {
+  const kept = layouts.get(eid);
+  if (!kept || kept.handle === handle) return false;
+  kept.handle = handle;
+  return true;
+}
+
+// An entity's attributes: its own while its state carries them, otherwise
+// the last ones it had, over what the state still has (its name, say).
+function layoutOf(eid, state) {
+  const attrs = (state && state.attributes) || {};
+  const kept = eid ? layouts.get(eid) : null;
+  return kept && !carriesLayout(attrs) ? { ...attrs, ...kept } : attrs;
+}
+
+function readLayouts(panelId) {
+  if (!panelId || layoutsRead.has(panelId)) return;
+  layoutsRead.add(panelId);
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(LAYOUT_STORE + panelId));
+    if (!saved || typeof saved !== "object") return;
+    for (const [eid, kept] of Object.entries(saved)) {
+      // What the states say now wins over what an earlier visit kept.
+      if (kept && typeof kept === "object" && !Array.isArray(kept) && !layouts.has(eid)) layouts.set(eid, kept);
+    }
+  } catch (err) {
+    // storage blocked or unreadable: draw from the states alone
+  }
+}
+
+function saveLayouts(panelId, ids) {
+  if (!panelId) return;
+  const saved = {};
+  for (const eid of ids) if (eid && layouts.has(eid)) saved[eid] = layouts.get(eid);
+  try {
+    window.localStorage.setItem(LAYOUT_STORE + panelId, JSON.stringify(saved));
+  } catch (err) {
+    // not stored: this page keeps it until it is closed
+  }
+}
+
+// What a question about switching a breaker rests on. If any of it changes
+// before the answer, the question no longer holds and is withdrawn.
+const askState = (s) => [s.switchOn, s.canRemoteOn, s.vis === "pending", s.available, s.switchAvailable].join("|");
 
 // ── Small helpers ────────────────────────────────────────────────────────
 
@@ -472,6 +552,7 @@ const EN = {
       "cloud_connected": "Connected to the Leviton cloud",
       "cloud_offline": "Panel offline",
       "cloud_unknown": "Cloud status unknown",
+      "no_data": "No data from Leviton right now",
       "wifi_signal": "Wi-Fi signal: {dbm} dBm",
       "wifi_unknown": "Wi-Fi signal unknown",
       "update_available": "Firmware update available (install it in the My Leviton app)",
@@ -586,7 +667,9 @@ const EN = {
       "check_linked_any": "Devices linked to any panel",
       "check_linked_this": "Devices linked to this panel",
       "check_breakers": "Breakers with a Status entity",
-      "empty_help": "If the panel device is not found, copy the device ID from the panel's own device page, not from a breaker's. If it is found but nothing is linked to it, update the LDATA integration and restart Home Assistant; a reload is not enough."
+      "empty_help": "If the panel device is not found, copy the device ID from the panel's own device page, not from a breaker's. If it is found but nothing is linked to it, update the LDATA integration and restart Home Assistant; a reload is not enough.",
+      "no_data_title": "Waiting for data from Leviton",
+      "no_data_body": "The LDATA integration can't reach Leviton right now, or it is still starting. This panel appears here on its own once the integration reconnects. If it doesn't, check the integration under Settings → Devices & services."
     }
   },
   "editor": {
@@ -723,7 +806,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     this._t = englishOnly;
     this._pending = new Map(); // switch entity_id -> { target, since }
     this._errors = new Map(); // slot position -> { text, until }
-    this._handles = new Map(); // status entity_id -> last handle position seen
+    this._question = null; // the switch being asked about: { pos, target, blocked, inSheet, state }
     this._fmtCache = new Map();
     this._trackedIds = [];
     this._trackedRefs = [];
@@ -795,6 +878,11 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     this._forgetLanguage();
     for (const t of this._timers) clearTimeout(t);
     this._timers.clear();
+    this._closeDialogs();
+  }
+
+  // The detail sheet, a question and a sub-panel, whichever are open.
+  _closeDialogs() {
     for (const dlg of [this._dlgDetail, this._dlgConfirm, this._dlgSub]) {
       if (dlg && dlg.open) dlg.close();
     }
@@ -823,7 +911,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       <style>${CARD_CSS}</style>
       <ha-card><div class="content"></div></ha-card>
       <dialog class="dlg dlg--detail" aria-labelledby="ldp-detail-name"><div class="dlg-in"></div></dialog>
-      <dialog class="dlg dlg--confirm" role="alertdialog" aria-labelledby="ldp-cf-title"><div class="dlg-in"></div></dialog>
+      <dialog class="dlg dlg--confirm" role="alertdialog" aria-labelledby="ldp-cf-title" aria-describedby="ldp-cf-body"><div class="dlg-in"></div></dialog>
       <dialog class="dlg dlg--sub" aria-labelledby="ldp-sub-title"><div class="dlg-in"></div></dialog>
     `;
     this._content = root.querySelector(".content");
@@ -839,13 +927,16 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     // Image errors don't bubble; capture them to fall back to the served path.
     root.addEventListener("error", (ev) => this._onArtError(ev), true);
     this._applyArt();
+    // A close event arrives a moment after the dialog closed; by then it may
+    // be open again, for something else, and that must not be undone.
     this._dlgDetail.addEventListener("close", () => {
+      if (this._dlgDetail.open) return;
       this._detailPos = null;
-      this._detailConfirm = false;
       this._detailRows = [];
+      if (this._question && this._question.inSheet) this._question = null;
     });
     this._dlgConfirm.addEventListener("close", () => {
-      this._confirm = null;
+      if (!this._dlgConfirm.open && this._question && !this._question.inSheet) this._question = null;
     });
     this._dlgSub.addEventListener("close", () => {
       const body = this._dlgSub.querySelector(".sub-b");
@@ -1027,7 +1118,10 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     this._model = model;
 
     if (model.empty) {
-      this._renderEmpty();
+      // Nothing is left on show for a dialog to be about.
+      this._closeDialogs();
+      if (model.outOfTouch) this._renderMessage(this._t("card.setup.no_data_title"), esc(this._t("card.setup.no_data_body")));
+      else this._renderEmpty();
       return;
     }
     if (model.structKey !== this._structKey) {
@@ -1036,7 +1130,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       if (this._detailPos != null) this._buildDetail();
     }
     this._patch(model);
+    const refocus = this._question ? this._checkQuestion(model) : false;
     if (this._detailPos != null) this._patchDetail();
+    if (refocus) this._focusPower();
   }
 
   _languageChanged() {
@@ -1166,7 +1262,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     }
     const idsFor = (id) => byDevice.get(id) || [];
     const category = (eid) => (hass.entities[eid] && hass.entities[eid].entity_category) || null;
-    const attr = (eid) => (states[eid] && states[eid].attributes) || {};
+    // Out of touch, a renamed entity is still found by what it last carried.
+    readLayouts(panelId);
+    const attr = (eid) => layoutOf(eid, states[eid]);
     let incomplete = false;
 
     // Panel
@@ -1267,16 +1365,6 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       fedKey: fedKeyOf(states[panel.roles.cloud]),
       tracked: [...tracked],
       incomplete,
-      diagnostics: {
-        hassHasDevices: typeof hass.devices === "object" && hass.devices !== null,
-        hassHasEntities: typeof hass.entities === "object" && hass.entities !== null,
-        totalDevices: Object.keys(devices).length,
-        totalEntities: entityList.length,
-        panelDeviceFound: !!devices[panelId],
-        devicesLinkedToAnyPanel: Object.values(devices).filter((d) => !!d.via_device_id).length,
-        devicesLinkedToThisPanel: Object.values(devices).filter((d) => d.via_device_id === panelId).length,
-        statusEntitiesFoundOnThisPanel: breakers.length,
-      },
     };
   }
 
@@ -1285,8 +1373,12 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   _buildModel(hass, d) {
     const st = hass.states;
     const cfg = this._config;
-    const cloud = d.panel.roles.cloud ? st[d.panel.roles.cloud] : null;
-    const ca = (cloud && cloud.attributes) || {};
+    const cloudId = d.panel.roles.cloud;
+    const cloud = cloudId ? st[cloudId] : null;
+    // While Home Assistant has no data for them, the panel and its breakers
+    // are laid out from what their states last carried (see layoutOf).
+    let learned = rememberLayout(cloudId, cloud, PANEL_LAYOUT);
+    const ca = layoutOf(cloudId, cloud);
 
     const rotate =
       cfg.rotate_180 !== undefined && cfg.rotate_180 !== null
@@ -1298,8 +1390,8 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const linkByPos = new Map(d.links.map((l) => [l.position, l]));
     for (const b of d.breakers) {
       const s = st[b.roles.status];
-      if (!s) continue;
-      const a = s.attributes || {};
+      if (rememberLayout(b.roles.status, s, BREAKER_LAYOUT)) learned = true;
+      const a = layoutOf(b.roles.status, s);
       const position = Number(a.position);
       if (!Number.isFinite(position) || taken.has(position)) continue;
       taken.add(position);
@@ -1368,7 +1460,16 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     }
     slots.sort((a, b) => a.position - b.position);
 
-    if (!slots.length) return { empty: true, rows: 0 };
+    if (!slots.length) {
+      if (learned) this._saveLayouts(d);
+      // Home Assistant has this panel's entities but no data for any of
+      // them, and nothing was kept from before: Leviton is out of reach, or
+      // the integration hasn't loaded yet. That is not a setup problem.
+      const silent = (state) => !state || state.state === "unavailable" || !!(state.attributes && state.attributes.restored);
+      const outOfTouch = !!cloudId && silent(cloud) && d.breakers.every((b) => silent(st[b.roles.status]));
+      // byPos too, so that nothing still holding on to a breaker can trip over it.
+      return { empty: true, outOfTouch, rows: 0, byPos: new Map() };
+    }
 
     const placed = this._computeLayout(slots, rotate);
     const rows = Math.max(1, ...placed.map((p) => p.row + p.rowSpan - 1));
@@ -1386,7 +1487,8 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     }
 
     const now = Date.now();
-    for (const s of slots) this._slotDynamics(st, s, now);
+    for (const s of slots) if (this._slotDynamics(st, s, now)) learned = true;
+    if (learned) this._saveLayouts(d);
 
     const panelDevice = d.panelDevice;
     const title = cfg.title || (panelDevice && (panelDevice.name_by_user || panelDevice.name)) || this._t("card.name.panel");
@@ -1505,11 +1607,13 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     // off by tripping it, and stays tripped until it is reset by hand.
     // Out of touch (the panel is offline, or Leviton can't be reached), the
     // breaker is still where it was: draw it that way under the veil rather
-    // than as switched off.
+    // than as switched off. Where that was is kept with its layout, so a
+    // page opened during an outage knows it too.
     const heldOff = !isOn && remoteOff && raw !== "ManualOFF";
     const handle = tripped || failed || (heldOff && s.gen1) ? "trip" : isOn || heldOff ? "on" : "off";
-    s.handle = !available ? this._handles.get(r.status) || "on" : handle;
-    if (available) this._handles.set(r.status, s.handle);
+    const kept = layouts.get(r.status);
+    s.handle = !available ? (kept && kept.handle) || "on" : handle;
+    const learned = available && rememberHandle(r.status, handle);
     // Identify blinks 1.5 s on, 1.5 s off, on Gen 1 and Gen 2 breakers alike
     // (seen on real ones). A Gen 1 breaker's LED only blinks for Identify: it
     // has no OFF LED to light when switched off, or to blink while a switch
@@ -1545,12 +1649,19 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const err = this._errors.get(s.position);
     s.error = err && err.until > now ? err.text : null;
     if (err && !s.error) this._errors.delete(s.position);
+    return learned;
+  }
+
+  // Store this panel's layouts for the next visit (see rememberLayout).
+  _saveLayouts(d) {
+    saveLayouts(this._config.device_id, [d.panel.roles.cloud, ...d.breakers.map((b) => b.roles.status)]);
   }
 
   _headDynamics(st, d) {
     const r = d.panel.roles;
     const val = (eid) => (eid && st[eid] ? numOrNull(st[eid].state) : null);
     const cloud = r.cloud ? st[r.cloud] : null;
+    const fedFrom = layoutOf(r.cloud, cloud).fed_from;
     const fw = r.firmware ? st[r.firmware] : null;
     return {
       watts: val(r.watts),
@@ -1568,10 +1679,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       // What this load center may draw: the breaker feeding it, if it is a
       // sub-panel (from the integration), or the main breaker on the card,
       // whichever is smaller.
-      capacity: Math.min(
-        ...[numOrNull(cloud && cloud.attributes && cloud.attributes.fed_from && cloud.attributes.fed_from.rating), numOrNull(this._config.main_breaker)].filter((v) => v > 0),
-        Infinity
-      ),
+      capacity: Math.min(...[numOrNull(fedFrom && fedFrom.rating), numOrNull(this._config.main_breaker)].filter((v) => v > 0), Infinity),
       busiest: [val(r.ampsL1), val(r.ampsL2)].filter((v) => v !== null).reduce((a, v) => Math.max(a === null ? v : a, v), null),
       overVoltage: !!(r.overVoltage && st[r.overVoltage] && st[r.overVoltage].state === "on"),
       underVoltage: !!(r.underVoltage && st[r.underVoltage] && st[r.underVoltage].state === "on"),
@@ -1822,6 +1930,22 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     return { text, html };
   }
 
+  // A breaker's state in a word or two: its label's sub-line, screen-reader
+  // text and tooltip, and the detail sheet's chip all say it the same way.
+  _stateWord(s) {
+    const t = this._t;
+    const words = {
+      on: t("card.state.on"),
+      off: t("card.state.off"),
+      "remote-off": t("card.state.off_remote"),
+      tripped: t(s.failed ? "card.state.service" : "card.state.tripped"),
+      unavailable: t("card.state.unavailable"),
+      pending: t(s.pendingTarget === "on" ? "card.state.switching_on" : "card.state.switching_off"),
+    };
+    if (s.vis in words) return words[s.vis];
+    return t(s.kind === "link" ? "card.label.feeds_sub_panel" : s.kind === "dumb" ? "card.state.not_monitored" : "card.state.unknown");
+  }
+
   _slotSubText(s) {
     const t = this._t;
     const r = this._readings(s);
@@ -1836,13 +1960,13 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const alarm = s.alarms && s.alarms.length ? s.alarms.join(", ") : null;
     switch (s.vis) {
       case "pending":
-        return { text: t(s.pendingTarget === "on" ? "card.state.switching_on" : "card.state.switching_off"), tone: "warn" };
+        return { text: this._stateWord(s), tone: "warn" };
       case "unavailable":
-        return { text: t("card.state.unavailable"), tone: "muted" };
+        return { text: this._stateWord(s), tone: "muted" };
       case "tripped":
         // What tripped it, when the breaker says. The line is short and
         // already in the alarm colour, so the cause stands in for "Tripped".
-        return { text: [t(s.failed ? "card.state.service" : s.cause ? `card.trip.${s.cause}` : "card.state.tripped"), alarm].filter(Boolean).join(" · "), tone: "bad" };
+        return { text: [s.cause && !s.failed ? t(`card.trip.${s.cause}`) : this._stateWord(s), alarm].filter(Boolean).join(" · "), tone: "bad" };
       default:
         break;
     }
@@ -1850,9 +1974,8 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     if (alarm) {
       return { text: [alarm, r && r.text].filter(Boolean).join(" · "), html: r ? `${esc(alarm)} · ${r.html}` : null, tone: "bad" };
     }
-    if (s.vis === "remote-off") return { text: t("card.state.off_remote"), tone: "muted" };
-    if (s.vis === "off") return { text: t("card.state.off"), tone: "muted" };
-    return { text: r ? r.text : t("card.state.on"), html: r && r.html, tone: "" };
+    if (s.vis === "remote-off" || s.vis === "off") return { text: this._stateWord(s), tone: "muted" };
+    return { text: r ? r.text : this._stateWord(s), html: r && r.html, tone: "" };
   }
 
   _patchSlot(s, el) {
@@ -1894,15 +2017,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       if (load !== null) el.lbl.dataset.load = load >= 80 ? "high" : load >= 50 ? "warn" : "ok";
     });
 
-    const stateWord = {
-      on: t("card.state.on"),
-      off: t("card.state.off"),
-      "remote-off": t("card.state.off_remote"),
-      tripped: t(s.failed ? "card.state.service" : "card.state.tripped"),
-      unavailable: t("card.state.unavailable"),
-      pending: t("card.state.switching"),
-      unknown: s.kind === "link" ? t("card.label.feeds_sub_panel") : t("card.state.not_monitored"),
-    }[s.vis];
+    const stateWord = this._stateWord(s);
     const cause = s.cause ? t(`card.trip.${s.cause}`) : null;
     // What a screen reader says for this circuit: name, where, rating, state,
     // then the readings or sub-panel (unless that only repeats the state).
@@ -2012,9 +2127,11 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       });
     }
     if (els.alarm) {
-      // An offline panel leads: its readings are the last ones it sent.
+      // An offline panel leads: its readings are the last ones it sent. So
+      // does one Home Assistant has no data for at all (Leviton out of
+      // reach, or the integration not loaded), drawn as it last was.
       const alarm = [
-        h.cloud === "off" ? t("card.meter.cloud_offline") : null,
+        h.cloud === "off" ? t("card.meter.cloud_offline") : h.cloud === "unavailable" ? t("card.meter.no_data") : null,
         h.overVoltage ? t("card.alarm.over_voltage") : null,
         h.underVoltage ? t("card.alarm.under_voltage") : null,
       ]
@@ -2039,7 +2156,24 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   }
 
   _renderEmpty() {
-    const d = (this._disc && this._disc.diagnostics) || {};
+    // Counted here, once per discovery, rather than on every discovery:
+    // only this message shows them.
+    if (!this._diag || this._diag.disc !== this._disc) {
+      const hass = this._hass;
+      const devices = Object.values(hass.devices || {});
+      const panelId = this._config.device_id;
+      this._diag = {
+        disc: this._disc,
+        hassHasDevices: typeof hass.devices === "object" && hass.devices !== null,
+        hassHasEntities: typeof hass.entities === "object" && hass.entities !== null,
+        totalDevices: devices.length,
+        panelDeviceFound: !!(hass.devices && hass.devices[panelId]),
+        devicesLinkedToAnyPanel: devices.filter((dev) => !!dev.via_device_id).length,
+        devicesLinkedToThisPanel: devices.filter((dev) => dev.via_device_id === panelId).length,
+        statusEntitiesFoundOnThisPanel: this._disc ? this._disc.breakers.length : 0,
+      };
+    }
+    const d = this._diag;
     const line = (label, ok, detail) =>
       `<div class="diag ${ok ? "diag--ok" : "diag--bad"}">${ok ? "✓" : "✗"} ${esc(label)}${
         detail !== undefined ? `: ${esc(detail)}` : ""
@@ -2080,7 +2214,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         break;
       case "toggle":
         ev.stopPropagation();
-        this._requestToggle(pos);
+        this._ask(pos, false);
         break;
       case "more":
         this._moreInfo(el.dataset.eid);
@@ -2089,15 +2223,15 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         this._dlgDetail.close();
         break;
       case "d-power":
-        this._detailPower();
+        this._ask(this._detailPos, true);
         break;
       case "d-cancel":
-        this._detailConfirm = false;
+        this._question = null;
         this._patchDetail();
-        if (this._detailEls && this._detailEls.pbtn) this._detailEls.pbtn.focus();
+        this._focusPower();
         break;
       case "d-confirm":
-        this._detailConfirmed();
+        this._answer();
         break;
       case "d-blink":
         this._toggleBlink();
@@ -2109,10 +2243,11 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         this._followLink(this._model && this._model.byPos.get(this._detailPos));
         break;
       case "c-cancel":
+        this._question = null;
         this._dlgConfirm.close();
         break;
       case "c-ok":
-        this._confirmOk();
+        this._answer();
         break;
       case "s-close":
         this._dlgSub.close();
@@ -2130,7 +2265,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       return;
     }
     this._detailPos = pos;
-    this._detailConfirm = false;
+    if (this._question && this._question.inSheet) this._question = null;
     this._buildDetail();
     this._patchDetail();
     if (!this._dlgDetail.open) this._dlgDetail.showModal();
@@ -2148,7 +2283,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     }
     const ev = new CustomEvent("ldata-open-sub-panel", { bubbles: true, composed: true, cancelable: true, detail: { deviceId: link.deviceId } });
     if (!this.dispatchEvent(ev)) {
-      for (const dlg of [this._dlgDetail, this._dlgConfirm, this._dlgSub]) if (dlg.open) dlg.close();
+      this._closeDialogs();
       return;
     }
     if (this._dlgDetail.open) this._dlgDetail.close();
@@ -2157,83 +2292,129 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
 
   _navigate(path) {
     if (!path) return;
-    for (const dlg of [this._dlgDetail, this._dlgConfirm, this._dlgSub]) if (dlg.open) dlg.close();
+    this._closeDialogs();
     history.pushState(null, "", path);
     window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
   }
 
   _moreInfo(entityId) {
     if (!entityId) return;
-    // Close our own modal first: HA's more-info dialog isn't guaranteed to
+    // Close our own modals first: HA's more-info dialog isn't guaranteed to
     // stack above a native modal <dialog> on every frontend version.
-    for (const dlg of [this._dlgDetail, this._dlgConfirm]) if (dlg.open) dlg.close();
+    this._closeDialogs();
     const ev = new Event("hass-more-info", { bubbles: true, composed: true });
     ev.detail = { entityId };
     this.dispatchEvent(ev);
   }
 
-  _requestToggle(pos) {
+  // Ask before switching a breaker: in a dialog for its rocker, in the
+  // detail sheet for the sheet's power button. Either way the answer
+  // switches it to what was asked about when the question opened, and the
+  // question goes away if the breaker changes first (see _checkQuestion).
+  // Focus starts on Cancel, so a second press of Enter, or a held one,
+  // can't answer it.
+  _ask(pos, inSheet) {
     const s = this._model && this._model.byPos.get(pos);
-    if (!s || s.kind !== "smart" || !s.roles.power || s.vis === "pending") return;
+    if (!s || s.kind !== "smart" || !s.roles.power || !s.switchAvailable || s.vis === "pending") return;
     const target = s.switchOn ? "off" : "on";
-    // Gen1 breakers can be tripped remotely but not reset — asking the cloud
-    // to turn one on silently does nothing, so explain instead.
-    if (target === "on" && !s.canRemoteOn) {
-      this._openConfirm({ pos, target, blocked: true });
-      return;
-    }
-    if (!this._config.confirm) {
+    // Gen 1 breakers can be tripped remotely but not reset: asking the cloud
+    // to turn one on silently does nothing, so explain instead, in the
+    // dialog whichever way it was asked.
+    const blocked = target === "on" && !s.canRemoteOn;
+    if (!blocked && !this._config.confirm) {
       this._switch(s, target);
       return;
     }
-    this._openConfirm({ pos, target, blocked: false });
+    this._question = { pos, target, blocked, inSheet: inSheet && !blocked, state: askState(s) };
+    // Shows the sheet's question, or hides one it had for the dialog's.
+    if (this._detailPos != null) this._patchDetail();
+    if (!this._question.inSheet) this._showQuestion(s);
+    else if (this._detailEls && this._detailEls.pcancel) this._detailEls.pcancel.focus();
   }
 
-  _openConfirm(c) {
-    const s = this._model.byPos.get(c.pos);
-    if (!s) return;
-    this._confirm = c;
+  // The question's words, the same in the dialog and in the sheet.
+  _questionText(s, q) {
     const t = this._t;
-    const off = c.target === "off";
-    const where = `${this._where(s)}${s.rating ? ` · ${s.rating} A` : ""}`;
-    let title;
-    let body;
-    let ok;
-    if (c.blocked) {
-      title = t("card.confirm.blocked_title", { name: s.name });
-      body = t("card.confirm.blocked_body");
-      ok = t("card.action.got_it");
-    } else {
-      title = t(off ? "card.confirm.turn_off_title" : "card.confirm.turn_on_title", { name: s.name });
-      body = t(off ? "card.confirm.turn_off_body" : "card.confirm.turn_on_body");
-      if (off && !s.canRemoteOn) body += ` ${t("card.confirm.gen1_off_warning")}`;
-      ok = t(off ? "card.action.turn_off" : "card.action.turn_on");
+    if (q.blocked) {
+      return { title: t("card.confirm.blocked_title", { name: s.name }), body: t("card.confirm.blocked_body"), ok: t("card.action.got_it") };
     }
-    this._dlgConfirm.querySelector(".dlg-in").innerHTML = `
+    const off = q.target === "off";
+    let body = t(off ? "card.confirm.turn_off_body" : "card.confirm.turn_on_body");
+    if (off && !s.canRemoteOn) body += ` ${t("card.confirm.gen1_off_warning")}`;
+    return {
+      title: t(off ? "card.confirm.turn_off_title" : "card.confirm.turn_on_title", { name: s.name }),
+      body,
+      ok: t(off ? "card.action.turn_off" : "card.action.turn_on"),
+    };
+  }
+
+  _showQuestion(s) {
+    const q = this._question;
+    const t = this._t;
+    const text = this._questionText(s, q);
+    const where = `${this._where(s)}${s.rating ? ` · ${s.rating} A` : ""}`;
+    const inner = this._dlgConfirm.querySelector(".dlg-in");
+    inner.innerHTML = `
       <div class="cf">
-        <div class="cf-art" data-vis="${esc(s.vis)}">${this._heroHtml(s, false)}</div>
+        <div class="cf-art">${this._heroHtml(s, false)}</div>
         <div class="cf-txt">
           <div class="cf-where">${esc(where)}</div>
-          <h2 class="cf-title" id="ldp-cf-title">${esc(title)}</h2>
-          <p class="cf-body">${esc(body)}</p>
+          <h2 class="cf-title" id="ldp-cf-title">${esc(text.title)}</h2>
+          <p class="cf-body" id="ldp-cf-body">${esc(text.body)}</p>
         </div>
       </div>
       <div class="cf-acts">
-        ${c.blocked ? "" : `<button type="button" class="btn" data-act="c-cancel">${esc(t("card.action.cancel"))}</button>`}
-        <button type="button" class="btn ${c.blocked ? "btn--tonal" : off ? "btn--danger" : "btn--primary"}" data-act="c-ok" autofocus>${esc(ok)}</button>
+        ${q.blocked ? "" : `<button type="button" class="btn" data-act="c-cancel" autofocus>${esc(t("card.action.cancel"))}</button>`}
+        <button type="button" class="btn ${q.blocked ? "btn--tonal" : q.target === "off" ? "btn--danger" : "btn--primary"}" data-act="c-ok"${
+      q.blocked ? " autofocus" : ""
+    }>${esc(text.ok)}</button>
       </div>`;
     if (!this._dlgConfirm.open) this._dlgConfirm.showModal();
+    else inner.querySelector("[autofocus]").focus();
   }
 
-  _confirmOk() {
-    const c = this._confirm;
-    this._dlgConfirm.close();
-    if (!c || c.blocked) return;
-    const s = this._model && this._model.byPos.get(c.pos);
-    if (s) this._switch(s, c.target);
+  _answer() {
+    const q = this._question;
+    this._question = null;
+    if (q && !q.inSheet && this._dlgConfirm.open) this._dlgConfirm.close();
+    const s = q && !q.blocked && this._model && this._model.byPos.get(q.pos);
+    // Only what was asked, and only while what it rested on still holds.
+    if (s && s.kind === "smart" && askState(s) === q.state) this._switch(s, q.target);
+    if (q && q.inSheet) {
+      this._patchDetail();
+      this._focusPower();
+    }
+  }
+
+  // The breaker changed while it was being asked about: switched from
+  // elsewhere, out of touch, or already switching. The question no longer
+  // says what an answer would do, so it is withdrawn instead. Returns true
+  // when focus was in the sheet's question, to be moved once it is hidden.
+  _checkQuestion(model) {
+    const q = this._question;
+    const s = model.byPos.get(q.pos);
+    if (s && s.kind === "smart" && askState(s) === q.state) return false;
+    this._question = null;
+    if (!q.inSheet) {
+      if (this._dlgConfirm.open) this._dlgConfirm.close();
+      return false;
+    }
+    const box = this._detailEls && this._detailEls.pconfirm;
+    return !!box && box.contains(this.shadowRoot.activeElement);
+  }
+
+  // Once the sheet's question is gone: back to its power button, or to the
+  // sheet's close button while that one can't be pressed.
+  _focusPower() {
+    const els = this._detailEls || {};
+    const target = els.pbtn && !els.pbtn.disabled && !els.pbtn.hidden ? els.pbtn : this._dlgDetail.querySelector(".dh-x");
+    if (target && this._dlgDetail.open) target.focus();
   }
 
   _switch(s, target) {
+    // The rule _ask explains, kept here too: a Gen 1 breaker can't be
+    // turned on remotely.
+    if (target === "on" && !s.canRemoteOn) return;
     const entityId = s.roles.power;
     this._pending.set(entityId, { target, since: Date.now() });
     this._errors.delete(s.position);
@@ -2244,15 +2425,21 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     this._timers.add(t);
     Promise.resolve(this._hass.callService("switch", target === "on" ? "turn_on" : "turn_off", { entity_id: entityId })).catch((err) => {
       this._pending.delete(entityId);
-      this._errors.set(s.position, { text: this._t("card.state.switch_failed"), until: Date.now() + 8000 });
-      console.error("ldata-panel-card: switching failed", err);
-      const t2 = setTimeout(() => {
-        this._timers.delete(t2);
-        this._update(true);
-      }, 8100);
-      this._timers.add(t2);
-      this._update(true);
+      this._commandFailed(s, err);
     });
+    this._update(true);
+  }
+
+  // A command that didn't go through: the breaker's label says so for a few
+  // seconds.
+  _commandFailed(s, err) {
+    this._errors.set(s.position, { text: this._t("card.state.switch_failed"), until: Date.now() + 8000 });
+    console.error("ldata-panel-card: switching failed", err);
+    const t = setTimeout(() => {
+      this._timers.delete(t);
+      this._update(true);
+    }, 8100);
+    this._timers.add(t);
     this._update(true);
   }
 
@@ -2304,7 +2491,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         : "";
     const spot = (led) => ({ left: (cx + led.x) / w, top: y(led.d) });
     const leds = ledSpots(s);
-    return `<div class="hero hero--${s.poles}p${smart ? "" : " hero--std"}" data-led="${esc(s.led || "off")}" data-af="${esc(
+    return `<div class="hero hero--${s.poles}p" data-led="${esc(s.led || "off")}" data-af="${esc(
       s.ledAf || "off"
     )}" data-gf="${esc(s.ledGf || "off")}">
         <img class="hero-img" alt="" draggable="false" src="${art(`hero-${s.poles}${s.face}-${s.handle || "on"}`)}">
@@ -2328,8 +2515,11 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const t = this._t;
     const where = this._where(s);
     const r = s.roles || {};
-    const statusAttr = (r.status && this._hass.states[r.status] && this._hass.states[r.status].attributes) || {};
+    const statusAttr = r.status ? layoutOf(r.status, this._hass.states[r.status]) : {};
     const leg = s.poles === 2 ? t("card.detail.both_legs") : statusAttr.leg ? t("card.detail.leg", { leg: statusAttr.leg }) : null;
+    // Home Assistant's device pages are for admins; anyone else following
+    // the link would land back on their default dashboard.
+    const admin = !!(this._hass.user && this._hass.user.is_admin);
 
     const chips = [
       s.kind === "smart" ? `<span class="chip chip--state" data-d="state"></span>` : "",
@@ -2359,7 +2549,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
 
     inner.innerHTML = `
       <header class="dh">
-        <div class="dh-art" data-vis="unknown">${this._heroHtml(s, true)}</div>
+        <div class="dh-art">${this._heroHtml(s, true)}</div>
         <div class="dh-txt">
           <div class="dh-where">${esc(where)}</div>
           <h2 class="dh-name" id="ldp-detail-name">${esc(s.name)}</h2>
@@ -2369,7 +2559,11 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       </header>
       <div class="dlg-body">${body}</div>
       <footer class="dlg-foot">
-        ${s.deviceId ? `<button type="button" class="btn btn--text" data-act="d-device" data-device="${esc(s.deviceId)}">${icon("open")}<span>${esc(t("card.action.device_page"))}</span></button>` : "<span></span>"}
+        ${
+          s.deviceId && admin
+            ? `<button type="button" class="btn btn--text" data-act="d-device" data-device="${esc(s.deviceId)}">${icon("open")}<span>${esc(t("card.action.device_page"))}</span></button>`
+            : "<span></span>"
+        }
         <button type="button" class="btn btn--tonal" data-act="d-close">${esc(t("card.action.close"))}</button>
       </footer>`;
     inner.scrollTop = scroll;
@@ -2394,10 +2588,10 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
            <button type="button" class="btn btn--power" data-act="d-power" data-d="pbtn"></button>
          </div>
          <div class="ctl-confirm" data-d="pconfirm" hidden>
-           <div class="ctl-q" data-d="pq"></div>
+           <div class="ctl-q" id="ldp-d-q" data-d="pq"></div>
            <div class="ctl-acts">
-             <button type="button" class="btn" data-act="d-cancel">${esc(t("card.action.cancel"))}</button>
-             <button type="button" class="btn btn--danger" data-act="d-confirm" data-d="pok"></button>
+             <button type="button" class="btn" data-act="d-cancel" data-d="pcancel" aria-describedby="ldp-d-q">${esc(t("card.action.cancel"))}</button>
+             <button type="button" class="btn btn--danger" data-act="d-confirm" data-d="pok" aria-describedby="ldp-d-q"></button>
            </div>
          </div>
          <div class="note note--muted" data-d="pnote" hidden></div>`
@@ -2566,16 +2760,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     if (s.kind !== "smart") return;
 
     const t = this._t;
-    const word = t(
-      {
-        on: "card.state.on",
-        off: "card.state.off",
-        "remote-off": "card.state.off_remote",
-        tripped: s.failed ? "card.state.service" : "card.state.tripped",
-        unavailable: "card.state.unavailable",
-        pending: s.pendingTarget === "on" ? "card.state.switching_on" : "card.state.switching_off",
-      }[s.vis] || "card.state.unknown"
-    );
+    const word = this._stateWord(s);
     if (els.state) {
       // "Tripped · Ground fault" when the breaker says what tripped it.
       const chip = s.cause ? `${word} · ${t(`card.trip.${s.cause}`)}` : word;
@@ -2589,7 +2774,8 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     if (els.pbtn) {
       const off = s.switchOn;
       const blocked = !off && !s.canRemoteOn;
-      const key = `${off}|${s.vis}|${s.failed}|${s.switchAvailable}|${this._detailConfirm}|${blocked}`;
+      const q = this._question && this._question.inSheet && this._question.pos === this._detailPos ? this._question : null;
+      const key = `${off}|${s.vis}|${s.failed}|${s.switchAvailable}|${q ? q.target : ""}|${blocked}`;
       this._set(c, "power", key, () => {
         els.pstate.textContent =
           s.vis === "pending"
@@ -2605,16 +2791,17 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
         els.pbtn.classList.toggle("btn--danger-outline", off);
         els.pbtn.classList.toggle("btn--primary", !off);
         els.pbtn.disabled = !s.switchAvailable || s.vis === "pending" || blocked;
-        els.pconfirm.hidden = !this._detailConfirm;
-        els.pbtn.hidden = !!this._detailConfirm;
-        // The same question the confirmation dialog asks.
-        els.pq.textContent = off
-          ? [t("card.confirm.turn_off_title", { name: s.name }), t("card.confirm.turn_off_body"), s.canRemoteOn ? null : t("card.confirm.gen1_off_warning")]
-              .filter(Boolean)
-              .join(" ")
-          : `${t("card.confirm.turn_on_title", { name: s.name })} ${t("card.confirm.turn_on_body")}`;
-        els.pok.textContent = t(off ? "card.action.turn_off" : "card.action.turn_on");
-        els.pok.className = `btn ${off ? "btn--danger" : "btn--primary"}`;
+        els.pconfirm.hidden = !q;
+        els.pbtn.hidden = !!q;
+        if (q) {
+          // The same question the dialog asks, about what was asked when it
+          // opened: if the breaker has changed since, it is withdrawn, not
+          // reworded under the pointer.
+          const text = this._questionText(s, q);
+          els.pq.textContent = `${text.title} ${text.body}`;
+          els.pok.textContent = text.ok;
+          els.pok.className = `btn ${q.target === "off" ? "btn--danger" : "btn--primary"}`;
+        }
         els.pnote.hidden = !blocked;
         els.pnote.innerHTML = blocked
           ? `${icon("info")}<span>${esc(t("card.detail.gen1_note"))}</span>`
@@ -2674,30 +2861,12 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     }
   }
 
-  _detailPower() {
-    const s = this._model && this._model.byPos.get(this._detailPos);
-    if (!s || !s.roles.power) return;
-    if (!this._config.confirm) {
-      this._switch(s, s.switchOn ? "off" : "on");
-      return;
-    }
-    this._detailConfirm = true;
-    this._patchDetail();
-    const ok = this._detailEls.pok;
-    if (ok) ok.focus();
-  }
-
-  _detailConfirmed() {
-    const s = this._model && this._model.byPos.get(this._detailPos);
-    this._detailConfirm = false;
-    if (s && s.roles.power) this._switch(s, s.switchOn ? "off" : "on");
-    else this._patchDetail();
-  }
-
   _toggleBlink() {
     const s = this._model && this._model.byPos.get(this._detailPos);
     if (!s || !s.roles.blink) return;
-    this._hass.callService("switch", s.blinkOn ? "turn_off" : "turn_on", { entity_id: s.roles.blink });
+    Promise.resolve(this._hass.callService("switch", s.blinkOn ? "turn_off" : "turn_on", { entity_id: s.roles.blink })).catch((err) =>
+      this._commandFailed(s, err)
+    );
   }
 }
 
@@ -2715,11 +2884,15 @@ const CARD_CSS = `
   --k: 0.62; /* thickness of the door surround (1 on wide cards) */
   --edge: 0.26; /* cover outside the labels */
   --fs: 12px; /* header type */
-  --ldp-focus: var(--primary-color, #03a9f4);
-  /* Print on the painted steel. */
+  /* The theme's colour, darkened: on the white cover a light primary colour
+     would hardly show. Half black or more keeps any of them at 3:1 or
+     better against the cover, in light and dark themes alike. */
+  --ldp-focus: color-mix(in srgb, var(--primary-color, #03a9f4) 45%, #000);
+  /* Print on the painted steel. The lightest of them still reads at 4.5:1
+     on the cover, in its smallest size too. */
   --ink: #26292b;
   --ink-2: #565a5e;
-  --ink-3: #84888b;
+  --ink-3: #62666a;
   --ink-bad: #c3220f;
   --ink-warn: #a35f00;
   --ink-link: #1b5aa0;
@@ -3163,15 +3336,6 @@ button { font: inherit; }
 /* three readings to a row, so each has room for its caption */
 :host([narrow]) .m-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
-@media (prefers-reduced-motion: reduce) {
-  [data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf,
-  [data-led="ident"] > .led--st, [data-af="ident"] > .led--af, [data-gf="ident"] > .led--gf,
-  [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf, [data-af="fast"] > .led--af, [data-gf="fast"] > .led--gf,
-  [data-af="quick"] > .led--af, [data-gf="quick"] > .led--gf,
-  .lbl[data-vis="pending"] .lbl-sub { animation: none; opacity: 1; }
-  .lbl-bar i { transition: none; }
-}
-
 /* ── Messages ───────────────────────────────────────────────── */
 .msg { padding: 16px; font-size: 14px; color: var(--primary-text-color); background: var(--ha-card-background, var(--card-background-color, #fff)); border-radius: var(--ha-card-border-radius, 12px); border: 1px solid var(--divider-color, #e0e0e0); }
 .msg-t { font-weight: 600; margin-bottom: 6px; }
@@ -3181,8 +3345,12 @@ button { font: inherit; }
 .diag--bad { color: var(--error-color, #db4437); }
 
 /* ── Dialogs ────────────────────────────────────────────────── */
+/* The dialog box itself is see-through; its padding keeps the content clear
+   of a phone's notch, status bar and home indicator. */
 dialog.dlg {
-  padding: 0;
+  box-sizing: border-box;
+  padding: var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) var(--safe-area-inset-right, env(safe-area-inset-right, 0px))
+    var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
   border: none;
   background: transparent;
   max-width: none;
@@ -3198,18 +3366,20 @@ dialog.dlg::backdrop { background: rgba(0,0,0,.5); }
 dialog.dlg[open] .dlg-in { animation: ldp-pop .18s ease-out; }
 @keyframes ldp-pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
 .dlg-in {
+  --ldp-inset-x: calc(var(--safe-area-inset-left, env(safe-area-inset-left, 0px)) + var(--safe-area-inset-right, env(safe-area-inset-right, 0px)));
+  --ldp-inset-y: calc(var(--safe-area-inset-top, env(safe-area-inset-top, 0px)) + var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));
   box-sizing: border-box;
-  width: min(460px, calc(100vw - 20px));
-  max-height: calc(100vh - 28px);
-  max-height: calc(100dvh - 28px);
+  width: min(460px, calc(100vw - 20px - var(--ldp-inset-x)));
+  max-height: calc(100vh - 28px - var(--ldp-inset-y));
+  max-height: calc(100dvh - 28px - var(--ldp-inset-y));
   overflow: auto;
   overscroll-behavior: contain;
   background: var(--ha-card-background, var(--card-background-color, #fff));
   border-radius: var(--ha-dialog-border-radius, 20px);
   box-shadow: 0 24px 64px rgba(0,0,0,.35), 0 2px 8px rgba(0,0,0,.2);
 }
-.dlg--sub .dlg-in { width: min(640px, calc(100vw - 20px)); }
-.dlg--confirm .dlg-in { width: min(400px, calc(100vw - 20px)); padding: 20px 20px 16px; }
+.dlg--sub .dlg-in { width: min(640px, calc(100vw - 20px - var(--ldp-inset-x))); }
+.dlg--confirm .dlg-in { width: min(400px, calc(100vw - 20px - var(--ldp-inset-x))); padding: 20px 20px 16px; }
 .ic { width: 20px; height: 20px; fill: currentColor; flex: none; }
 .icon-btn {
   display: inline-flex;
@@ -3326,6 +3496,7 @@ dialog.dlg[open] .dlg-in { animation: ldp-pop .18s ease-out; }
 .ctl-q { margin-bottom: 10px; overflow-wrap: anywhere; }
 .ctl-acts, .cf-acts { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .ctl-led {
+  position: relative;
   width: 14px;
   height: 14px;
   margin: 0 4px;
@@ -3334,7 +3505,18 @@ dialog.dlg[open] .dlg-in { animation: ldp-pop .18s ease-out; }
   box-shadow: inset 0 1px 2px rgba(0,0,0,.5);
   flex: none;
 }
-.ctl-led.is-on { background: radial-gradient(circle at 40% 35%, #ffe9e4, #ff5a3c 45%, #c2260e); box-shadow: 0 0 8px rgba(255,90,60,.9); animation: ldp-alarm 1s ease-in-out infinite; }
+/* Lit, over the unlit lens, so it blinks the way Identify blinks on the
+   panel: 1.5 s on, 1.5 s off. */
+.ctl-led::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, #ffe9e4, #ff5a3c 45%, #c2260e);
+  box-shadow: 0 0 8px rgba(255,90,60,.9);
+  opacity: 0;
+}
+.ctl-led.is-on::after { animation: ldp-blink 3s steps(1, end) infinite; }
 .tgl {
   position: relative;
   flex: none;
@@ -3443,6 +3625,12 @@ button.tile:hover:not(:disabled) { background: color-mix(in srgb, var(--primary-
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
+  /* A blinking LED is shown lit instead, rather than not at all. */
+  [data-led="blink"] > .led--st, [data-af="blink"] > .led--af, [data-gf="blink"] > .led--gf,
+  [data-led="ident"] > .led--st, [data-af="ident"] > .led--af, [data-gf="ident"] > .led--gf,
+  [data-af="slow"] > .led--af, [data-gf="slow"] > .led--gf, [data-af="fast"] > .led--af, [data-gf="fast"] > .led--gf,
+  [data-af="quick"] > .led--af, [data-gf="quick"] > .led--gf,
+  .ctl-led.is-on::after { opacity: 1; }
 }
 `;
 
@@ -3563,7 +3751,12 @@ class LdataPanelCardEditor extends LanguageMixin(HTMLElement) {
     if (language || !this._schema) this._schema = editorSchema(this._t);
     this._form.hass = this._hass;
     this._form.schema = this._schema;
-    this._form.data = { ...EDITOR_DEFAULTS, ...this._config };
+    // Likewise the data: a new object makes the form draw again, and hass
+    // arrives on every state change in the house.
+    if (this._formConfig !== this._config) {
+      this._formConfig = this._config;
+      this._form.data = { ...EDITOR_DEFAULTS, ...this._config };
+    }
   }
 }
 
@@ -3768,10 +3961,11 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
     this._zoom = readZoom(); // 1, 1.5 or 2; only has an effect on a phone
   }
 
-  // Home Assistant sets these four on every custom panel.
+  // Home Assistant sets these four on every custom panel, one after another,
+  // and hass again on every state change in the house.
   set hass(hass) {
     this._hass = hass;
-    this._update();
+    this._schedule();
   }
 
   get hass() {
@@ -3780,7 +3974,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
 
   set narrow(narrow) {
     this._narrow = !!narrow;
-    this._update();
+    this._schedule();
   }
 
   get narrow() {
@@ -3789,7 +3983,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
 
   set panel(panel) {
     this._panel = panel;
-    this._update();
+    this._schedule();
   }
 
   get panel() {
@@ -3799,7 +3993,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
   // The rest of the address names the load center on show: /ldata/<device id>.
   set route(route) {
     this._route = route;
-    this._update();
+    this._schedule();
   }
 
   get route() {
@@ -3807,7 +4001,9 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
   }
 
   connectedCallback() {
-    this._update();
+    // A tab brought into view while the page was off screen didn't move.
+    this._tabShown = false;
+    this._schedule();
   }
 
   disconnectedCallback() {
@@ -3815,7 +4011,19 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
   }
 
   _languageChanged() {
-    this._update();
+    this._schedule();
+  }
+
+  // One update for whatever was set in the meantime. Home Assistant sets the
+  // route last: drawn on the first of the four, the page would build a card
+  // for the first load center before it knew which one was asked for.
+  _schedule() {
+    if (this._queued) return;
+    this._queued = true;
+    queueMicrotask(() => {
+      this._queued = false;
+      this._update();
+    });
   }
 
   _init() {
@@ -3840,7 +4048,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
       const link = ev.target.closest ? ev.target.closest("a[data-id]") : null;
       if (!link || ev.defaultPrevented || ev.button || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
       ev.preventDefault();
-      this._show(link.dataset.id);
+      this._show(link.dataset.id, true);
     });
     // A breaker that feeds one of these load centers: go to its tab instead
     // of the card opening it in a dialog.
@@ -3848,7 +4056,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
       const id = ev.detail && ev.detail.deviceId;
       if (!this._ids.includes(id)) return;
       ev.preventDefault();
-      this._show(id);
+      this._show(id, true);
     });
     this._els = {
       bar: root.querySelector(".bar"),
@@ -3952,24 +4160,32 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
 
     // One tab for each load center, once there is more than one.
     const tabs = ids.length > 1 ? ids.map((id) => [id, name(id)]) : [];
-    const tabsKey = JSON.stringify([tabs, active]);
+    const tabsKey = JSON.stringify(tabs);
+    const nav = this._els.tabs;
     if (tabsKey !== this._tabsKey) {
       this._tabsKey = tabsKey;
-      const nav = this._els.tabs;
       nav.textContent = "";
       for (const [id, label] of tabs) {
         const tab = document.createElement("a");
         tab.className = "tab";
         tab.href = this._pathFor(id);
         tab.dataset.id = id;
-        if (id === active) tab.setAttribute("aria-current", "page");
         tab.appendChild(document.createElement("span")).textContent = label;
         nav.appendChild(tab);
       }
       nav.hidden = !tabs.length;
       this._els.bar.toggleAttribute("data-tabs", tabs.length > 0);
-      const current = nav.querySelector('[aria-current="page"]');
-      if (current && current.scrollIntoView) current.scrollIntoView({ block: "nearest", inline: "nearest" });
+      this._tabActive = undefined;
+    }
+    // The tab on show is marked where it is: built again, the tabs would
+    // take the keyboard focus with them.
+    if (active !== this._tabActive) {
+      this._tabActive = active;
+      for (const tab of nav.children) {
+        if (tab.dataset.id === active) tab.setAttribute("aria-current", "page");
+        else tab.removeAttribute("aria-current");
+      }
+      this._tabShown = false;
     }
     if (title !== this._navLabel) {
       this._navLabel = title;
@@ -4015,12 +4231,36 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
       }
     }
 
+    // Written once, and again only for another language: this runs on every
+    // state change in the house.
     const empty = !ids.length && !waiting;
-    if (empty) {
-      this._els.emptyTitle.textContent = this._t("sidebar.empty_title");
-      this._els.emptyBody.textContent = this._t("sidebar.empty_body");
+    const emptyKey = empty ? String(this._langKey) : "";
+    if (emptyKey !== this._emptyKey) {
+      this._emptyKey = emptyKey;
+      if (empty) {
+        this._els.emptyTitle.textContent = this._t("sidebar.empty_title");
+        this._els.emptyBody.textContent = this._t("sidebar.empty_body");
+      }
+      this._els.empty.hidden = !empty;
     }
-    this._els.empty.hidden = !empty;
+
+    // Last, once the zoom button that shares the bar is shown or hidden.
+    if (!this._tabShown && this.isConnected) {
+      this._tabShown = true;
+      this._revealTab();
+    }
+  }
+
+  // Bring the tab on show into the strip's view. Sideways only, inside the
+  // strip: the bar itself is always in sight.
+  _revealTab() {
+    const nav = this._els.tabs;
+    const tab = nav.querySelector('[aria-current="page"]');
+    if (!tab) return;
+    const t = tab.getBoundingClientRect();
+    const n = nav.getBoundingClientRect();
+    if (t.left < n.left) nav.scrollLeft -= n.left - t.left;
+    else if (t.right > n.right) nav.scrollLeft += t.right - n.right;
   }
 
   _routeId() {
@@ -4042,15 +4282,21 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
 
   // Put a load center on show: the address changes with it, so the browser's
   // back button returns to the one before and a reload stays on this one.
-  _show(id) {
-    if (!this._ids.includes(id) || id === this._activeId) return;
-    const prefix = this._prefix();
-    history.pushState(null, "", this._pathFor(id));
-    // Home Assistant hands the new route back; taking it now as well keeps
-    // the page in step even where nothing does.
-    this._route = { ...(this._route || {}), prefix, path: `/${encodeURIComponent(id)}` };
-    window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
-    this._update();
+  // focusTab moves the keyboard focus to its tab: the link or breaker that
+  // was used to get there may have gone with the load center left behind.
+  _show(id, focusTab) {
+    if (!this._ids.includes(id)) return;
+    if (id !== this._activeId) {
+      const prefix = this._prefix();
+      history.pushState(null, "", this._pathFor(id));
+      // Home Assistant hands the new route back; taking it now as well keeps
+      // the page in step even where nothing does.
+      this._route = { ...(this._route || {}), prefix, path: `/${encodeURIComponent(id)}` };
+      window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+      this._update();
+    }
+    const tab = focusTab ? [...this._els.tabs.children].find((el) => el.dataset.id === id) : null;
+    if (tab) tab.focus();
   }
 
   // Home Assistant's own menu button, which also carries the notification
@@ -4078,7 +4324,7 @@ class LdataSidebarPanel extends LanguageMixin(HTMLElement) {
         this.dispatchEvent(new CustomEvent("hass-toggle-menu", { bubbles: true, composed: true }));
       });
       holder.appendChild(this._menu);
-      customElements.whenDefined("ha-menu-button").then(() => this._update());
+      customElements.whenDefined("ha-menu-button").then(() => this._schedule());
     }
     // Same rule as the real one: the sidebar is out of sight.
     this._menu.hidden = hass.kioskMode === true || !(this._narrow || hass.dockedSidebar === "always_hidden");

@@ -207,6 +207,7 @@
                 "cloud_connected": "Connesso al cloud Leviton",
                 "cloud_offline": "Quadro non in linea",
                 "cloud_unknown": "Stato del cloud sconosciuto",
+                "no_data": "Nessun dato da Leviton al momento",
                 "wifi_signal": "Segnale Wi-Fi: {dbm} dBm",
                 "wifi_unknown": "Segnale Wi-Fi sconosciuto",
                 "update_available": "Aggiornamento firmware disponibile (installalo dall'app My Leviton)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Dispositivi collegati a un quadro",
                 "check_linked_this": "Dispositivi collegati a questo quadro",
                 "check_breakers": "Interruttori con un'entità Status",
-                "empty_help": "Se il dispositivo del quadro non viene trovato, copia l'ID dispositivo dalla pagina del dispositivo del quadro stesso, non da quella di un interruttore. Se viene trovato ma non vi è collegato nulla, aggiorna l'integrazione LDATA e riavvia Home Assistant; ricaricarla non basta."
+                "empty_help": "Se il dispositivo del quadro non viene trovato, copia l'ID dispositivo dalla pagina del dispositivo del quadro stesso, non da quella di un interruttore. Se viene trovato ma non vi è collegato nulla, aggiorna l'integrazione LDATA e riavvia Home Assistant; ricaricarla non basta.",
+                "no_data_title": "In attesa dei dati da Leviton",
+                "no_data_body": "L'integrazione LDATA al momento non riesce a raggiungere Leviton, oppure si sta ancora avviando. Il quadro comparirà qui da solo appena l'integrazione si ricollega. In caso contrario, controlla l'integrazione in Impostazioni → Dispositivi e servizi."
             }
         },
         "editor": {

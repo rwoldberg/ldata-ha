@@ -207,6 +207,7 @@
                 "cloud_connected": "Conectado a la nube de Leviton",
                 "cloud_offline": "Centro de carga sin conexión",
                 "cloud_unknown": "Estado de la nube desconocido",
+                "no_data": "Sin datos de Leviton por ahora",
                 "wifi_signal": "Señal Wi-Fi: {dbm} dBm",
                 "wifi_unknown": "Señal Wi-Fi desconocida",
                 "update_available": "Actualización de firmware disponible (instálela en la aplicación My Leviton)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Dispositivos vinculados a algún centro de carga",
                 "check_linked_this": "Dispositivos vinculados a este centro de carga",
                 "check_breakers": "Interruptores con una entidad “Status”",
-                "empty_help": "Si no se encuentra el dispositivo del centro de carga, copie el ID de dispositivo desde la página de dispositivo del propio centro de carga, no desde la de un interruptor. Si se encuentra pero no tiene nada vinculado, actualice la integración LDATA y reinicie Home Assistant; no basta con recargarla."
+                "empty_help": "Si no se encuentra el dispositivo del centro de carga, copie el ID de dispositivo desde la página de dispositivo del propio centro de carga, no desde la de un interruptor. Si se encuentra pero no tiene nada vinculado, actualice la integración LDATA y reinicie Home Assistant; no basta con recargarla.",
+                "no_data_title": "Esperando datos de Leviton",
+                "no_data_body": "La integración LDATA no puede conectarse con Leviton en este momento, o aún se está iniciando. El centro de carga aparecerá aquí por sí solo cuando la integración vuelva a conectarse. Si no aparece, revise la integración en Configuración → Dispositivos y servicios."
             }
         },
         "editor": {

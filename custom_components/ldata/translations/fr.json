@@ -207,6 +207,7 @@
                 "cloud_connected": "Connecté au cloud Leviton",
                 "cloud_offline": "Panneau hors ligne",
                 "cloud_unknown": "État du cloud inconnu",
+                "no_data": "Aucune donnée de Leviton pour le moment",
                 "wifi_signal": "Signal Wi-Fi : {dbm} dBm",
                 "wifi_unknown": "Signal Wi-Fi inconnu",
                 "update_available": "Mise à jour du micrologiciel disponible (installez-la depuis l'application My Leviton)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Appareils liés à un panneau",
                 "check_linked_this": "Appareils liés à ce panneau",
                 "check_breakers": "Disjoncteurs ayant une entité Status",
-                "empty_help": "Si l'appareil du panneau est introuvable, copiez l'ID de l'appareil depuis la page d'appareil du panneau lui-même, et non depuis celle d'un disjoncteur. S'il est trouvé mais que rien n'y est lié, mettez à jour l'intégration LDATA et redémarrez Home Assistant ; un simple rechargement ne suffit pas."
+                "empty_help": "Si l'appareil du panneau est introuvable, copiez l'ID de l'appareil depuis la page d'appareil du panneau lui-même, et non depuis celle d'un disjoncteur. S'il est trouvé mais que rien n'y est lié, mettez à jour l'intégration LDATA et redémarrez Home Assistant ; un simple rechargement ne suffit pas.",
+                "no_data_title": "En attente des données de Leviton",
+                "no_data_body": "L'intégration LDATA ne parvient pas à joindre Leviton pour le moment, ou elle est encore en cours de démarrage. Le panneau apparaîtra ici de lui-même dès que l'intégration sera reconnectée. Sinon, vérifiez l'intégration dans Paramètres → Appareils et services."
             }
         },
         "editor": {

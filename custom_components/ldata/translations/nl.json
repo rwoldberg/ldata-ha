@@ -207,6 +207,7 @@
                 "cloud_connected": "Verbonden met de Leviton-cloud",
                 "cloud_offline": "Groepenkast offline",
                 "cloud_unknown": "Cloudstatus onbekend",
+                "no_data": "Op dit moment geen gegevens van Leviton",
                 "wifi_signal": "Wi-Fi-signaal: {dbm} dBm",
                 "wifi_unknown": "Wi-Fi-signaal onbekend",
                 "update_available": "Firmware-update beschikbaar (installeer deze in de My Leviton-app)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Apparaten gekoppeld aan een groepenkast",
                 "check_linked_this": "Apparaten gekoppeld aan deze groepenkast",
                 "check_breakers": "Automaten met een Status-entiteit",
-                "empty_help": "Als het apparaat van de groepenkast niet wordt gevonden, kopieer dan het apparaat-ID van de apparaatpagina van de groepenkast zelf, niet van die van een automaat. Als het wel wordt gevonden maar er niets aan gekoppeld is, werk dan de LDATA-integratie bij en herstart Home Assistant; herladen is niet genoeg."
+                "empty_help": "Als het apparaat van de groepenkast niet wordt gevonden, kopieer dan het apparaat-ID van de apparaatpagina van de groepenkast zelf, niet van die van een automaat. Als het wel wordt gevonden maar er niets aan gekoppeld is, werk dan de LDATA-integratie bij en herstart Home Assistant; herladen is niet genoeg.",
+                "no_data_title": "Wachten op gegevens van Leviton",
+                "no_data_body": "De LDATA-integratie kan Leviton op dit moment niet bereiken, of start nog op. De groepenkast verschijnt hier vanzelf zodra de integratie weer verbonden is. Gebeurt dat niet, controleer dan de integratie onder Instellingen → Apparaten en diensten."
             }
         },
         "editor": {

@@ -207,6 +207,7 @@
                 "cloud_connected": "Koblet til Leviton-skyen",
                 "cloud_offline": "Sikringsskapet er frakoblet",
                 "cloud_unknown": "Skystatus ukjent",
+                "no_data": "Ingen data fra Leviton akkurat nå",
                 "wifi_signal": "Wi-Fi-signal: {dbm} dBm",
                 "wifi_unknown": "Wi-Fi-signal ukjent",
                 "update_available": "Fastvareoppdatering tilgjengelig (installer den i My Leviton-appen)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Enheter knyttet til et sikringsskap",
                 "check_linked_this": "Enheter knyttet til dette sikringsskapet",
                 "check_breakers": "Automatsikringer med en Status-entitet",
-                "empty_help": "Hvis sikringsskapets enhet ikke blir funnet, kopierer du enhets-ID-en fra sikringsskapets egen enhetsside, ikke fra enhetssiden til en automatsikring. Hvis den blir funnet, men ingenting er knyttet til den, oppdaterer du LDATA-integrasjonen og starter Home Assistant på nytt; det holder ikke å laste inn på nytt."
+                "empty_help": "Hvis sikringsskapets enhet ikke blir funnet, kopierer du enhets-ID-en fra sikringsskapets egen enhetsside, ikke fra enhetssiden til en automatsikring. Hvis den blir funnet, men ingenting er knyttet til den, oppdaterer du LDATA-integrasjonen og starter Home Assistant på nytt; det holder ikke å laste inn på nytt.",
+                "no_data_title": "Venter på data fra Leviton",
+                "no_data_body": "LDATA-integrasjonen får ikke kontakt med Leviton akkurat nå, eller den starter fortsatt. Sikringsskapet dukker opp her av seg selv når integrasjonen er tilkoblet igjen. Hvis ikke, sjekk integrasjonen under Innstillinger → Enheter og tjenester."
             }
         },
         "editor": {

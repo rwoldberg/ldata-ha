@@ -207,6 +207,7 @@
                 "cloud_connected": "Yhdistetty Levitonin pilvipalveluun",
                 "cloud_offline": "Sähkökeskus ei ole verkossa",
                 "cloud_unknown": "Pilviyhteyden tila tuntematon",
+                "no_data": "Ei tietoja Levitonilta juuri nyt",
                 "wifi_signal": "Wi-Fi-signaali: {dbm} dBm",
                 "wifi_unknown": "Wi-Fi-signaali tuntematon",
                 "update_available": "Laiteohjelmistopäivitys saatavilla (asenna se My Leviton -sovelluksessa)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Johonkin sähkökeskukseen liitetyt laitteet",
                 "check_linked_this": "Tähän sähkökeskukseen liitetyt laitteet",
                 "check_breakers": "Johdonsuojat, joilla on tilaentiteetti",
-                "empty_help": "Jos sähkökeskuksen laitetta ei löydy, kopioi laitetunnus sähkökeskuksen omalta laitesivulta, ei johdonsuojan sivulta. Jos laite löytyy mutta siihen ei ole liitetty mitään, päivitä LDATA-integraatio ja käynnistä Home Assistant uudelleen; pelkkä uudelleenlataus ei riitä."
+                "empty_help": "Jos sähkökeskuksen laitetta ei löydy, kopioi laitetunnus sähkökeskuksen omalta laitesivulta, ei johdonsuojan sivulta. Jos laite löytyy mutta siihen ei ole liitetty mitään, päivitä LDATA-integraatio ja käynnistä Home Assistant uudelleen; pelkkä uudelleenlataus ei riitä.",
+                "no_data_title": "Odotetaan tietoja Levitonilta",
+                "no_data_body": "LDATA-integraatio ei juuri nyt saa yhteyttä Levitoniin, tai se käynnistyy vielä. Sähkökeskus ilmestyy tähän itsestään, kun integraatio saa yhteyden uudelleen. Jos näin ei käy, tarkista integraatio kohdassa Asetukset → Laitteet & palvelut."
             }
         },
         "editor": {

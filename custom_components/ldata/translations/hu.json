@@ -207,6 +207,7 @@
                 "cloud_connected": "Csatlakozva a Leviton felhőjéhez",
                 "cloud_offline": "Az elosztótábla offline",
                 "cloud_unknown": "A felhőkapcsolat állapota ismeretlen",
+                "no_data": "Jelenleg nincs adat a Levitontól",
                 "wifi_signal": "Wi-Fi-jelerősség: {dbm} dBm",
                 "wifi_unknown": "A Wi-Fi-jelerősség ismeretlen",
                 "update_available": "Firmware-frissítés érhető el (telepítse a My Leviton alkalmazásban)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Bármely elosztótáblához kapcsolt eszközök",
                 "check_linked_this": "Ehhez az elosztótáblához kapcsolt eszközök",
                 "check_breakers": "Állapot entitással rendelkező megszakítók",
-                "empty_help": "Ha az elosztótábla-eszköz nem található, az eszközazonosítót az elosztótábla saját eszközoldaláról másolja ki, ne egy megszakítóéról. Ha megtalálható, de semmi sem kapcsolódik hozzá, frissítse az LDATA integrációt, és indítsa újra a Home Assistantot; az újratöltés nem elég."
+                "empty_help": "Ha az elosztótábla-eszköz nem található, az eszközazonosítót az elosztótábla saját eszközoldaláról másolja ki, ne egy megszakítóéról. Ha megtalálható, de semmi sem kapcsolódik hozzá, frissítse az LDATA integrációt, és indítsa újra a Home Assistantot; az újratöltés nem elég.",
+                "no_data_title": "Várakozás a Leviton adataira",
+                "no_data_body": "Az LDATA integráció jelenleg nem éri el a Levitont, vagy még indul. Az elosztótábla magától megjelenik itt, amint az integráció újra kapcsolódik. Ha mégsem, ellenőrizze az integrációt a Beállítások → Eszközök és szolgáltatások menüpontban."
             }
         },
         "editor": {

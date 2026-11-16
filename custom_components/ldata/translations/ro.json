@@ -207,6 +207,7 @@
                 "cloud_connected": "Conectat la cloudul Leviton",
                 "cloud_offline": "Tablou offline",
                 "cloud_unknown": "Stare cloud necunoscută",
+                "no_data": "Momentan nu există date de la Leviton",
                 "wifi_signal": "Semnal Wi-Fi: {dbm} dBm",
                 "wifi_unknown": "Semnal Wi-Fi necunoscut",
                 "update_available": "Actualizare de firmware disponibilă (instaleaz-o din aplicația My Leviton)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Dispozitive asociate cu un tablou (oricare)",
                 "check_linked_this": "Dispozitive asociate cu acest tablou",
                 "check_breakers": "Disjunctoare cu o entitate Status",
-                "empty_help": "Dacă dispozitivul tabloului nu este găsit, copiază ID-ul dispozitivului de pe pagina de dispozitiv a tabloului, nu de pe cea a unui disjunctor. Dacă este găsit, dar nimic nu este asociat cu el, actualizează integrarea LDATA și repornește Home Assistant; o reîncărcare nu este suficientă."
+                "empty_help": "Dacă dispozitivul tabloului nu este găsit, copiază ID-ul dispozitivului de pe pagina de dispozitiv a tabloului, nu de pe cea a unui disjunctor. Dacă este găsit, dar nimic nu este asociat cu el, actualizează integrarea LDATA și repornește Home Assistant; o reîncărcare nu este suficientă.",
+                "no_data_title": "Se așteaptă datele de la Leviton",
+                "no_data_body": "Integrarea LDATA nu poate contacta Leviton momentan sau încă pornește. Tabloul va apărea aici de la sine imediat ce integrarea se reconectează. Dacă nu apare, verifică integrarea în Configurare → Dispozitive și servicii."
             }
         },
         "editor": {

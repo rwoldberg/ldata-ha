@@ -207,6 +207,7 @@
                 "cloud_connected": "Ansluten till Levitons moln",
                 "cloud_offline": "Elcentralen är offline",
                 "cloud_unknown": "Molnstatus okänd",
+                "no_data": "Inga data från Leviton just nu",
                 "wifi_signal": "Wi-Fi-signal: {dbm} dBm",
                 "wifi_unknown": "Wi-Fi-signal okänd",
                 "update_available": "Firmwareuppdatering tillgänglig (installera den i appen My Leviton)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Enheter kopplade till någon elcentral",
                 "check_linked_this": "Enheter kopplade till den här elcentralen",
                 "check_breakers": "Dvärgbrytare med en Status-entitet",
-                "empty_help": "Om elcentralens enhet inte hittas kopierar du enhets-ID:t från elcentralens egen enhetssida, inte från en dvärgbrytares. Om den hittas men inget är kopplat till den uppdaterar du LDATA-integrationen och startar om Home Assistant; det räcker inte att ladda om."
+                "empty_help": "Om elcentralens enhet inte hittas kopierar du enhets-ID:t från elcentralens egen enhetssida, inte från en dvärgbrytares. Om den hittas men inget är kopplat till den uppdaterar du LDATA-integrationen och startar om Home Assistant; det räcker inte att ladda om.",
+                "no_data_title": "Väntar på data från Leviton",
+                "no_data_body": "LDATA-integrationen når inte Leviton just nu, eller håller fortfarande på att starta. Elcentralen dyker upp här av sig själv när integrationen är ansluten igen. Om den inte gör det, kontrollera integrationen under Inställningar → Enheter och tjänster."
             }
         },
         "editor": {

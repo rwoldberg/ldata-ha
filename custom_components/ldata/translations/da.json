@@ -207,6 +207,7 @@
                 "cloud_connected": "Forbundet til Levitons sky",
                 "cloud_offline": "Eltavlen er offline",
                 "cloud_unknown": "Skystatus ukendt",
+                "no_data": "Ingen data fra Leviton lige nu",
                 "wifi_signal": "Wi-Fi-signal: {dbm} dBm",
                 "wifi_unknown": "Wi-Fi-signal ukendt",
                 "update_available": "Firmwareopdatering tilgængelig (installér den i appen My Leviton)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Enheder knyttet til en eltavle",
                 "check_linked_this": "Enheder knyttet til denne eltavle",
                 "check_breakers": "Automatsikringer med en Status-entitet",
-                "empty_help": "Hvis eltavlens enhed ikke bliver fundet, skal du kopiere enheds-ID'et fra eltavlens egen enhedsside, ikke fra en automatsikrings. Hvis den bliver fundet, men intet er knyttet til den, skal du opdatere LDATA-integrationen og genstarte Home Assistant; det er ikke nok at genindlæse."
+                "empty_help": "Hvis eltavlens enhed ikke bliver fundet, skal du kopiere enheds-ID'et fra eltavlens egen enhedsside, ikke fra en automatsikrings. Hvis den bliver fundet, men intet er knyttet til den, skal du opdatere LDATA-integrationen og genstarte Home Assistant; det er ikke nok at genindlæse.",
+                "no_data_title": "Venter på data fra Leviton",
+                "no_data_body": "LDATA-integrationen kan ikke få forbindelse til Leviton lige nu, eller den er stadig ved at starte. Eltavlen vises her af sig selv, når integrationen har forbindelse igen. Hvis den ikke gør, så tjek integrationen under Indstillinger → Enheder & tjenester."
             }
         },
         "editor": {

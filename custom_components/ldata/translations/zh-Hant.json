@@ -207,6 +207,7 @@
                 "cloud_connected": "已連線至 Leviton 雲端",
                 "cloud_offline": "配電箱離線",
                 "cloud_unknown": "雲端狀態未知",
+                "no_data": "暫時沒有來自 Leviton 的資料",
                 "wifi_signal": "Wi-Fi 訊號：{dbm} dBm",
                 "wifi_unknown": "Wi-Fi 訊號未知",
                 "update_available": "有可用的韌體更新（請在 My Leviton 應用程式中安裝）",
@@ -321,7 +322,9 @@
                 "check_linked_any": "已連結至任一配電箱的裝置",
                 "check_linked_this": "已連結至此配電箱的裝置",
                 "check_breakers": "具有 Status 實體的斷路器",
-                "empty_help": "若找不到配電箱裝置，請從配電箱本身的裝置頁面複製裝置 ID，而不是從斷路器的裝置頁面複製。若已找到配電箱裝置，但沒有任何裝置與其連結，請更新 LDATA 整合並重新啟動 Home Assistant；只重新載入是不夠的。"
+                "empty_help": "若找不到配電箱裝置，請從配電箱本身的裝置頁面複製裝置 ID，而不是從斷路器的裝置頁面複製。若已找到配電箱裝置，但沒有任何裝置與其連結，請更新 LDATA 整合並重新啟動 Home Assistant；只重新載入是不夠的。",
+                "no_data_title": "正在等待 Leviton 的資料",
+                "no_data_body": "LDATA 整合暫時無法連線至 Leviton，或仍在啟動中。整合重新連線後，配電箱會自動顯示在這裡。如果沒有顯示，請在「設定 → 裝置與服務」中檢查該整合。"
             }
         },
         "editor": {

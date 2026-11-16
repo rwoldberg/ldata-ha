@@ -207,6 +207,7 @@
                 "cloud_connected": "Připojeno ke cloudu Leviton",
                 "cloud_offline": "Rozvaděč je offline",
                 "cloud_unknown": "Neznámý stav připojení ke cloudu",
+                "no_data": "Momentálně žádná data ze služby Leviton",
                 "wifi_signal": "Signál Wi-Fi: {dbm} dBm",
                 "wifi_unknown": "Neznámá síla signálu Wi-Fi",
                 "update_available": "Je dostupná aktualizace firmwaru (nainstalujte ji v aplikaci My Leviton)",
@@ -321,7 +322,9 @@
                 "check_linked_any": "Zařízení propojená s libovolným rozvaděčem",
                 "check_linked_this": "Zařízení propojená s tímto rozvaděčem",
                 "check_breakers": "Jističe s entitou Status",
-                "empty_help": "Pokud zařízení rozvaděče nebylo nalezeno, zkopírujte ID zařízení ze stránky zařízení samotného rozvaděče, ne ze stránky jističe. Pokud nalezeno bylo, ale nic s ním není propojeno, aktualizujte integraci LDATA a restartujte Home Assistant; pouhé nové načtení nestačí."
+                "empty_help": "Pokud zařízení rozvaděče nebylo nalezeno, zkopírujte ID zařízení ze stránky zařízení samotného rozvaděče, ne ze stránky jističe. Pokud nalezeno bylo, ale nic s ním není propojeno, aktualizujte integraci LDATA a restartujte Home Assistant; pouhé nové načtení nestačí.",
+                "no_data_title": "Čeká se na data ze služby Leviton",
+                "no_data_body": "Integrace LDATA se momentálně nemůže spojit se službou Leviton, nebo se teprve spouští. Rozvaděč se tu zobrazí sám, jakmile se integrace znovu připojí. Pokud se tak nestane, zkontrolujte integraci v Nastavení → Zařízení a služby."
             }
         },
         "editor": {
