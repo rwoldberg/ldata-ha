@@ -29,6 +29,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         """Initialize the coordinator and set up the Controller object."""
         self._hass = hass
         self.user = user
+        # What every entity's unique id starts with. The Leviton user id once
+        # __init__.py's _async_migrate_unique_id_prefix has moved the entry's
+        # entities to it; the account email until then.
+        self.unique_id_prefix = user
         self._service = LDATAService(user, password, entry)
         self.config_entry = entry
         self._websocket_task = None

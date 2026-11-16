@@ -141,8 +141,8 @@ class LDATABaseEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     def unique_id(self):
         """Return the unique ID of the entity."""
         if suffix := self.unique_id_suffix:
-            return f"{self.coordinator.user}-{self._device_id}_{suffix}"
-        return f"{self.coordinator.user}-{self._device_id}"
+            return f"{self.coordinator.unique_id_prefix}-{self._device_id}_{suffix}"
+        return f"{self.coordinator.unique_id_prefix}-{self._device_id}"
 
     @property
     def name_suffix(self) -> str | None:
