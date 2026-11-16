@@ -335,8 +335,21 @@ async def async_setup_entry(
 
         _imp  = float(breaker_data.get("import", 0) or 0)
         _cons = float(breaker_data.get("consumption", 0) or 0)
-        _daily_import_uid    = f"{coordinator.user}-ldata_{breaker_id}_todaymw_import"
-        _lifetime_import_uid = f"{coordinator.user}-ldata_{breaker_id}__Import_kWh"
+        # The import sensors' unique ids are built from the breaker's stable
+        # id (LDATABaseEntity._build_device_id). These were built from the
+        # raw id, which differs from it since Leviton's firmware 2.2.0 id
+        # change, so on those panels the registry lookups and removals below
+        # never matched. The options lists may still hold the raw-id form,
+        # which is read alongside.
+        _stable_id = breaker_data.get("stable_id") or breaker_id
+        _daily_import_uid    = f"{coordinator.user}-ldata_{_stable_id}_todaymw_import"
+        _lifetime_import_uid = f"{coordinator.user}-ldata_{_stable_id}__Import_kWh"
+        _import_uids = {
+            _daily_import_uid,
+            _lifetime_import_uid,
+            f"{coordinator.user}-ldata_{breaker_id}_todaymw_import",
+            f"{coordinator.user}-ldata_{breaker_id}__Import_kWh",
+        }
         _has_daily_import    = ent_reg.async_get_entity_id("sensor", DOMAIN, _daily_import_uid)    is not None
         _has_lifetime_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _lifetime_import_uid) is not None
 
@@ -397,10 +410,7 @@ async def async_setup_entry(
         _suppressed_uids: set = set(
             config_entry.options.get("suppressed_import_uids", [])
         )
-        _already_suppressed = (
-            _daily_import_uid in _suppressed_uids
-            or _lifetime_import_uid in _suppressed_uids
-        )
+        _already_suppressed = bool(_import_uids & _suppressed_uids)
 
         # ── Persisted solar confirmation ───────────────────────────────────────
         # confirmed_solar_import_uids: breakers positively identified as solar/
@@ -411,10 +421,7 @@ async def async_setup_entry(
         _confirmed_solar_uids: set = set(
             config_entry.options.get("confirmed_solar_import_uids", [])
         )
-        _is_confirmed_solar = (
-            _daily_import_uid in _confirmed_solar_uids
-            or _lifetime_import_uid in _confirmed_solar_uids
-        )
+        _is_confirmed_solar = bool(_import_uids & _confirmed_solar_uids)
 
         # Persist solar classification the first time we detect it.
         if _v2_solar_signal and not _is_confirmed_solar:
@@ -448,8 +455,8 @@ async def async_setup_entry(
         if _v2_load_artifact:
             # Remove any spurious registry entries so these entities become
             # orphaned (enabling deletion) and are not recreated.
-            _remove_registry_entry(_daily_import_uid)
-            _remove_registry_entry(_lifetime_import_uid)
+            for _uid in _import_uids:
+                _remove_registry_entry(_uid)
             _has_daily_import    = False
             _has_lifetime_import = False
             _is_confirmed_solar  = False
@@ -461,9 +468,8 @@ async def async_setup_entry(
                 _suppressed_uids.add(_lifetime_import_uid)
                 options_patch["suppressed_import_uids"] = list(_suppressed_uids)
             # Also evict from confirmed_solar if somehow present (defensive).
-            if _daily_import_uid in _confirmed_solar_uids or _lifetime_import_uid in _confirmed_solar_uids:
-                _confirmed_solar_uids.discard(_daily_import_uid)
-                _confirmed_solar_uids.discard(_lifetime_import_uid)
+            if _import_uids & _confirmed_solar_uids:
+                _confirmed_solar_uids -= _import_uids
                 options_patch["confirmed_solar_import_uids"] = list(_confirmed_solar_uids)
             if options_patch:
                 hass.config_entries.async_update_entry(
