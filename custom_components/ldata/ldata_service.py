@@ -1,5 +1,6 @@
 """The LDATAService object."""
 
+import contextlib
 import logging
 import typing
 import time
@@ -20,6 +21,7 @@ from .const import (
     ENABLE_DECORA_DEFAULT, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
     CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
     PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD,
+    STATUS_LOCK_WAIT, STATUS_TIME_BUDGET,
     HW_COUNTER_DECREASE_TOLERANCE_KWH, HW_COUNTER_DEFAULT_RATING_A,
     HW_COUNTER_DEMOTE_EVIDENCE, HW_COUNTER_EVIDENCE_SPACING_S,
     HW_COUNTER_MIN_PLAUSIBLE_KWH,
@@ -56,6 +58,47 @@ defaultHeaders = {
 }
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
+
+
+class _DeadlineSession(requests.Session):
+    """A requests.Session whose requests can share one deadline per thread.
+
+    status() makes many requests in one executor job. Each has its own
+    timeout, but together they could outlast the time the coordinator waits
+    for the job, and an executor job that times out keeps running in its
+    thread. Inside deadline() every request's timeout is cut to the time
+    left, and once it has passed requests fail at once, so status() ends
+    within its budget. The deadline is per thread: the REST polls running
+    in other threads share this session and are not affected.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._local = threading.local()
+
+    @contextlib.contextmanager
+    def deadline(self, seconds: float):
+        """Give the requests this thread makes inside the block `seconds` in all."""
+        self._local.at = time.monotonic() + seconds
+        try:
+            yield
+        finally:
+            self._local.at = None
+
+    def time_left(self) -> float | None:
+        """Return the seconds left before this thread's deadline, or None without one."""
+        at = getattr(self._local, "at", None)
+        return None if at is None else at - time.monotonic()
+
+    def request(self, method, url, *args, **kwargs):
+        left = self.time_left()
+        if left is not None:
+            if left <= 0:
+                raise requests.exceptions.Timeout("Out of time for this status refresh")
+            timeout = kwargs.get("timeout")
+            if timeout is None or timeout > left:
+                kwargs["timeout"] = left
+        return super().request(method, url, *args, **kwargs)
 
 
 def _panel_firmware_versions(panel: dict) -> tuple[str, str | None]:
@@ -198,7 +241,7 @@ class LDATAService:
         self.userid = entry.data.get("userid", "") if entry else ""
         self.account_id = ""
         self.residence_id_list = []  # type: list[str]
-        self.session = requests.Session()
+        self.session = _DeadlineSession()
         self.session.headers.update(defaultHeaders)
         
         # Lock to serialize REST poll operations. The breaker poll and CT poll
@@ -320,6 +363,13 @@ class LDATAService:
                 time.sleep(wait_time)
 
             LDATAService._last_login_attempt_time = time.time()
+
+    def _pause(self, seconds: float) -> None:
+        """time.sleep(), cut short at this thread's status() deadline if it has one."""
+        left = (
+            self.session.time_left() if isinstance(self.session, _DeadlineSession) else None
+        )
+        time.sleep(seconds if left is None else max(0.0, min(seconds, left)))
 
     def _test_internet_connectivity(self) -> str:
         """Return 'ACTIVE' if google.com is resolvable, 'DOWN' otherwise.
@@ -493,7 +543,7 @@ class LDATAService:
                         f"[v{self.version}] Token check failed (Attempt {attempts}/{max_attempts}) with status {result.status_code}. Waiting..."
                     )
                     if attempts < max_attempts:
-                        time.sleep(5) # Wait 5 seconds before retrying
+                        self._pause(5) # Wait 5 seconds before retrying
                         continue # Try again
                     else:
                         # STRIKE 3: The token is truly dead.
@@ -508,7 +558,7 @@ class LDATAService:
                         f"[v{self.version}] Server error during token check (Attempt {attempts}/{max_attempts}): {result.status_code} {result.reason} - {clean_msg}. Waiting..."
                     )
                     if attempts < max_attempts:
-                        time.sleep(5)
+                        self._pause(5)
                         continue
                     else:
                         raise requests.exceptions.RequestException(f"Server error: {result.status_code} {result.reason}")
@@ -524,7 +574,7 @@ class LDATAService:
                     f"[v{self.version}] Network error during token check (Attempt {attempts}/{max_attempts}): {msg}. Waiting..."
                 )
                 if attempts < max_attempts:
-                    time.sleep(5)
+                    self._pause(5)
                     continue
                 else:
                     raise
@@ -989,8 +1039,12 @@ class LDATAService:
         """Get the whemns CTs for the panel module."""
         return self._get_whems_resource(panel_id, "iotCts", "CTs")
 
-    def _fetch_panels(self, url_template: str, panel_type: str) -> object:
-        """Helper to fetch panels of a specific type (LDATA or WHEMS)."""
+    def _fetch_panels(self, url_template: str, panel_type: str, toggle_bandwidth: bool = True) -> object:
+        """Helper to fetch panels of a specific type (LDATA or WHEMS).
+
+        toggle_bandwidth: force each connected panel to push fresh values
+        first (see status()).
+        """
         allPanels = None
         for residenceId in self.residence_id_list:
             headers = self._auth_headers()
@@ -1063,7 +1117,7 @@ class LDATAService:
 
                         # Only force an update if the panel is actually online.
                         # This avoids wasting API calls on offline devices, saving cost/load.
-                        if is_connected:
+                        if is_connected and toggle_bandwidth:
                             try:
                                 # Full 1→0→1 bandwidth toggle forces the panel to push
                                 # fresh data to the cloud.  A single bandwidth:1 PUT is
@@ -1092,8 +1146,8 @@ class LDATAService:
                             panel["updateVersion"] = panel["version"]
                             # Brief delay after toggle to let the cloud receive
                             # fresh values from the panel hardware before we fetch.
-                            if is_connected:
-                                time.sleep(2)
+                            if is_connected and toggle_bandwidth:
+                                self._pause(2)
                             panel["residentialBreakers"] = self.get_Whems_breakers(panel["id"])
                             panel["CTs"] = self.get_Whems_CT(panel["id"])
 
@@ -1278,13 +1332,13 @@ class LDATAService:
             failed.add(self.FETCH_DECORA)
         return inventory, failed
 
-    def get_iotWhemsPanels(self) -> object:
+    def get_iotWhemsPanels(self, toggle_bandwidth: bool = True) -> object:
         """Get the whemns modules for all the residences the user has access to."""
-        return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/iotWhems", "WHEMS")
+        return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/iotWhems", "WHEMS", toggle_bandwidth)
 
-    def get_ldata_panels(self) -> object:
+    def get_ldata_panels(self, toggle_bandwidth: bool = True) -> object:
         """Get the ldata modules for all the residences the user has access to."""
-        return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels", "LDATA")
+        return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels", "LDATA", toggle_bandwidth)
 
     def _put_request(self, url: str, json_data: dict, context_str: str, referer: str = None, method: str = "PUT") -> object:
         """Helper to handle PUT/PATCH requests with standardized error handling."""
@@ -1856,8 +1910,35 @@ class LDATAService:
                     pass
         status_data[panel_id + "totalPower"] = total
 
-    def status(self):
-        """Get the breakers from the API."""
+    def status(self, toggle_bandwidth: bool = True):
+        """Get the breakers from the API.
+
+        toggle_bandwidth: run each connected panel's bandwidth toggle before
+        reading it, so it pushes fresh values (setup). A refresh while the
+        WebSocket is down passes False: it only needs the current values,
+        and the toggle knocks a panel off the cloud for 10-20 s on firmware
+        2.1.
+
+        Takes _rest_poll_lock, like the REST polls, so its requests and
+        toggles can't land inside a poll's bandwidth toggle, and runs within
+        STATUS_TIME_BUDGET once it has the lock (see _DeadlineSession), so it
+        always ends before the coordinator's STATUS_TIMEOUT.
+        """
+        if not self._rest_poll_lock.acquire(timeout=STATUS_LOCK_WAIT):
+            raise LDATAConnectionError("A REST poll is still running; status refresh skipped")
+        try:
+            deadline = (
+                self.session.deadline(STATUS_TIME_BUDGET)
+                if isinstance(self.session, _DeadlineSession)
+                else contextlib.nullcontext()
+            )
+            with deadline:
+                return self._status(toggle_bandwidth)
+        finally:
+            self._rest_poll_lock.release()
+
+    def _status(self, toggle_bandwidth: bool):
+        """Inner implementation of status(), called under _rest_poll_lock."""
         try:
             # First, try to validate our existing token
             if not self.refresh_auth():
@@ -1997,8 +2078,8 @@ class LDATAService:
             self._incomplete_fetches.update((self.FETCH_PANELS, self.FETCH_DECORA))
 
         # Get the breaker panels.
-        panels_json = self.get_ldata_panels()
-        whems_panels_json = self.get_iotWhemsPanels()
+        panels_json = self.get_ldata_panels(toggle_bandwidth)
+        whems_panels_json = self.get_iotWhemsPanels(toggle_bandwidth)
         if panels_json is None:
             panels_json = whems_panels_json
         elif whems_panels_json is not None:

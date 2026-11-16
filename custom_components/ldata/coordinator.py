@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, BREAKER_POLL_INTERVAL, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
+from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, BREAKER_POLL_INTERVAL, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL, STATUS_TIMEOUT
 from .ldata_service import LDATAService, LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -440,12 +440,19 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         # Initial fetch or WebSocket not yet connected
         _LOGGER.debug("Fetching initial LDATA data")
-        
+
+        # Only the first refresh toggles the panels' bandwidth for fresh
+        # values. A later one runs because the WebSocket is down and something
+        # asked for a refresh (every Decora command does) and only reads.
+        toggle_bandwidth = self.data is None
+
         try:
-            async with asyncio.timeout(30):
+            # status() ends within STATUS_TIMEOUT (see const.py), so this
+            # never gives up on a refresh that then runs on in its thread.
+            async with asyncio.timeout(STATUS_TIMEOUT):
                 # This will now either return data or raise an Exception
                 returnData = await self._hass.async_add_executor_job(
-                    self._service.status  # Fetch new status
+                    self._service.status, toggle_bandwidth
                 )
 
             # Log data if enabled

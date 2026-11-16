@@ -51,6 +51,19 @@ HA_INFORM_RATE_MAX = 600.0
 # reach Home Assistant at the next push anyway.
 BREAKER_POLL_INTERVAL = 60.0
 
+# A full status refresh (at setup, and when something asks for a refresh while
+# the WebSocket is down, as every Decora command does) first waits up to
+# STATUS_LOCK_WAIT seconds for a running REST poll to finish (the CT poll alone
+# waits 15 s after its bandwidth toggle), then has STATUS_TIME_BUDGET seconds
+# for all its requests and waits. The coordinator waits for it STATUS_TIMEOUT
+# seconds: both of those plus a margin for the login rate limit, which can
+# hold a login back up to 10 s. A refresh therefore always ends before the
+# coordinator stops waiting for it, instead of running on in its executor
+# thread after a timeout.
+STATUS_LOCK_WAIT = 60.0
+STATUS_TIME_BUDGET = 120.0
+STATUS_TIMEOUT = STATUS_LOCK_WAIT + STATUS_TIME_BUDGET + 15.0
+
 # CT REST poll interval (seconds) — v1 firmware panels only.
 # On v2+ firmware, CT energy counters are period counters (not lifetime totals)
 # and CT REST polling is disabled entirely; CT power arrives via WS IotCt events.
