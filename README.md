@@ -4,7 +4,7 @@
 # ldata-ha
 # leviton LDATA and LWHEM integration for Home Assistant (https://my.leviton.com/)
 
-This is a home assistant integration for the LDATA and LWHEM hubs for levitons smart breakers. It can also optionally discover and control Decora Smart Wi-Fi devices (switches, dimmers, fans, outlets, GFCIs) on the same account � see [Decora Smart Wi-Fi Support](#decora-smart-wi-fi-support) below.
+This is a home assistant integration for the LDATA and LWHEM hubs for levitons smart breakers. It can also optionally discover and control Decora Smart Wi-Fi devices (switches, dimmers, fans, outlets, GFCIs) on the same account — see [Decora Smart Wi-Fi Support](#decora-smart-wi-fi-support) below.
 
 <br>
 
@@ -18,7 +18,7 @@ MrToast99
 
 ## Install
 
-Use HACS and add as a custom repo. Once the integration is installed go to your integrations and follow the configuration options to specify the below:
+Install through the Home Assistant **Marketplace** (Home Assistant 2026.11 or newer), through **HACS** (2026.10 or older), or by hand. See [Installation](#installation) below. Once the integration is installed go to your integrations and follow the configuration options to specify the below:
 
 - Username (my.leviton.com Username)
 - Password (my.leviton.com Password)
@@ -26,21 +26,42 @@ Use HACS and add as a custom repo. Once the integration is installed go to your 
 
 ## Installation
 
-Recommended installation is via the [Home Assistant Community Store (HACS)](https://hacs.xyz/). [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+Home Assistant 2026.11 replaced HACS with a built-in **Marketplace**, so the steps depend on your Home Assistant version.
 
-### 1. Install via HACS custom repository
+### 1. Install the integration
 
-If you do not wish to use HACS, then please download the latest version from the [releases page](https://github.com/rwoldberg/ldata-ha/releases) and proceed to Step 2.
+#### Home Assistant 2026.11 or newer: Marketplace
+
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=rwoldberg&repository=ldata-ha&category=integration)
+
+Select the button above, or add the repository by hand:
+
+1. Go to **Settings** > **Marketplace** (administrators only).
+2. Select **Add from link** in the upper-right corner.
+3. Under **GitHub link**, enter `rwoldberg/ldata-ha` (or `https://github.com/rwoldberg/ldata-ha`) and select **Add**. If it asks for a **Type**, choose **Integration** and select **Add** again.
+4. Open the repository's page, accept the community-content risk notice if asked, and select **Install**.
+5. Restart Home Assistant.
+
+Adding a custom repository needs a GitHub connection: the Marketplace asks you to connect with GitHub's device sign-in the first time. It only reads public information.
+
+If you used HACS before updating to 2026.11, you don't need to do anything: Home Assistant moves HACS and everything installed with it, including this integration, to the Marketplace when it starts after the update.
+
+#### Home Assistant 2026.10 or older: HACS
+
+HACS can't be installed on Home Assistant 2026.11 or newer. On older versions, use [HACS](https://hacs.xyz/):
 
 1. Navigate to the HACS add-on
 2. Select 'Custom Repositories'
-2. Add 'https://github.com/rwoldberg/ldata-ha' as the repository and 'Integration' as the Categroy
-3. Restart Home Assistant
-
+3. Add 'https://github.com/rwoldberg/ldata-ha' as the repository and 'Integration' as the Category
+4. Restart Home Assistant
 
 <img width="450" alt="Select Custom Repositories " src="https://user-images.githubusercontent.com/2048887/220187592-3c88bb8f-fd4f-412f-aebe-6c8202bb552c.png">
 
 <img width="450" alt="Add ldata-ha" src="https://user-images.githubusercontent.com/2048887/220187501-0f339218-4b07-4ee1-9e75-81c1f3f55e3f.png">
+
+#### Manual install
+
+Download the latest version from the [releases page](https://github.com/rwoldberg/ldata-ha/releases), copy its `custom_components/ldata` folder into your Home Assistant `custom_components` folder, and restart Home Assistant.
 
 ### 2. Configure via Home Assistant
 
@@ -268,22 +289,22 @@ To add or correct a language, copy `custom_components/ldata/translations/en.json
 
 ## Decora Smart Wi-Fi Support
 
-Optional support for Leviton's **Decora Smart Wi-Fi** product line � a separate line of devices from the LDATA/WHEM breaker panels above (switches, dimmers, fans, outlets, GFCI outlets, and Wi-Fi bridges), fetched from the same Leviton cloud account via a different API. Off by default � most LDATA users don't have any of these, and leaving it off avoids extra API calls on every update.
+Optional support for Leviton's **Decora Smart Wi-Fi** product line — a separate line of devices from the LDATA/WHEM breaker panels above (switches, dimmers, fans, outlets, GFCI outlets, and Wi-Fi bridges), fetched from the same Leviton cloud account via a different API. Off by default — most LDATA users don't have any of these, and leaving it off avoids extra API calls on every update.
 
 ### Enabling it
 
-Turn on **Enable Decora Smart Wi-Fi devices** � either during initial setup, or later via **Settings > Devices & Services > Leviton LDATA > Configure**. Home Assistant will discover every supported Decora device on your account automatically; no device IDs or manual entity setup required.
+Turn on **Enable Decora Smart Wi-Fi devices** — either during initial setup, or later via **Settings > Devices & Services > Leviton LDATA > Configure**. Home Assistant will discover every supported Decora device on your account automatically; no device IDs or manual entity setup required.
 
 ### What gets created
 
 Each Decora device becomes its own HA device, with entities depending on its type:
 
-- **Lights & dimmers** � a `light` entity (on/off, plus brightness if the device supports dimming).
-- **Fans** � a `fan` entity (on/off, plus speed if supported).
-- **Switches, outlets, and GFCI outlets** � a `switch` entity.
-- **GFCI outlets specifically** � an additional fault-status `binary_sensor` and `sensor` (Protected/Fault/Test), plus a buzzer enable/disable `switch` and a silence-alert `button`.
-- **Every device** � a Wi-Fi signal strength `sensor`, a connectivity `binary_sensor`, and an identify `button` (blinks the device's LED so you can find it physically).
-- **Dimmable/motion-capable devices** � config `select` entities for things like auto-shutoff time, status LED behavior, fade rate, and motion sensor timing/mode, where the device reports support for them.
+- **Lights & dimmers** — a `light` entity (on/off, plus brightness if the device supports dimming).
+- **Fans** — a `fan` entity (on/off, plus speed if supported).
+- **Switches, outlets, and GFCI outlets** — a `switch` entity.
+- **GFCI outlets specifically** — an additional fault-status `binary_sensor` and `sensor` (Protected/Fault/Test), plus a buzzer enable/disable `switch` and a silence-alert `button`.
+- **Every device** — a Wi-Fi signal strength `sensor`, a connectivity `binary_sensor`, and an identify `button` (blinks the device's LED so you can find it physically).
+- **Dimmable/motion-capable devices** — config `select` entities for things like auto-shutoff time, status LED behavior, fade rate, and motion sensor timing/mode, where the device reports support for them.
 
 Devices update in real time over the same WebSocket connection used for breaker/panel data, so state changes (e.g. flipping a physical switch) reflect in HA immediately.
 
@@ -346,8 +367,6 @@ If you add a new Decora device to your account, reload the integration to pick i
 
 Your panel and any Decora devices each get a firmware `update` entity (Settings > Devices & Services > your device) that reports when Leviton has a newer firmware version available — installing it still happens in the My Leviton app, this is detection only.
 
-Each smart breaker has one too, found the same way the My Leviton app finds it: a breaker on an LDATA hub when Leviton offers it an update, a breaker on an LWHEM when the panel has downloaded newer firmware for it. Its installed version is always the breaker's main firmware, as on its device page; when an update waits, the release notes name each part of the firmware that changes, with its old and new version. These are **disabled by default**, because Leviton updates every breaker of a model at once and the blueprint below would send a notification for each. To use one, open the breaker's device page, select the hidden entities and enable its Firmware Update entity.
-
 To get notified when one becomes available, import this blueprint and create an automation from it — it automatically covers every current and future LDATA `update.*` entity, no per-device setup required:
 
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Frwoldberg%2Fldata-ha%2Fmain%2Fblueprints%2Fautomation%2Fldata_firmware_notify.yaml)
@@ -367,13 +386,12 @@ Addon is auto reloading on submit.
 
 - Allow Breaker Control (default off)
   - HA will not create Switch entities for breaker control (Breakers are only treated as Sensors)
-  - A Leviton Metering Accessory (model LSBMA) never gets one: it meters a standard breaker and has nothing to switch.
 
 - Allow Identify (default off)
-  - HA will not create the per-breaker Blink LED switch used to physically locate a breaker. Independent of Allow Breaker Control � a config with breaker control off can still enable this (or vice versa) if you just want the ability to blink a breaker's LED without granting power control.
+  - HA will not create the per-breaker Blink LED switch used to physically locate a breaker. Independent of Allow Breaker Control — a config with breaker control off can still enable this (or vice versa) if you just want the ability to blink a breaker's LED without granting power control.
 
 - Enable Decora Smart Wi-Fi devices (default off)
-  - Discovers and creates entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account (a separate Leviton product line from the LDATA/WHEM breaker panels). Leave off if you don't have any � it avoids extra API calls on every update. Can be set at initial setup or toggled later here.
+  - Discovers and creates entities for Decora Smart Wi-Fi switches, dimmers, fans, outlets, and GFCIs on your account (a separate Leviton product line from the LDATA/WHEM breaker panels). Leave off if you don't have any — it avoids extra API calls on every update. Can be set at initial setup or toggled later here.
 
 - Show the load center in the sidebar (default off)
   - Adds a sidebar item that opens a full-page, interactive view of your load center(s). See [Sidebar page](#sidebar-page).

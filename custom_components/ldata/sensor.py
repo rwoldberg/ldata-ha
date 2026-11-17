@@ -1979,6 +1979,28 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 return not self.coordinator._service.panel_has_hw_counters(panel_id)
         return False  # default: hw counter path (safe for v1)
 
+    def _source_offline(self, new_data: dict) -> bool:
+        """Return True while the breaker or its panel is reported offline.
+
+        The coordinator keeps re-publishing the last data it has while a hub
+        is down. To the guards below such a repeat looks like a fresh reading,
+        which would restart the plausibility clock every update: after a long
+        outage the first real reading would then be judged against only a
+        minute of elapsed time and rejected as implausible. An offline source
+        sends no readings, so they are skipped and the clock keeps measuring
+        from the last reading that actually came from the hub.
+
+        Only an explicit ``connected: False`` counts; a missing flag means
+        online.
+        """
+        if new_data.get("connected") is False:
+            return True
+        panel_id = self.breaker_data.get("panel_id")
+        for panel in (self.coordinator.data or {}).get("panels") or []:
+            if panel.get("id") == panel_id:
+                return panel.get("connected") is False
+        return False
+
     def _is_implausible_increase(self, new_value: float, new_data: dict) -> bool:
         """Return True if the counter rose more than this breaker could have drawn.
 
@@ -2072,6 +2094,10 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                         return
 
                     # ── v1 hardware counter path ──────────────────────────────
+                    # An offline hub re-publishes stale data, not readings.
+                    if self._source_offline(new_data):
+                        return
+
                     raw = new_data.get(self.entity_description.key)
                     if raw is None:
                         return  # Field missing — keep last state
