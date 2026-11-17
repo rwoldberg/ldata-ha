@@ -2656,7 +2656,6 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
         self.breaker_data = data
         self._state = data.get("operationalState", "Normal")
         self._second = data.get("operationalState2") or None
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
