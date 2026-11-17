@@ -35,11 +35,24 @@ ALLOW_LED_BLINK = "allow_led_blink"
 ALLOW_LED_BLINK_DEFAULT = False
 ENABLE_DECORA = "enable_decora"
 ENABLE_DECORA_DEFAULT = False
+# Adds the load center card to Home Assistant's sidebar as a page of its own
+# (see sidebar.py). Off unless the user turns it on.
+SHOW_SIDEBAR_PANEL = "show_sidebar_panel"
+SHOW_SIDEBAR_PANEL_DEFAULT = False
 
 HA_INFORM_RATE = "ha_inform_rate"
 HA_INFORM_RATE_DEFAULT = 60.0
 HA_INFORM_RATE_MIN = 2.0
 HA_INFORM_RATE_MAX = 600.0
+
+# When Leviton refuses the stored token after setup (it expired, or a password
+# change revoked it), the coordinator logs in again with the stored
+# credentials. Further refusals wait AUTH_RENEWAL_BACKOFF seconds before the
+# next login, doubling up to AUTH_RENEWAL_BACKOFF_MAX while logins keep failing,
+# so a login service outage is not met with a login every minute from every
+# poll loop.
+AUTH_RENEWAL_BACKOFF = 300.0
+AUTH_RENEWAL_BACKOFF_MAX = 3600.0
 
 # CT REST poll interval (seconds) — v1 firmware panels only.
 # On v2+ firmware, CT energy counters are period counters (not lifetime totals)

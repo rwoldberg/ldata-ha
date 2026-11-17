@@ -127,14 +127,14 @@ class DecoraEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
-        """Return extra state attributes."""
+        """Return extra state attributes: the device's room.
+
+        Signal strength has its own sensor (DecoraSignalSensor). As an
+        attribute of every entity of the device, each change of it recorded
+        a new state row for all of them. The LAN address is left out too: it
+        does not belong in the recorder's history.
+        """
         device = self._get_device_data()
-        attrs = {}
-        if device:
-            if device.get("rssi") is not None:
-                attrs["signal_strength"] = device["rssi"]
-            if device.get("localIP"):
-                attrs["local_ip"] = device["localIP"]
-            if device.get("roomName"):
-                attrs["room"] = device["roomName"]
-        return attrs
+        if device and device.get("roomName"):
+            return {"room": device["roomName"]}
+        return {}
