@@ -355,8 +355,8 @@
             "appearance_auto": "Podle motivu",
             "appearance_light": "Jasné",
             "appearance_dark": "Tlumené",
-            "main_breaker": "Jmenovitý proud hlavního jističe (volitelný)",
-            "main_breaker_help": "Leviton údaje o hlavním jističi neposkytuje. Ponechte prázdné, chcete-li použít hodnotu nastavenou v možnostech integrace, nebo u rozvaděče bez hlavního jističe."
+            "load_capacity": "Zatížitelnost (volitelná)",
+            "load_capacity_help": "Jakou zátěž tento rozvaděč unese, v ampérech: jmenovitý proud jeho hlavního jističe, nebo jističe, který ho napájí. Ponechte prázdné, chcete-li použít zatížitelnost nastavenou v možnostech integrace."
         }
     }
 }

@@ -155,23 +155,44 @@ def test_sub_panel_popup_shows_it_with_this_cards_settings() -> None:
     given = set(re.findall(r"(\w+): cfg\.(\w+),", config.group(1)))
     assert given == {(name, name) for name in ("appearance", "confirm", "toggle", "show_power", "show_alarms", "show_panel_info")}
     # What belongs to this card's own panel stays here.
-    for option in ("rotate_180", "main_breaker", "sub_panels"):
+    for option in ("rotate_180", "load_capacity", "main_breaker", "sub_panels"):
         assert option not in config.group(1), option
 
 
-def test_main_breaker_comes_from_the_card_or_else_the_integration() -> None:
-    # Kept with the panel's layout, so it is still drawn during an outage.
+def test_capacity_comes_from_the_card_or_else_the_integration() -> None:
+    # Kept with the panel's layout, so it still counts during an outage.
     layout = re.search(r"const PANEL_LAYOUT = \[(.*?)\];", CARD)
-    assert layout is not None and '"main_breaker"' in layout.group(1)
-    helper = re.search(r"\n  _mainBreaker\(layout\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
+    assert layout is not None and '"load_capacity"' in layout.group(1)
+    helper = re.search(r"\n  _capacity\(layout\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
     assert helper is not None
     body = helper.group(1)
-    # The card's own setting wins over the integration's.
-    assert body.index("this._config.main_breaker") < body.index("layout.main_breaker")
+    # The card's own load_capacity wins over the integration's.
+    assert body.index("this._config.load_capacity") < body.index("layout.load_capacity")
+    # The integration's attribute is load_capacity now, not main_breaker.
+    assert not re.search(r"layout\.main_breaker\b(?!_)", CARD)
+    assert '"main_breaker"' not in layout.group(1)
     # The drawing, the share in use and the rebuild key all go through it.
     assert "const main = m.mainBreaker;" in CARD
-    assert "this._mainBreaker(layout)].filter" in CARD
-    assert "cfg.main_breaker" not in CARD
+    assert "this._capacity(layout)].filter" in CARD
+    assert "cfg.main_breaker" not in CARD and "cfg.load_capacity" not in CARD
+
+
+def test_old_main_breaker_setting_still_works() -> None:
+    """load_capacity was main_breaker in the first test builds: such a dashboard keeps working."""
+    helper = re.search(r"\nfunction currentOptions\(config\) \{\n(.*?)\n\}\n", CARD, re.DOTALL)
+    assert helper is not None
+    body = helper.group(1)
+    assert 'const { main_breaker: capacity, ...rest } = config;' in body
+    # The new name wins when both are set.
+    assert '"load_capacity" in rest ? rest : { ...rest, load_capacity: capacity }' in body
+    # The card and its editor both read a dashboard through it.
+    assert CARD.count("config = currentOptions(config);") == 1
+    assert "this._config = currentOptions(config || {});" in CARD
+    # The editor offers, and saves, only the new name.
+    schema = re.search(r"\nfunction editorSchema\(t\) \{\n(.*?)\n\}\n", CARD, re.DOTALL)
+    assert schema is not None
+    assert '{ name: "load_capacity",' in schema.group(1) and '"main_breaker"' not in schema.group(1)
+    assert 'load_capacity: "editor.load_capacity",' in CARD and 'load_capacity: "editor.load_capacity_help",' in CARD
 
 
 def test_main_breaker_is_drawn_where_the_options_put_it() -> None:
@@ -194,9 +215,9 @@ def test_sub_panel_draws_no_main_breaker_but_its_capacity_counts() -> None:
     """A sub-panel, fed from a main breaker by the meter, say: no main breaker in it, but the share in use stays."""
     helper = re.search(r"\n  _mainDrawn\(layout\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
     assert helper is not None
-    assert 'layout.main_breaker_position === "none" ? null : this._mainBreaker(layout)' in helper.group(1)
+    assert 'layout.main_breaker_position === "none" ? null : this._capacity(layout)' in helper.group(1)
     # The drawing and the rebuild key go by what is drawn...
     assert "mainBreaker: this._mainDrawn(ca)," in CARD
     assert "this._mainDrawn(ca)," in CARD.split("const structKey")[1].split("]);")[0]
-    # ...and the share in use by the rating, drawn or not.
-    assert "this._mainBreaker(layout)].filter" in CARD
+    # ...and the share in use by the capacity, drawn or not.
+    assert "this._capacity(layout)].filter" in CARD

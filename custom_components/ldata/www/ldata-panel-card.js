@@ -45,12 +45,15 @@
  *   confirm: true              # optional, ask before switching a breaker
  *   show_panel_info: true      # optional, the panel's own readings above the door
  *   appearance: auto           # optional, auto | light | dark (dimmed lighting)
- *   main_breaker: 200          # optional, show a main breaker with this rating
- *                              # (the header then shows how much of it is in use);
- *                              # without it, the rating set for this load center
- *                              # in the integration's options, if any. The
- *                              # integration's options also say where it is drawn:
- *                              # next to positions 1 and 2, at the top or the bottom
+ *   load_capacity: 200         # optional, what this load center can carry, in
+ *                              # amps: the header shows how much of it is in use,
+ *                              # and a main panel's main breaker is drawn with it
+ *                              # as its rating. Without it, the capacity set for
+ *                              # this load center in the integration's options,
+ *                              # which also say whether it is a main panel or a
+ *                              # sub-panel, and where its main breaker is drawn.
+ *                              # (Called main_breaker in the first test builds,
+ *                              # which is still read.)
  *   rotate_180: true           # optional override — by default the card reads
  *                              # the panel's reported mounting orientation.
  *   sub_panels:                # optional — link a breaker that feeds a
@@ -241,7 +244,7 @@ function fallbackRole(match, entityIds, role, test) {
 // outage can still draw the panel. Nothing is kept that the states don't
 // already carry.
 const BREAKER_LAYOUT = ["position", "poles", "model", "hardware", "rating", "canRemoteOn", "leg"];
-const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from", "main_breaker", "main_breaker_position"];
+const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from", "load_capacity", "main_breaker_position"];
 const LAYOUT_STORE = "ldata.layout.v1."; // + the panel's device id
 const layouts = new Map(); // entity id -> what its state last carried, and the handle seen then
 const layoutSeen = new Map(); // entity id -> the state object that was read
@@ -693,8 +696,8 @@ const EN = {
     "appearance_auto": "Follow theme",
     "appearance_light": "Bright",
     "appearance_dark": "Dimmed",
-    "main_breaker": "Main breaker rating (optional)",
-    "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty to use the rating set in the integration's options, or for a main-lug panel."
+    "load_capacity": "Load capacity (optional)",
+    "load_capacity_help": "What this load center can carry, in amps: its main breaker's rating, or the rating of what feeds it. Leave empty to use the capacity set in the integration's options."
   }
 };
 /* i18n:end */
@@ -837,6 +840,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     if (!config || typeof config !== "object") {
       throw new Error("ldata-panel-card: invalid configuration.");
     }
+    config = currentOptions(config);
     this._config = {
       show_power: true,
       show_alarms: true,
@@ -1666,23 +1670,23 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     saveLayouts(this._config.device_id, [d.panel.roles.cloud, ...d.breakers.map((b) => b.roles.status)]);
   }
 
-  // The main breaker's rating, which Leviton doesn't report: this card's own
-  // main_breaker, or else the one set for this load center in the
+  // The load center's capacity, which Leviton doesn't report: this card's own
+  // load_capacity, or else the one set for this load center in the
   // integration's options, which its Cloud Connected entity carries.
-  _mainBreaker(layout) {
+  _capacity(layout) {
     const positive = (v) => {
       const n = numOrNull(v);
       return n !== null && n > 0 ? n : null;
     };
-    return positive(this._config.main_breaker) ?? positive(layout && layout.main_breaker);
+    return positive(this._config.load_capacity) ?? positive(layout && layout.load_capacity);
   }
 
-  // The main breaker to draw: its rating, or null for none. A sub-panel
-  // (position "none") has no main breaker of its own; its rating is what
-  // feeds it, such as a main breaker by the meter, and still says how much
-  // of it is in use.
+  // The main breaker to draw: its rating (the capacity), or null for none. A
+  // sub-panel (position "none") has no main breaker of its own; its capacity
+  // is what feeds it, such as a main breaker by the meter, and still says how
+  // much of it is in use.
   _mainDrawn(layout) {
-    return layout && layout.main_breaker_position === "none" ? null : this._mainBreaker(layout);
+    return layout && layout.main_breaker_position === "none" ? null : this._capacity(layout);
   }
 
   // Whether the main breaker is drawn at the bottom of the panel: where the
@@ -1714,9 +1718,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       cloud: cloud ? cloud.state : null,
       fwAvailable: !!fw && fw.state === "on",
       // What this load center may draw: the breaker feeding it, if it is a
-      // sub-panel (from the integration), or its main breaker, whichever is
-      // smaller.
-      capacity: Math.min(...[numOrNull(fedFrom && fedFrom.rating), this._mainBreaker(layout)].filter((v) => v > 0), Infinity),
+      // sub-panel of another load center (from the integration), or its own
+      // load capacity, whichever is smaller.
+      capacity: Math.min(...[numOrNull(fedFrom && fedFrom.rating), this._capacity(layout)].filter((v) => v > 0), Infinity),
       busiest: [val(r.ampsL1), val(r.ampsL2)].filter((v) => v !== null).reduce((a, v) => Math.max(a === null ? v : a, v), null),
       overVoltage: !!(r.overVoltage && st[r.overVoltage] && st[r.overVoltage].state === "on"),
       underVoltage: !!(r.underVoltage && st[r.underVoltage] && st[r.underVoltage].state === "on"),
@@ -3717,8 +3721,17 @@ function editorSchema(t) {
         },
       },
     },
-    { name: "main_breaker", selector: { number: { min: 0, max: 600, step: 5, mode: "box", unit_of_measurement: "A" } } },
+    { name: "load_capacity", selector: { number: { min: 0, max: 600, step: 5, mode: "box", unit_of_measurement: "A" } } },
   ];
+}
+
+// A card's settings under their current names. main_breaker became
+// load_capacity in 2.0.14's test builds; a dashboard saved before still works,
+// and the editor saves it under the new name.
+function currentOptions(config) {
+  if (!("main_breaker" in config)) return config;
+  const { main_breaker: capacity, ...rest } = config;
+  return "load_capacity" in rest ? rest : { ...rest, load_capacity: capacity };
 }
 
 const EDITOR_LABELS = {
@@ -3730,12 +3743,12 @@ const EDITOR_LABELS = {
   confirm: "editor.confirm",
   show_panel_info: "editor.show_panel_info",
   appearance: "editor.appearance",
-  main_breaker: "editor.main_breaker",
+  load_capacity: "editor.load_capacity",
 };
 
 const EDITOR_HELP = {
   device_id: "editor.panel_help",
-  main_breaker: "editor.main_breaker_help",
+  load_capacity: "editor.load_capacity_help",
 };
 
 const EDITOR_DEFAULTS = {
@@ -3754,7 +3767,7 @@ class LdataPanelCardEditor extends LanguageMixin(HTMLElement) {
   }
 
   setConfig(config) {
-    this._config = config || {};
+    this._config = currentOptions(config || {});
     this._render();
   }
 
@@ -3787,7 +3800,7 @@ class LdataPanelCardEditor extends LanguageMixin(HTMLElement) {
       this._form.addEventListener("value-changed", (ev) => {
         const value = { ...this._config, ...ev.detail.value };
         for (const [k, v] of Object.entries(EDITOR_DEFAULTS)) if (value[k] === v) delete value[k];
-        for (const k of ["title", "main_breaker"]) if (value[k] === "" || value[k] === null || value[k] === 0) delete value[k];
+        for (const k of ["title", "load_capacity"]) if (value[k] === "" || value[k] === null || value[k] === 0) delete value[k];
         this._config = value;
         this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: value }, bubbles: true, composed: true }));
       });

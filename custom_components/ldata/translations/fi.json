@@ -355,8 +355,8 @@
             "appearance_auto": "Teeman mukaan",
             "appearance_light": "Kirkas",
             "appearance_dark": "Himmennetty",
-            "main_breaker": "Pääkatkaisijan nimellisvirta (valinnainen)",
-            "main_breaker_help": "Leviton ei ilmoita pääkatkaisijaa. Jätä tyhjäksi, jos haluat käyttää integraation asetuksissa annettua nimellisvirtaa tai jos sähkökeskuksessa ei ole pääkatkaisijaa."
+            "load_capacity": "Kuormituskyky (valinnainen)",
+            "load_capacity_help": "Kuinka paljon tämä sähkökeskus kestää ampeereina: sen pääkatkaisijan tai sitä syöttävän katkaisijan nimellisvirta. Jätä tyhjäksi, jos haluat käyttää integraation asetuksissa annettua kuormituskykyä."
         }
     }
 }

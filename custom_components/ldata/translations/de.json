@@ -355,8 +355,8 @@
             "appearance_auto": "Dem Design folgen",
             "appearance_light": "Hell",
             "appearance_dark": "Gedimmt",
-            "main_breaker": "Nennstrom der Hauptsicherung (optional)",
-            "main_breaker_help": "Leviton meldet die Hauptsicherung nicht. Leer lassen, um den Nennstrom aus den Optionen der Integration zu verwenden, oder bei einem Sicherungskasten ohne Hauptsicherung."
+            "load_capacity": "Belastbarkeit (optional)",
+            "load_capacity_help": "Wie viel dieser Sicherungskasten tragen kann, in Ampere: der Nennstrom seiner Hauptsicherung oder der Sicherung, die ihn versorgt. Leer lassen, um die Belastbarkeit aus den Optionen der Integration zu verwenden."
         }
     }
 }

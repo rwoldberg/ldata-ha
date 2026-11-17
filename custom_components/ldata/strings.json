@@ -355,8 +355,8 @@
       "appearance_auto": "Follow theme",
       "appearance_light": "Bright",
       "appearance_dark": "Dimmed",
-      "main_breaker": "Main breaker rating (optional)",
-      "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty to use the rating set in the integration's options, or for a main-lug panel."
+      "load_capacity": "Load capacity (optional)",
+      "load_capacity_help": "What this load center can carry, in amps: its main breaker's rating, or the rating of what feeds it. Leave empty to use the capacity set in the integration's options."
     }
   }
 }

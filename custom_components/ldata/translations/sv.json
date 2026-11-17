@@ -355,8 +355,8 @@
             "appearance_auto": "Följ temat",
             "appearance_light": "Ljus",
             "appearance_dark": "Dämpad",
-            "main_breaker": "Huvudbrytarens märkström (valfritt)",
-            "main_breaker_help": "Leviton rapporterar inte huvudbrytaren. Lämna tomt för att använda märkströmmen från integrationens alternativ, eller för en elcentral utan huvudbrytare."
+            "load_capacity": "Belastningskapacitet (valfritt)",
+            "load_capacity_help": "Hur mycket den här elcentralen klarar, i ampere: märkströmmen för dess huvudbrytare eller för brytaren som matar den. Lämna tomt för att använda kapaciteten från integrationens alternativ."
         }
     }
 }

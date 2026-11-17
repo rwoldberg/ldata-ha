@@ -355,8 +355,8 @@
             "appearance_auto": "Følg tema",
             "appearance_light": "Lyst",
             "appearance_dark": "Dempet",
-            "main_breaker": "Hovedsikringens merkestrøm (valgfritt)",
-            "main_breaker_help": "Leviton rapporterer ikke hovedsikringen. La feltet stå tomt for å bruke merkestrømmen fra integrasjonens innstillinger, eller for et sikringsskap uten hovedsikring."
+            "load_capacity": "Belastningskapasitet (valgfritt)",
+            "load_capacity_help": "Hvor mye dette sikringsskapet tåler, i ampere: merkestrømmen til hovedsikringen eller til sikringen som forsyner det. La feltet stå tomt for å bruke kapasiteten fra integrasjonens innstillinger."
         }
     }
 }

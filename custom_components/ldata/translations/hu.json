@@ -355,8 +355,8 @@
             "appearance_auto": "Téma követése",
             "appearance_light": "Világos",
             "appearance_dark": "Tompított",
-            "main_breaker": "Főmegszakító névleges árama (opcionális)",
-            "main_breaker_help": "A Leviton nem közli a főmegszakító adatait. Hagyja üresen az integráció beállításaiban megadott névleges áram használatához, vagy főmegszakító nélküli elosztótáblánál."
+            "load_capacity": "Terhelhetőség (opcionális)",
+            "load_capacity_help": "Mekkora terhelést bír ez az elosztótábla, amperben: a főmegszakítója vagy az azt tápláló megszakító névleges árama. Hagyja üresen az integráció beállításaiban megadott terhelhetőség használatához."
         }
     }
 }

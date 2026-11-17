@@ -355,8 +355,8 @@
             "appearance_auto": "Segui il tema",
             "appearance_light": "Luminosa",
             "appearance_dark": "Soffusa",
-            "main_breaker": "Corrente nominale dell'interruttore generale (facoltativa)",
-            "main_breaker_help": "Leviton non comunica alcun dato sull'interruttore generale. Lascia vuoto per usare la corrente nominale impostata nelle opzioni dell'integrazione, o per un quadro senza interruttore generale."
+            "load_capacity": "Capacità di carico (facoltativa)",
+            "load_capacity_help": "Quanto carico può sopportare questo quadro, in ampere: la corrente nominale del suo interruttore generale o dell'interruttore che lo alimenta. Lascia vuoto per usare la capacità impostata nelle opzioni dell'integrazione."
         }
     }
 }

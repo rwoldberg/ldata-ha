@@ -355,8 +355,8 @@
             "appearance_auto": "Suivre le thème",
             "appearance_light": "Lumineux",
             "appearance_dark": "Tamisé",
-            "main_breaker": "Courant nominal du disjoncteur principal (facultatif)",
-            "main_breaker_help": "Leviton ne transmet aucune donnée sur le disjoncteur principal. Laissez vide pour utiliser le courant nominal défini dans les options de l'intégration, ou pour un panneau sans disjoncteur principal (à cosses principales)."
+            "load_capacity": "Capacité de charge (facultatif)",
+            "load_capacity_help": "La charge que ce panneau peut supporter, en ampères : le courant nominal de son disjoncteur principal, ou celui du disjoncteur qui l'alimente. Laissez vide pour utiliser la capacité définie dans les options de l'intégration."
         }
     }
 }

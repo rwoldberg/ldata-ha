@@ -115,7 +115,7 @@ toggle: true               # optional, let each breaker's rocker switch it (need
 confirm: true              # optional, ask before switching a breaker
 show_panel_info: true      # optional, the panel's own readings above the door
 appearance: auto           # optional, auto (follow theme), light, or dark (dimmed lighting)
-# main_breaker: 200        # optional, show a main breaker with this rating, and how much of it is in use (Leviton doesn't report it); overrides the load capacity set under Panel type and load capacity in the integration's options
+# load_capacity: 200       # optional, what this load center can carry, in amps: the header shows how much of it is in use, and a main panel's main breaker is drawn with it as its rating (Leviton doesn't report it); overrides the capacity set under Panel type and load capacity in the integration's options. The first test builds called it main_breaker, which still works
 # rotate_180: true         # optional override — only set this if auto-detected orientation is wrong
 ```
 
@@ -272,7 +272,7 @@ Leviton doesn't report what a load center can carry either. Say once whether eac
    - **Sub-panel, no main breaker**: nothing is drawn, and **Panel load** still shows how much of its capacity is in use. This suits a load center fed from a main breaker by the meter, as well as one fed from a breaker in another load center (see [Sub-panels](#sub-panels)).
 4. Save. The integration reloads, and the cards show it without a restart.
 
-The main breaker is drawn as Leviton's 2nd Gen one (LM100-T to LM225-T) with your rating printed on it, and shows as switched off when neither leg has voltage. At the bottom of the panel it is drawn upside down, as it is fitted there, with its handle next to positions 1 and 2. A dashboard card's own `main_breaker` rating wins over the capacity set here; the panel type and position apply to every card of that load center.
+The main breaker is drawn as Leviton's 2nd Gen one (LM100-T to LM225-T) with your rating printed on it, and shows as switched off when neither leg has voltage. At the bottom of the panel it is drawn upside down, as it is fitted there, with its handle next to positions 1 and 2. A dashboard card's own `load_capacity` wins over the capacity set here; the panel type and position apply to every card of that load center.
 
 ## Sidebar page
 

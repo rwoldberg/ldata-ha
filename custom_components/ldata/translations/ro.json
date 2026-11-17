@@ -355,8 +355,8 @@
             "appearance_auto": "Urmează tema",
             "appearance_light": "Puternică",
             "appearance_dark": "Redusă",
-            "main_breaker": "Curentul nominal al disjunctorului general (opțional)",
-            "main_breaker_help": "Leviton nu raportează disjunctorul general. Lasă necompletat pentru a folosi curentul nominal setat în opțiunile integrării sau pentru un tablou fără disjunctor general."
+            "load_capacity": "Capacitate de încărcare (opțional)",
+            "load_capacity_help": "Ce sarcină suportă acest tablou, în amperi: curentul nominal al disjunctorului său general sau al disjunctorului care îl alimentează. Lasă necompletat pentru a folosi capacitatea setată în opțiunile integrării."
         }
     }
 }

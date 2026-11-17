@@ -228,10 +228,12 @@ async def test_cloud_connected_carries_the_main_breaker_settings() -> None:
         main = _cloud_sensor(hass, entry, "p1").extra_state_attributes
         garage = _cloud_sensor(hass, entry, "p2").extra_state_attributes
 
-        assert main["main_breaker"] == 200.0
+        assert main["load_capacity"] == 200.0
         assert main["main_breaker_position"] == "bottom"
+        # The capacity isn't called a main breaker: a sub-panel has none.
+        assert "main_breaker" not in main
         # One without settings (a main-lug panel) has neither.
-        assert "main_breaker" not in garage and "main_breaker_position" not in garage
+        assert "load_capacity" not in garage and "main_breaker_position" not in garage
 
 
 @pytest.mark.asyncio

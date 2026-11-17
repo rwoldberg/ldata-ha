@@ -355,8 +355,8 @@
             "appearance_auto": "Según el tema",
             "appearance_light": "Intensa",
             "appearance_dark": "Tenue",
-            "main_breaker": "Capacidad del interruptor principal (opcional)",
-            "main_breaker_help": "Leviton no reporta el interruptor principal. Déjelo vacío para usar la capacidad configurada en las opciones de la integración, o si el centro de carga es de zapatas principales (sin interruptor principal)."
+            "load_capacity": "Capacidad de carga (opcional)",
+            "load_capacity_help": "Cuánta carga admite este centro de carga, en amperios: la capacidad de su interruptor principal o la del interruptor que lo alimenta. Déjelo vacío para usar la capacidad configurada en las opciones de la integración."
         }
     }
 }

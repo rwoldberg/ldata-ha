@@ -211,23 +211,24 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         attributes["panel_size"] = self.panel_data.get("panel_size")
         attributes["dumb_breakers"] = self.panel_data.get("dumb_breakers", [])
         attributes["sub_panels"], attributes["fed_from"] = self._feeds()
-        rating, position = self._main_breaker()
-        if rating is not None:
-            attributes["main_breaker"] = rating
+        capacity, position = self._load_capacity()
+        if capacity is not None:
+            attributes["load_capacity"] = capacity
         if position is not None:
             attributes["main_breaker_position"] = position
         return attributes
 
-    def _main_breaker(self) -> tuple[float | None, str | None]:
-        """Return this panel's main breaker rating and position, as far as the user gave them.
+    def _load_capacity(self) -> tuple[float | None, str | None]:
+        """Return this panel's load capacity and its main breaker's position, as far as the user gave them.
 
         Leviton reports neither; they are set in the integration's options
-        (see sub_panels.py). The rating is the load center's load capacity,
-        and the position "none" makes it a sub-panel without a main breaker.
-        The panel card reads them here, so the sidebar page and every
-        dashboard card without a main_breaker of its own show how much of
-        that capacity the load center uses, and draw a main panel's main
-        breaker at the top or the bottom.
+        (see sub_panels.py). The capacity is a main panel's main breaker
+        rating, or the rating of what feeds a sub-panel; the position is
+        "none" for a sub-panel, which has no main breaker. The panel card
+        reads them here, so the sidebar page and every dashboard card
+        without a main_breaker of its own show how much of that capacity the
+        load center uses, and draw a main panel's main breaker at the top or
+        the bottom.
         """
         entry = getattr(self.coordinator, "config_entry", None)
         if entry is None:

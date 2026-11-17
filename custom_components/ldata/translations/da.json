@@ -355,8 +355,8 @@
             "appearance_auto": "Følg tema",
             "appearance_light": "Lys",
             "appearance_dark": "Dæmpet",
-            "main_breaker": "Hovedafbryderens mærkestrøm (valgfri)",
-            "main_breaker_help": "Leviton rapporterer ikke hovedafbryderen. Lad feltet stå tomt for at bruge mærkestrømmen fra integrationens indstillinger eller for en eltavle uden hovedafbryder."
+            "load_capacity": "Belastningskapacitet (valgfri)",
+            "load_capacity_help": "Hvor meget denne eltavle kan bære, i ampere: hovedafbryderens mærkestrøm eller mærkestrømmen på det, der forsyner den. Lad feltet stå tomt for at bruge kapaciteten fra integrationens indstillinger."
         }
     }
 }

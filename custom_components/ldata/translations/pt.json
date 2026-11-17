@@ -355,8 +355,8 @@
             "appearance_auto": "Seguir o tema",
             "appearance_light": "Intensa",
             "appearance_dark": "Atenuada",
-            "main_breaker": "Corrente nominal do disjuntor geral (opcional)",
-            "main_breaker_help": "A Leviton não fornece informação sobre o disjuntor geral. Deixe vazio para usar a corrente nominal definida nas opções da integração, ou se o quadro não tiver disjuntor geral."
+            "load_capacity": "Capacidade de carga (opcional)",
+            "load_capacity_help": "Que carga este quadro suporta, em amperes: a corrente nominal do disjuntor geral ou do disjuntor que o alimenta. Deixe vazio para usar a capacidade definida nas opções da integração."
         }
     }
 }

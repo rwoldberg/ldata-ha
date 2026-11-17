@@ -355,8 +355,8 @@
             "appearance_auto": "Zgodnie z motywem",
             "appearance_light": "Jasne",
             "appearance_dark": "Przygaszone",
-            "main_breaker": "Prąd znamionowy wyłącznika głównego (opcjonalnie)",
-            "main_breaker_help": "Leviton nie udostępnia danych wyłącznika głównego. Pozostaw puste, aby użyć prądu znamionowego ustawionego w opcjach integracji, lub w przypadku rozdzielnicy bez wyłącznika głównego."
+            "load_capacity": "Obciążalność (opcjonalnie)",
+            "load_capacity_help": "Jakie obciążenie wytrzyma ta rozdzielnica, w amperach: prąd znamionowy jej wyłącznika głównego lub wyłącznika, który ją zasila. Pozostaw puste, aby użyć obciążalności ustawionej w opcjach integracji."
         }
     }
 }

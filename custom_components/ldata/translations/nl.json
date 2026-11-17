@@ -355,8 +355,8 @@
             "appearance_auto": "Thema volgen",
             "appearance_light": "Helder",
             "appearance_dark": "Gedimd",
-            "main_breaker": "Nominale stroom hoofdschakelaar (optioneel)",
-            "main_breaker_help": "Leviton geeft de hoofdschakelaar niet door. Laat leeg om de nominale stroom uit de opties van de integratie te gebruiken, of voor een groepenkast zonder hoofdschakelaar."
+            "load_capacity": "Belastbaarheid (optioneel)",
+            "load_capacity_help": "Hoeveel deze groepenkast kan dragen, in ampère: de nominale stroom van de hoofdschakelaar of van de schakelaar die hem voedt. Laat leeg om de belastbaarheid uit de opties van de integratie te gebruiken."
         }
     }
 }

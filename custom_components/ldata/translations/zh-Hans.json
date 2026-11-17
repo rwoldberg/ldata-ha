@@ -355,8 +355,8 @@
             "appearance_auto": "跟随主题",
             "appearance_light": "明亮",
             "appearance_dark": "昏暗",
-            "main_breaker": "总开关额定电流（可选）",
-            "main_breaker_help": "Leviton 不会报告总开关的信息。留空即可使用集成选项中设置的额定电流；如果配电箱没有总开关，也请留空。"
+            "load_capacity": "负载容量（可选）",
+            "load_capacity_help": "此配电箱能承受的负载（安培）：其总开关的额定电流，或为其供电的断路器的额定电流。留空即可使用集成选项中设置的负载容量。"
         }
     }
 }

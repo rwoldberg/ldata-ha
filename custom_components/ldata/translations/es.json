@@ -355,8 +355,8 @@
             "appearance_auto": "Según el tema",
             "appearance_light": "Intensa",
             "appearance_dark": "Tenue",
-            "main_breaker": "Calibre del interruptor general (opcional)",
-            "main_breaker_help": "Leviton no informa del interruptor general. Déjalo vacío para usar el calibre configurado en las opciones de la integración, o si el cuadro no tiene interruptor general."
+            "load_capacity": "Capacidad de carga (opcional)",
+            "load_capacity_help": "Cuánta carga admite este cuadro, en amperios: el calibre de su interruptor general o el del interruptor que lo alimenta. Déjalo vacío para usar la capacidad configurada en las opciones de la integración."
         }
     }
 }
