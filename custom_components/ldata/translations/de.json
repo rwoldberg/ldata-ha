@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Hauptsicherungen",
-                        "description": "Leviton meldet die Hauptsicherung eines Sicherungskastens nicht. Gib ihren Nennstrom im Feld mit (A) unter dem Namen des Sicherungskastens ein, damit die Karte die Hauptsicherung zeigen kann und wie viel davon genutzt wird, auf der Seite in der Seitenleiste und auf Dashboard-Karten ohne eigenen Wert. Leer lassen bei einem Sicherungskasten ohne Hauptsicherung. Das Feld mit dem Namen des Sicherungskastens legt fest, wo die Hauptsicherung gezeigt wird: neben den Positionen 1 und 2, die der Einbaurichtung folgen, oder oben oder unten."
+                        "name": "Verteilungsart und Belastbarkeit",
+                        "description": "Leviton meldet nicht, wie viel ein Sicherungskasten tragen kann. Gib unter dem Namen jedes Sicherungskastens an, ob er eine Hauptverteilung mit eigener Hauptsicherung ist oder eine Unterverteilung ohne, und trag seine Belastbarkeit in Ampere in das Feld mit (A) ein: bei einer Hauptverteilung den Nennstrom ihrer Hauptsicherung, bei einer Unterverteilung den Nennstrom der Sicherung, die sie versorgt, zum Beispiel einer Hauptsicherung beim Zähler. Die Karte zeigt dann, wie viel davon genutzt wird, auf der Seite in der Seitenleiste und auf Dashboard-Karten ohne eigenen Wert, und zeigt bei einer Hauptverteilung die Hauptsicherung mit ihrem Nennstrom: neben den Positionen 1 und 2 (die der Einbaurichtung folgen), oben oder unten. Lass die Belastbarkeit leer, um beides nicht zu zeigen."
                     },
                     "sub_panels": {
                         "name": "Unterverteilungen",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Keine Unterverteilung"
+                "none": "Nicht von einem anderen Sicherungskasten versorgt"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Neben den Positionen 1 und 2",
-                "top": "Oben",
-                "bottom": "Unten"
+                "auto": "Hauptverteilung, Hauptsicherung neben den Positionen 1 und 2",
+                "top": "Hauptverteilung, Hauptsicherung oben",
+                "bottom": "Hauptverteilung, Hauptsicherung unten",
+                "none": "Unterverteilung, keine Hauptsicherung"
             }
         }
     },

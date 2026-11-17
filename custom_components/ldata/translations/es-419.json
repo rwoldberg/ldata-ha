@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Interruptores principales",
-                        "description": "Leviton no reporta el interruptor principal de un centro de carga. Escriba su capacidad en el campo terminado en (A) debajo del nombre del centro de carga, para que la tarjeta muestre el interruptor principal y cuánto de él se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor. Déjelo vacío si el centro de carga es de zapatas principales (sin interruptor principal). El campo con el nombre del centro de carga indica dónde se muestra el interruptor principal: junto a las posiciones 1 y 2, que siguen la orientación del centro de carga, o arriba o abajo."
+                        "name": "Tipo de centro de carga y capacidad",
+                        "description": "Leviton no reporta cuánta carga admite un centro de carga. Debajo del nombre de cada centro de carga, indique si es un centro de carga principal, con su propio interruptor principal, o un subpanel sin él, y escriba su capacidad de carga en amperios en el campo terminado en (A): para un centro de carga principal, la capacidad de su interruptor principal; para un subpanel, la del interruptor que lo alimenta, por ejemplo un interruptor principal junto al medidor. La tarjeta mostrará cuánto de ella se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor, y mostrará el interruptor principal de un centro de carga principal con su capacidad: junto a las posiciones 1 y 2 (que siguen la orientación del centro de carga), arriba o abajo. Deje la capacidad vacía para no mostrar ninguna de las dos cosas."
                     },
                     "sub_panels": {
                         "name": "Subpaneles",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "No es un subpanel"
+                "none": "No se alimenta de otro centro de carga"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Junto a las posiciones 1 y 2",
-                "top": "Arriba",
-                "bottom": "Abajo"
+                "auto": "Principal, interruptor principal junto a las posiciones 1 y 2",
+                "top": "Principal, interruptor principal arriba",
+                "bottom": "Principal, interruptor principal abajo",
+                "none": "Subpanel, sin interruptor principal"
             }
         }
     },

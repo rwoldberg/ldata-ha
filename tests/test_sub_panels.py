@@ -208,9 +208,10 @@ def test_main_breaker_settings_are_read_from_the_options() -> None:
         "p5": True,
         "p6": 150,  # a bare rating, as the first test builds stored it
         "p7": None,
+        "p8": {"rating": 200, "position": "none"},  # a sub-panel: no main breaker drawn
     }
-    assert main_breaker_ratings({MAIN_BREAKERS: raw}) == {"p1": 200.0, "p2": 100.0, "p6": 150.0}
-    assert main_breaker_positions({MAIN_BREAKERS: raw}) == {"p1": "bottom", "p3": "top"}
+    assert main_breaker_ratings({MAIN_BREAKERS: raw}) == {"p1": 200.0, "p2": 100.0, "p6": 150.0, "p8": 200.0}
+    assert main_breaker_positions({MAIN_BREAKERS: raw}) == {"p1": "bottom", "p3": "top", "p8": "none"}
     assert main_breaker_ratings({}) == {} == main_breaker_positions({})
     assert main_breaker_ratings({MAIN_BREAKERS: ["p1"]}) == {}
 

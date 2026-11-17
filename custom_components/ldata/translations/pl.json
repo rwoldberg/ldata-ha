@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Wyłączniki główne",
-                        "description": "Leviton nie udostępnia danych wyłącznika głównego rozdzielnicy. Wpisz jego prąd znamionowy w polu zakończonym (A) pod nazwą rozdzielnicy, aby karta mogła pokazać wyłącznik główny i jaka jego część jest wykorzystywana, na stronie w pasku bocznym i na kartach w dashboardach, które nie mają własnej wartości. Pozostaw puste w przypadku rozdzielnicy bez wyłącznika głównego. Pole z nazwą rozdzielnicy określa, gdzie jest pokazany wyłącznik główny: obok pozycji 1 i 2, które podążają za kierunkiem montażu rozdzielnicy, albo na górze lub na dole."
+                        "name": "Typ rozdzielnicy i obciążalność",
+                        "description": "Leviton nie podaje, jakie obciążenie wytrzyma rozdzielnica. Pod nazwą każdej rozdzielnicy wskaż, czy jest to rozdzielnica główna z własnym wyłącznikiem głównym, czy podrozdzielnica bez niego, i wpisz jej obciążalność w amperach w polu zakończonym (A): dla rozdzielnicy głównej prąd znamionowy jej wyłącznika głównego, dla podrozdzielnicy prąd znamionowy wyłącznika, który ją zasila, na przykład wyłącznika głównego przy liczniku. Karta pokaże wtedy, jaka część jest wykorzystywana, na stronie w pasku bocznym i na kartach w dashboardach, które nie mają własnej wartości, a w rozdzielnicy głównej pokaże wyłącznik główny z jego prądem znamionowym: obok pozycji 1 i 2 (które podążają za kierunkiem montażu rozdzielnicy), na górze lub na dole. Pozostaw obciążalność pustą, aby nie pokazywać żadnego z nich."
                     },
                     "sub_panels": {
                         "name": "Podrozdzielnice",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "To nie jest podrozdzielnica"
+                "none": "Nie jest zasilana z innej rozdzielnicy"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Obok pozycji 1 i 2",
-                "top": "Na górze",
-                "bottom": "Na dole"
+                "auto": "Rozdzielnica główna, wyłącznik główny obok pozycji 1 i 2",
+                "top": "Rozdzielnica główna, wyłącznik główny na górze",
+                "bottom": "Rozdzielnica główna, wyłącznik główny na dole",
+                "none": "Podrozdzielnica, bez wyłącznika głównego"
             }
         }
     },

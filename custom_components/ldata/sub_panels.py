@@ -21,16 +21,22 @@ most. The link is used in two places:
 - The sidebar page puts a sub-panel right after the load center that feeds
   it (sidebar.py).
 
-Leviton doesn't report a load center's main breaker either. The user can
-give its rating, in amps, and where it is, in the same options:
+Leviton doesn't report what a load center can carry either. The user says
+whether each one is a main panel, with its own main breaker, or a sub-panel
+without one, and gives its load capacity in amps, in the same options:
 
     options["main_breakers"] = {"<panel id>": {"rating": 200, "position": "bottom"}}
 
-A main-lug panel has no rating. Without a position, the card draws the main
-breaker next to positions 1 and 2, which follow the panel's direction. The
-panel's Cloud Connected entity passes both on, so the panel card draws the
-main breaker and shows how much of it is in use on the sidebar page and on
-any dashboard card that doesn't set its own rating.
+The rating is the load capacity: a main panel's main breaker rating, or for
+a sub-panel the rating of the breaker that feeds it (by the meter, say). A
+main panel's position says where its main breaker is drawn; without one, the
+card draws it next to positions 1 and 2, which follow the panel's direction.
+A sub-panel's position is "none": no main breaker is drawn, and its rating
+only says how much of it is in use. Without a rating neither is shown, as
+for a main-lug panel. The panel's Cloud Connected entity passes both on, so
+the panel card shows how much of its capacity is in use, and draws a main
+panel's main breaker, on the sidebar page and on any dashboard card that
+doesn't set its own rating.
 """
 from __future__ import annotations
 
@@ -45,10 +51,10 @@ from .const import DOMAIN, PANEL_SUBENTRY_TYPE
 
 SUB_PANELS = "sub_panels"
 MAIN_BREAKERS = "main_breakers"
-# Where a load center's main breaker is drawn: next to positions 1 and 2
+# Where a main panel's main breaker is drawn: next to positions 1 and 2
 # (MAIN_AUTO, which follows the panel's direction), or at the top or the
-# bottom of the panel.
-MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM = "auto", "top", "bottom"
+# bottom of the panel. MAIN_NONE is a sub-panel, which has no main breaker.
+MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM, MAIN_NONE = "auto", "top", "bottom", "none"
 # The form's choice for a load center that no other one feeds.
 NOT_FED = "none"
 
@@ -141,11 +147,11 @@ def main_breaker_ratings(options: Mapping[str, Any]) -> dict[str, float]:
 
 
 def main_breaker_positions(options: Mapping[str, Any]) -> dict[str, str]:
-    """Return {load center id: "top" or "bottom"} where the user placed the main breaker."""
+    """Return {load center id: "top", "bottom", or "none" for a sub-panel} where the user placed the main breaker."""
     return {
         panel_id: entry["position"]
         for panel_id, entry in _main_breaker_entries(options).items()
-        if entry.get("position") in (MAIN_TOP, MAIN_BOTTOM)
+        if entry.get("position") in (MAIN_TOP, MAIN_BOTTOM, MAIN_NONE)
     }
 
 

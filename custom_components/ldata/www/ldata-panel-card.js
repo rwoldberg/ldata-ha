@@ -1506,7 +1506,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       cfg.toggle,
       cfg.show_power,
       cfg.show_panel_info,
-      this._mainBreaker(ca),
+      this._mainDrawn(ca),
       this._mainLow(ca, rotate),
       Object.keys(d.panel.roles).sort(),
       d.cts.map((c) => [c.deviceId, c.name]),
@@ -1538,7 +1538,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       head: this._headDynamics(st, d),
       structKey,
       panelDevice,
-      mainBreaker: this._mainBreaker(ca),
+      mainBreaker: this._mainDrawn(ca),
       mainLow: this._mainLow(ca, rotate),
     };
   }
@@ -1675,6 +1675,14 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       return n !== null && n > 0 ? n : null;
     };
     return positive(this._config.main_breaker) ?? positive(layout && layout.main_breaker);
+  }
+
+  // The main breaker to draw: its rating, or null for none. A sub-panel
+  // (position "none") has no main breaker of its own; its rating is what
+  // feeds it, such as a main breaker by the meter, and still says how much
+  // of it is in use.
+  _mainDrawn(layout) {
+    return layout && layout.main_breaker_position === "none" ? null : this._mainBreaker(layout);
   }
 
   // Whether the main breaker is drawn at the bottom of the panel: where the

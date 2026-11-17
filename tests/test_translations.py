@@ -203,12 +203,20 @@ def test_translations_cover_the_integration() -> None:
     assert SHOW_SIDEBAR_PANEL in ENGLISH["options"]["step"]["init"]["data"]
     assert set(ENGLISH["selector"][GAP_HANDLING]["options"]) == set(GAP_HANDLING_LABELS)
     # The options form's section, its "none" choice and the error it can raise.
-    from custom_components.ldata.sub_panels import MAIN_AUTO, MAIN_BOTTOM, MAIN_BREAKERS, MAIN_TOP, NOT_FED, SUB_PANELS
+    from custom_components.ldata.sub_panels import (
+        MAIN_AUTO,
+        MAIN_BOTTOM,
+        MAIN_BREAKERS,
+        MAIN_NONE,
+        MAIN_TOP,
+        NOT_FED,
+        SUB_PANELS,
+    )
 
     assert {"name", "description"} == set(ENGLISH["options"]["step"]["init"]["sections"][SUB_PANELS])
     assert {"name", "description"} == set(ENGLISH["options"]["step"]["init"]["sections"][MAIN_BREAKERS])
     assert set(ENGLISH["selector"]["sub_panel_feed"]["options"]) == {NOT_FED}
-    assert set(ENGLISH["selector"]["main_breaker_position"]["options"]) == {MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM}
+    assert set(ENGLISH["selector"]["main_breaker_position"]["options"]) == {MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM, MAIN_NONE}
     assert set(ENGLISH["options"]["error"]) == {"sub_panel_loop", "sub_panel_same_breaker"}
 
     services = yaml.safe_load((COMPONENT / "services.yaml").read_text(encoding="utf-8"))

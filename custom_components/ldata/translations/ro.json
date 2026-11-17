@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Disjunctoare generale",
-                        "description": "Leviton nu raportează disjunctorul general al unui tablou electric. Introdu curentul său nominal în câmpul terminat în (A) de sub numele tabloului, ca fișa să poată afișa disjunctorul general și cât din el este folosit, pe pagina din bara laterală și pe fișele din tablourile de bord care nu au o valoare proprie. Lasă necompletat pentru un tablou fără disjunctor general. Câmpul cu numele tabloului stabilește unde este afișat disjunctorul general: lângă pozițiile 1 și 2, care urmează orientarea tabloului, sau sus ori jos."
+                        "name": "Tipul tabloului și capacitatea de încărcare",
+                        "description": "Leviton nu raportează ce sarcină suportă un tablou electric. Sub numele fiecărui tablou, spune dacă este un tablou general, cu propriul disjunctor general, sau un tablou secundar fără disjunctor general, și introdu capacitatea sa de încărcare în amperi în câmpul terminat în (A): pentru un tablou general, curentul nominal al disjunctorului său general; pentru un tablou secundar, pe cel al disjunctorului care îl alimentează, de exemplu un disjunctor general lângă contor. Fișa arată apoi cât din ea este folosit, pe pagina din bara laterală și pe fișele din tablourile de bord care nu au o valoare proprie, iar la un tablou general afișează disjunctorul general cu curentul său nominal: lângă pozițiile 1 și 2 (care urmează orientarea tabloului), sus sau jos. Lasă capacitatea necompletată ca să nu afișezi nimic din acestea."
                     },
                     "sub_panels": {
                         "name": "Tablouri secundare",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Nu este tablou secundar"
+                "none": "Nu este alimentat din alt tablou"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Lângă pozițiile 1 și 2",
-                "top": "Sus",
-                "bottom": "Jos"
+                "auto": "Tablou general, disjunctor general lângă pozițiile 1 și 2",
+                "top": "Tablou general, disjunctor general sus",
+                "bottom": "Tablou general, disjunctor general jos",
+                "none": "Tablou secundar, fără disjunctor general"
             }
         }
     },

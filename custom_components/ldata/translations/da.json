@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Hovedafbrydere",
-                        "description": "Leviton rapporterer ikke en eltavles hovedafbryder. Angiv dens mærkestrøm i feltet, der ender på (A), under eltavlens navn, så kortet kan vise hovedafbryderen og hvor meget af den der bruges, både på siden i sidepanelet og på kort i dashboards, der ikke har deres egen værdi. Lad feltet stå tomt for en eltavle uden hovedafbryder. Feltet med eltavlens navn angiver, hvor hovedafbryderen vises: ved position 1 og 2, som følger eltavlens retning, eller øverst eller nederst."
+                        "name": "Tavletype og belastningskapacitet",
+                        "description": "Leviton rapporterer ikke, hvor meget en eltavle kan bære. Angiv under hver eltavles navn, om den er en hovedtavle med sin egen hovedafbryder eller en undertavle uden, og skriv dens belastningskapacitet i ampere i feltet, der ender på (A): for en hovedtavle hovedafbryderens mærkestrøm, for en undertavle mærkestrømmen på den afbryder, der forsyner den, for eksempel en hovedafbryder ved elmåleren. Kortet viser så, hvor meget af den der bruges, både på siden i sidepanelet og på kort i dashboards, der ikke har deres egen værdi, og viser en hovedtavles hovedafbryder med dens mærkestrøm ved position 1 og 2 (som følger eltavlens retning), øverst eller nederst. Lad kapaciteten stå tom for at vise ingen af delene."
                     },
                     "sub_panels": {
                         "name": "Undertavler",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Ikke en undertavle"
+                "none": "Forsynes ikke fra en anden eltavle"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Ved position 1 og 2",
-                "top": "Øverst",
-                "bottom": "Nederst"
+                "auto": "Hovedtavle, hovedafbryder ved position 1 og 2",
+                "top": "Hovedtavle, hovedafbryder øverst",
+                "bottom": "Hovedtavle, hovedafbryder nederst",
+                "none": "Undertavle, ingen hovedafbryder"
             }
         }
     },

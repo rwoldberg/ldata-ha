@@ -188,3 +188,15 @@ def test_main_breaker_is_drawn_where_the_options_put_it() -> None:
     # The room it needs moves to the bottom row with it.
     assert re.search(r"\.has-main\.main-low \{ --mainh: 0px; --mainh-low: ", CARD)
     assert "+ var(--mainh-low, 0px));" in CARD
+
+
+def test_sub_panel_draws_no_main_breaker_but_its_capacity_counts() -> None:
+    """A sub-panel, fed from a main breaker by the meter, say: no main breaker in it, but the share in use stays."""
+    helper = re.search(r"\n  _mainDrawn\(layout\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
+    assert helper is not None
+    assert 'layout.main_breaker_position === "none" ? null : this._mainBreaker(layout)' in helper.group(1)
+    # The drawing and the rebuild key go by what is drawn...
+    assert "mainBreaker: this._mainDrawn(ca)," in CARD
+    assert "this._mainDrawn(ca)," in CARD.split("const structKey")[1].split("]);")[0]
+    # ...and the share in use by the rating, drawn or not.
+    assert "this._mainBreaker(layout)].filter" in CARD

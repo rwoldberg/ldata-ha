@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Hoofdschakelaars",
-                        "description": "Leviton geeft de hoofdschakelaar van een groepenkast niet door. Vul de nominale stroom in het veld onder de naam van de groepenkast in dat eindigt op (A), zodat de kaart de hoofdschakelaar kan tonen en hoeveel ervan in gebruik is, op de pagina in de zijbalk en op dashboardkaarten zonder eigen waarde. Laat leeg voor een groepenkast zonder hoofdschakelaar. Het veld met de naam van de groepenkast bepaalt waar de hoofdschakelaar wordt getoond: naast posities 1 en 2, die de richting van de groepenkast volgen, of boven of onder."
+                        "name": "Soort verdeler en belastbaarheid",
+                        "description": "Leviton geeft niet door hoeveel een groepenkast kan dragen. Geef onder de naam van elke groepenkast aan of het een hoofdverdeler is, met een eigen hoofdschakelaar, of een onderverdeler zonder, en vul de belastbaarheid in ampère in het veld in dat eindigt op (A): bij een hoofdverdeler de nominale stroom van de hoofdschakelaar, bij een onderverdeler die van de schakelaar die hem voedt, bijvoorbeeld een hoofdschakelaar bij de meter. De kaart laat dan zien hoeveel ervan in gebruik is, op de pagina in de zijbalk en op dashboardkaarten zonder eigen waarde, en toont bij een hoofdverdeler de hoofdschakelaar met zijn nominale stroom: naast posities 1 en 2 (die de richting van de groepenkast volgen), boven of onder. Laat de belastbaarheid leeg om geen van beide te tonen."
                     },
                     "sub_panels": {
                         "name": "Onderverdelers",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Geen onderverdeler"
+                "none": "Niet gevoed vanuit een andere groepenkast"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Naast posities 1 en 2",
-                "top": "Boven",
-                "bottom": "Onder"
+                "auto": "Hoofdverdeler, hoofdschakelaar naast posities 1 en 2",
+                "top": "Hoofdverdeler, hoofdschakelaar boven",
+                "bottom": "Hoofdverdeler, hoofdschakelaar onder",
+                "none": "Onderverdeler, geen hoofdschakelaar"
             }
         }
     },

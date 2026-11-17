@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Főmegszakítók",
-                        "description": "A Leviton nem közli az elosztótábla főmegszakítóját. Adja meg a névleges áramát az elosztótábla neve alatti, (A) végű mezőben, hogy a kártya megjeleníthesse a főmegszakítót, és megmutathassa, mennyi van használatban belőle, az oldalsáv oldalán és azokon az irányítópult-kártyákon, amelyeknek nincs saját értéke. Főmegszakító nélküli elosztótáblánál hagyja üresen. Az elosztótábla nevét viselő mező adja meg, hol jelenjen meg a főmegszakító: az 1. és 2. hely mellett, amelyek a tábla irányát követik, vagy felül vagy alul."
+                        "name": "Elosztótábla típusa és terhelhetősége",
+                        "description": "A Leviton nem közli, mekkora terhelést bír egy elosztótábla. Minden elosztótábla neve alatt adja meg, hogy saját főmegszakítóval rendelkező főelosztó, vagy főmegszakító nélküli alelosztó, és írja be a terhelhetőségét amperben az (A) végű mezőbe: főelosztónál a főmegszakító névleges áramát, alelosztónál az azt tápláló megszakítóét, például a mérőóránál lévő főmegszakítóét. A kártya ezután megmutatja, mennyi van használatban belőle, az oldalsáv oldalán és azokon az irányítópult-kártyákon, amelyeknek nincs saját értéke, főelosztónál pedig megjeleníti a főmegszakítót a névleges áramával: az 1. és 2. hely mellett (amelyek a tábla irányát követik), felül vagy alul. Ha egyiket sem szeretné megjeleníteni, hagyja üresen a terhelhetőséget."
                     },
                     "sub_panels": {
                         "name": "Alelosztók",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Nem alelosztó"
+                "none": "Nem másik elosztótábláról táplált"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Az 1. és 2. hely mellett",
-                "top": "Felül",
-                "bottom": "Alul"
+                "auto": "Főelosztó, főmegszakító az 1. és 2. hely mellett",
+                "top": "Főelosztó, főmegszakító felül",
+                "bottom": "Főelosztó, főmegszakító alul",
+                "none": "Alelosztó, főmegszakító nélkül"
             }
         }
     },

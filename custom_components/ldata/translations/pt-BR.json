@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Disjuntores gerais",
-                        "description": "A Leviton não informa o disjuntor geral de um quadro de distribuição. Informe a corrente nominal dele no campo terminado em (A) abaixo do nome do quadro, para que o cartão mostre o disjuntor geral e quanto dele está em uso, na página da barra lateral e nos cartões dos painéis que não tenham um valor próprio. Deixe em branco se o quadro não tiver disjuntor geral. O campo com o nome do quadro define onde o disjuntor geral aparece: ao lado das posições 1 e 2, que seguem a orientação do quadro, ou em cima ou embaixo."
+                        "name": "Tipo de quadro e capacidade de carga",
+                        "description": "A Leviton não informa quanta carga um quadro de distribuição suporta. Abaixo do nome de cada quadro, informe se ele é um quadro geral, com disjuntor geral próprio, ou um quadro secundário sem disjuntor geral, e informe a capacidade de carga em ampères no campo terminado em (A): para um quadro geral, a corrente nominal do disjuntor geral; para um quadro secundário, a do disjuntor que o alimenta, por exemplo um disjuntor geral junto ao medidor. O cartão então mostra quanto dela está em uso, na página da barra lateral e nos cartões dos painéis que não tenham um valor próprio, e mostra o disjuntor geral de um quadro geral com a sua corrente nominal: ao lado das posições 1 e 2 (que seguem a orientação do quadro), em cima ou embaixo. Deixe a capacidade em branco para não mostrar nenhum dos dois."
                     },
                     "sub_panels": {
                         "name": "Quadros secundários",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Não é um quadro secundário"
+                "none": "Não é alimentado por outro quadro"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Ao lado das posições 1 e 2",
-                "top": "Em cima",
-                "bottom": "Embaixo"
+                "auto": "Quadro geral, disjuntor geral ao lado das posições 1 e 2",
+                "top": "Quadro geral, disjuntor geral em cima",
+                "bottom": "Quadro geral, disjuntor geral embaixo",
+                "none": "Quadro secundário, sem disjuntor geral"
             }
         }
     },

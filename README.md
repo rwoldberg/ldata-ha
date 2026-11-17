@@ -115,7 +115,7 @@ toggle: true               # optional, let each breaker's rocker switch it (need
 confirm: true              # optional, ask before switching a breaker
 show_panel_info: true      # optional, the panel's own readings above the door
 appearance: auto           # optional, auto (follow theme), light, or dark (dimmed lighting)
-# main_breaker: 200        # optional, show a main breaker with this rating, and how much of it is in use (Leviton doesn't report it); overrides the one set under Main breakers in the integration's options
+# main_breaker: 200        # optional, show a main breaker with this rating, and how much of it is in use (Leviton doesn't report it); overrides the load capacity set under Panel type and load capacity in the integration's options
 # rotate_180: true         # optional override — only set this if auto-detected orientation is wrong
 ```
 
@@ -218,7 +218,7 @@ If the sub-panel doesn't have its own CT clamp, it won't have a "Grid Power"-sty
 Leviton reports each load center separately; nothing in its data says that one of them is a sub-panel fed from a breaker in another. Tell the integration once and every panel card uses it, on a dashboard and on the [sidebar page](#sidebar-page) alike:
 
 1. Open **Settings > Devices & Services > Leviton LDATA > Configure** and expand **Sub-panels**. The section is there when the integration has found two or more load centers.
-2. Each load center has a field under its name. For a sub-panel, choose the breaker in the other load center that feeds it (listed as *load center · position · breaker name*). Leave the others on **Not a sub-panel**.
+2. Each load center has a field under its name. For a sub-panel, choose the breaker in the other load center that feeds it (listed as *load center · position · breaker name*). Leave the others on **Not fed from another load center**.
    If that breaker isn't a smart breaker, also enter its size in the field below, ending in **(A)**: Leviton knows a smart breaker's rating but not a dumb one's.
 3. Save. The integration reloads, and the link shows without a restart.
 
@@ -226,7 +226,7 @@ What you get:
 
 - A **"dumb" (non-smart) feeder breaker** has no monitoring data of its own. Linked, its label shows the sub-panel's live Watts/Amps instead, printed in blue after a "↳", so it reads at a glance as "feeds another panel" rather than "just unmonitored". The amps are the sub-panel's busier leg, which is what that pole of the feeder carries. With the feeder's size given, the label shows its rating and a load bar, like any other circuit. Clicking it opens the sub-panel.
 - A **smart feeder breaker** stays a breaker, with its own readings and rocker. Its detail sheet gains a **Feeds *sub-panel*** row that opens the sub-panel.
-- With the feeder's rating known (a smart feeder's own, or the size you entered), the sub-panel's header shows how much of it is in use under **Panel load**, e.g. *16% of 100 A*, with the same colors as the circuit bars. It is the busier leg's current against the feeder's rating. A load center shows the same against its main breaker once you give its rating (see [Main breakers](#main-breakers)); a sub-panel with both uses the smaller.
+- With the feeder's rating known (a smart feeder's own, or the size you entered), the sub-panel's header shows how much of it is in use under **Panel load**, e.g. *16% of 100 A*, with the same colors as the circuit bars. It is the busier leg's current against the feeder's rating. A load center shows the same against its load capacity once you give it (see [Panel type and load capacity](#panel-type-and-load-capacity)); a sub-panel with both uses the smaller.
 - On a dashboard the sub-panel opens in a popup; on the sidebar page it opens the sub-panel's own tab.
 
 A load center has one feed and a breaker feeds one load center. A sub-panel can feed another sub-panel, but two load centers cannot feed each other.
@@ -261,16 +261,18 @@ sub_panels:
 
 There's no registry mapping a device id to "the dashboard view showing its card" — a device can appear on any number of dashboards or none — so this can't be auto-detected; the popup is the default precisely because it needs nothing beyond `panel_device_id`, and `view_path` only takes effect once you set it explicitly.
 
-### Main breakers
+### Panel type and load capacity
 
-Leviton doesn't report a load center's main breaker either. Give its rating once, and every panel card draws the main breaker and shows how much of it is in use under **Panel load**, e.g. *40% of 200 A*, on the [sidebar page](#sidebar-page) and on dashboard cards alike:
+Leviton doesn't report what a load center can carry either. Say once whether each load center is a main panel, with its own main breaker, or a sub-panel without one, and give its load capacity. Every panel card then shows how much of it is in use under **Panel load**, e.g. *40% of 200 A*, on the [sidebar page](#sidebar-page) and on dashboard cards alike, and draws a main panel's main breaker:
 
-1. Open **Settings > Devices & Services > Leviton LDATA > Configure** and expand **Main breakers**.
-2. Each load center has two fields under its name. Enter its main breaker's rating in amps in the one ending in **(A)**; leave it empty for a main-lug panel.
-3. The field with the load center's name says where the main breaker is drawn: **Next to positions 1 and 2** (the default: at the top, or at the bottom of a panel turned 180°), **Top** or **Bottom**.
+1. Open **Settings > Devices & Services > Leviton LDATA > Configure** and expand **Panel type and load capacity**.
+2. Each load center has two fields under its name. In the one ending in **(A)**, enter its load capacity in amps: for a main panel, its main breaker's rating; for a sub-panel, the rating of the breaker that feeds it, such as a main breaker by the meter. Leave it empty for a main-lug panel, to show neither.
+3. In the field with the load center's name, choose what it is:
+   - **Main panel, main breaker next to positions 1 and 2** (the default: at the top, or at the bottom of a panel turned 180°), **at the top** or **at the bottom**;
+   - **Sub-panel, no main breaker**: nothing is drawn, and **Panel load** still shows how much of its capacity is in use. This suits a load center fed from a main breaker by the meter, as well as one fed from a breaker in another load center (see [Sub-panels](#sub-panels)).
 4. Save. The integration reloads, and the cards show it without a restart.
 
-The main breaker is drawn as Leviton's 2nd Gen one (LM100-T to LM225-T) with your rating printed on it, and shows as switched off when neither leg has voltage. A dashboard card's own `main_breaker` rating wins over the one set here; the position applies to every card of that load center.
+The main breaker is drawn as Leviton's 2nd Gen one (LM100-T to LM225-T) with your rating printed on it, and shows as switched off when neither leg has voltage. A dashboard card's own `main_breaker` rating wins over the capacity set here; the panel type and position apply to every card of that load center.
 
 ## Sidebar page
 
@@ -283,7 +285,7 @@ It is **off by default**. Turn it on with **Show the load center in the sidebar*
 - On a phone, where Home Assistant doesn't allow pinch-zoom, the button at the right of the header zooms the panel to 1.5× or 2×. Swipe sideways to see the rest of the panel. The phone remembers the zoom.
 - If you have more than one LDATA entry (one per residence), there is still a single sidebar item. It shows the load centers of every entry that has the option turned on.
 - The item is there as soon as Home Assistant starts and stays while the integration reloads or cannot reach Leviton, so a wall tablet left on the page stays on it. Until the integration has data, the breakers show as unavailable.
-- The page uses the card's defaults and the ratings under [Main breakers](#main-breakers). For the card's other options (lighting and so on), add the card to a dashboard instead; both can be used at the same time.
+- The page uses the card's defaults and the capacities under [Panel type and load capacity](#panel-type-and-load-capacity). For the card's other options (lighting and so on), add the card to a dashboard instead; both can be used at the same time.
 - The item's name in the sidebar is in the language Home Assistant itself is set to (**Settings > System > General**). Home Assistant shows one name to all users, so it does not follow each user's own language the way the page does. You can hide or move the item like any other by editing the sidebar.
 
 ## Languages
@@ -407,8 +409,8 @@ Addon is auto reloading on submit.
 - Show the load center in the sidebar (default off)
   - Adds a sidebar item that opens a full-page, interactive view of your load center(s). See [Sidebar page](#sidebar-page).
 
-- Main breakers
-  - The rating of each load center's main breaker, which Leviton doesn't report, and where it is drawn. Leave the rating empty for a main-lug panel. See [Main breakers](#main-breakers).
+- Panel type and load capacity
+  - Whether each load center is a main panel, and where its main breaker is drawn, or a sub-panel without one, and its load capacity in amps, which Leviton doesn't report. Leave the capacity empty for a main-lug panel. See [Panel type and load capacity](#panel-type-and-load-capacity).
 
 - Sub-panels (shown with two or more load centers)
   - For a load center that is fed from a breaker in another one, the breaker that feeds it. See [Sub-panels](#sub-panels).

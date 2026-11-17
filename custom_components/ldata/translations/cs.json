@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Hlavní jističe",
-                        "description": "Leviton údaje o hlavním jističi rozvaděče neposkytuje. Zadejte jeho jmenovitý proud do pole končícího (A) pod názvem rozvaděče, aby karta mohla hlavní jistič zobrazit a ukázat, jakou část z něj rozvaděč využívá, na stránce v postranním panelu i na kartách v ovládacích panelech, které nemají vlastní hodnotu. U rozvaděče bez hlavního jističe ponechte prázdné. Pole s názvem rozvaděče určuje, kde se hlavní jistič zobrazí: u pozic 1 a 2, které se řídí orientací rozvaděče, nebo nahoře či dole."
+                        "name": "Typ rozvaděče a zatížitelnost",
+                        "description": "Leviton neuvádí, jakou zátěž rozvaděč unese. U názvu každého rozvaděče uveďte, zda jde o hlavní rozvaděč s vlastním hlavním jističem, nebo o podružný rozvaděč bez něj, a do pole končícího (A) zadejte jeho zatížitelnost v ampérech: u hlavního rozvaděče jmenovitý proud jeho hlavního jističe, u podružného rozvaděče jmenovitý proud jističe, který ho napájí, například hlavního jističe u elektroměru. Karta pak ukáže, jaká část je využita, na stránce v postranním panelu i na kartách v ovládacích panelech, které nemají vlastní hodnotu, a u hlavního rozvaděče zobrazí hlavní jistič s jeho jmenovitým proudem: u pozic 1 a 2 (které se řídí orientací rozvaděče), nahoře nebo dole. Pokud zatížitelnost nevyplníte, nezobrazí se ani jedno."
                     },
                     "sub_panels": {
                         "name": "Podružné rozvaděče",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Není podružný rozvaděč"
+                "none": "Nenapájí ho jiný rozvaděč"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "U pozic 1 a 2",
-                "top": "Nahoře",
-                "bottom": "Dole"
+                "auto": "Hlavní rozvaděč, hlavní jistič u pozic 1 a 2",
+                "top": "Hlavní rozvaděč, hlavní jistič nahoře",
+                "bottom": "Hlavní rozvaděč, hlavní jistič dole",
+                "none": "Podružný rozvaděč, bez hlavního jističe"
             }
         }
     },

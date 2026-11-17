@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Pääkatkaisijat",
-                        "description": "Leviton ei ilmoita sähkökeskuksen pääkatkaisijaa. Anna sen nimellisvirta sähkökeskuksen nimen alla olevaan kenttään, joka päättyy (A), jotta kortti voi näyttää pääkatkaisijan ja kuinka suuri osa siitä on käytössä, sekä sivupalkin sivulla että kojelautojen korteissa, joilla ei ole omaa arvoa. Jätä tyhjäksi, jos sähkökeskuksessa ei ole pääkatkaisijaa. Sähkökeskuksen nimellä oleva kenttä kertoo, missä pääkatkaisija näytetään: paikkojen 1 ja 2 vieressä, jotka seuraavat keskuksen asennussuuntaa, tai ylhäällä tai alhaalla."
+                        "name": "Keskuksen tyyppi ja kuormituskyky",
+                        "description": "Leviton ei ilmoita, kuinka paljon sähkökeskus kestää. Kerro kunkin sähkökeskuksen nimen alla, onko se pääkeskus, jolla on oma pääkatkaisija, vai alakeskus ilman sitä, ja anna sen kuormituskyky ampeereina kenttään, joka päättyy (A): pääkeskukselle sen pääkatkaisijan nimellisvirta, alakeskukselle sitä syöttävän katkaisijan nimellisvirta, esimerkiksi sähkömittarin luona olevan pääkatkaisijan. Kortti näyttää sitten, kuinka suuri osa siitä on käytössä, sekä sivupalkin sivulla että kojelautojen korteissa, joilla ei ole omaa arvoa, ja näyttää pääkeskuksen pääkatkaisijan nimellisvirtoineen paikkojen 1 ja 2 vieressä (jotka seuraavat keskuksen asennussuuntaa), ylhäällä tai alhaalla. Jätä kuormituskyky tyhjäksi, jos et halua näyttää kumpaakaan."
                     },
                     "sub_panels": {
                         "name": "Alakeskukset",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Ei alakeskus"
+                "none": "Ei syötetä toisesta sähkökeskuksesta"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Paikkojen 1 ja 2 vieressä",
-                "top": "Ylhäällä",
-                "bottom": "Alhaalla"
+                "auto": "Pääkeskus, pääkatkaisija paikkojen 1 ja 2 vieressä",
+                "top": "Pääkeskus, pääkatkaisija ylhäällä",
+                "bottom": "Pääkeskus, pääkatkaisija alhaalla",
+                "none": "Alakeskus, ei pääkatkaisijaa"
             }
         }
     },

@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Interruttori generali",
-                        "description": "Leviton non comunica l'interruttore generale di un quadro elettrico. Inserisci la sua corrente nominale nel campo che termina con (A) sotto il nome del quadro, così la scheda può mostrare l'interruttore generale e quanto ne viene usato, nella pagina della barra laterale e nelle schede delle plance che non hanno un valore proprio. Lascia vuoto per un quadro senza interruttore generale. Il campo con il nome del quadro indica dove viene mostrato l'interruttore generale: accanto alle posizioni 1 e 2, che seguono l'orientamento del quadro, oppure in alto o in basso."
+                        "name": "Tipo di quadro e capacità di carico",
+                        "description": "Leviton non comunica quanto carico può sopportare un quadro elettrico. Sotto il nome di ogni quadro, indica se è un quadro generale, con un proprio interruttore generale, o un sottoquadro senza, e inserisci la sua capacità di carico in ampere nel campo che termina con (A): per un quadro generale, la corrente nominale del suo interruttore generale; per un sottoquadro, quella dell'interruttore che lo alimenta, per esempio un interruttore generale vicino al contatore. La scheda mostra quindi quanto ne viene usato, nella pagina della barra laterale e nelle schede delle plance che non hanno un valore proprio, e per un quadro generale mostra l'interruttore generale con la sua corrente nominale: accanto alle posizioni 1 e 2 (che seguono l'orientamento del quadro), in alto o in basso. Lascia vuota la capacità per non mostrare nessuno dei due."
                     },
                     "sub_panels": {
                         "name": "Sottoquadri",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Non è un sottoquadro"
+                "none": "Non alimentato da un altro quadro"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Accanto alle posizioni 1 e 2",
-                "top": "In alto",
-                "bottom": "In basso"
+                "auto": "Quadro generale, interruttore generale accanto alle posizioni 1 e 2",
+                "top": "Quadro generale, interruttore generale in alto",
+                "bottom": "Quadro generale, interruttore generale in basso",
+                "none": "Sottoquadro, senza interruttore generale"
             }
         }
     },

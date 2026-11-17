@@ -222,10 +222,12 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         """Return this panel's main breaker rating and position, as far as the user gave them.
 
         Leviton reports neither; they are set in the integration's options
-        (see sub_panels.py). The panel card reads them here, so the sidebar
-        page and every dashboard card without a main_breaker of its own draw
-        the main breaker, at the top or the bottom, and show how much of it
-        the load center uses.
+        (see sub_panels.py). The rating is the load center's load capacity,
+        and the position "none" makes it a sub-panel without a main breaker.
+        The panel card reads them here, so the sidebar page and every
+        dashboard card without a main_breaker of its own show how much of
+        that capacity the load center uses, and draw a main panel's main
+        breaker at the top or the bottom.
         """
         entry = getattr(self.coordinator, "config_entry", None)
         if entry is None:

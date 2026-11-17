@@ -288,10 +288,10 @@ async def test_each_load_center_can_be_given_the_breaker_that_feeds_it() -> None
     marker, selector_ = _feed_field(form, "Casita")
     assert marker.default() == "none"
     assert selector_.config["translation_key"] == "sub_panel_feed"
-    # "Not a sub-panel", then every breaker of the other load center by
+    # "Not fed from another load center", then every breaker of the other load center by
     # position, smart or not.
     assert selector_.config["options"] == [
-        {"value": "none", "label": "Not a sub-panel"},
+        {"value": "none", "label": "Not fed from another load center"},
         {"value": "main|1", "label": "Main Panel · 1 · Kitchen · 20 A"},
         {"value": "main|25", "label": "Main Panel · 25/27 · Solar · 40 A"},
         {"value": "main|38", "label": "Main Panel · 38/40 · Casita Feed"},
@@ -502,7 +502,7 @@ async def test_feed_of_a_load_center_leviton_no_longer_reports_can_be_taken_off(
     form = await flow.async_step_init()
 
     # Named after the load center's subentry, after the ones Leviton reports;
-    # without a size field, and offering only its feed and "Not a sub-panel".
+    # without a size field, and offering only its feed and "Not fed from another load center".
     assert [str(m) for m in _section(form).schema.schema] == [
         "Casita", "Casita (A)", "Main Panel", "Main Panel (A)", "Shed"
     ]
@@ -510,7 +510,7 @@ async def test_feed_of_a_load_center_leviton_no_longer_reports_can_be_taken_off(
     marker, selector_ = _feed_field(form, "Shed")
     assert marker.default() == "main|38"
     assert selector_.config["options"] == [
-        {"value": "none", "label": "Not a sub-panel"},
+        {"value": "none", "label": "Not fed from another load center"},
         {"value": "main|38", "label": "Main Panel · 38/40 · Casita Feed"},
     ]
 
@@ -604,7 +604,7 @@ async def test_main_breakers_are_asked_about_from_one_load_center() -> None:
     place, rating = list(section.schema.schema)
     assert place.default() == "auto"
     assert section.schema.schema[place].config["translation_key"] == "main_breaker_position"
-    assert [o["value"] for o in section.schema.schema[place].config["options"]] == ["auto", "top", "bottom"]
+    assert [o["value"] for o in section.schema.schema[place].config["options"]] == ["auto", "top", "bottom", "none"]
     assert isinstance(rating, vol.Optional)
     assert section.schema.schema[rating].config["unit_of_measurement"] == "A"
     # Not while the entry is not loaded and its load centers are unknown.
@@ -633,6 +633,16 @@ async def test_main_breaker_position_is_kept_without_a_rating() -> None:
     )
 
     assert result["data"][MAIN_BREAKERS] == {"main": {"position": "top"}}
+
+
+async def test_sub_panel_without_a_main_breaker_keeps_its_capacity() -> None:
+    # A load center fed from a main breaker by the meter: its capacity gives
+    # the load in use, and the card doesn't draw a main breaker in it.
+    result = await _flow(_entry({}), _two_load_centers()).async_step_init(
+        {MAIN_BREAKERS: {"Casita": "auto", "Main Panel": "none", "Main Panel (A)": 200}}
+    )
+
+    assert result["data"][MAIN_BREAKERS] == {"main": {"rating": 200.0, "position": "none"}}
 
 
 async def test_stored_main_breaker_is_suggested_and_can_be_emptied() -> None:

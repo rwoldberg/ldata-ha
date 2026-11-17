@@ -46,6 +46,7 @@ from .sub_panels import (
     MAIN_AUTO,
     MAIN_BOTTOM,
     MAIN_BREAKERS,
+    MAIN_NONE,
     MAIN_TOP,
     NOT_FED,
     SUB_PANELS,
@@ -407,7 +408,7 @@ class _SubPanelSection:
 
     A load center the options give a feed for but that Leviton no longer
     reports (a hub that was replaced, or one left out of this fetch) gets a
-    field too, offering only that feed and "Not a sub-panel". Its feed holds
+    field too, offering only that feed and "Not fed from another load center". Its feed holds
     a breaker that no other load center can then be given, so there has to be
     a way to take it off.
 
@@ -490,7 +491,7 @@ class _SubPanelSection:
                 for position, breaker in listed
             ]
 
-        none = selector.SelectOptionDict(value=NOT_FED, label="Not a sub-panel")
+        none = selector.SelectOptionDict(value=NOT_FED, label="Not fed from another load center")
         listed_choices = {option["value"]: option for choices in breakers.values() for option in choices}
         for sub_id in self.fields.values():
             offered = [none]
@@ -501,7 +502,7 @@ class _SubPanelSection:
             # A stored link to a breaker, or a load center, that Leviton no
             # longer lists stays on offer, or saving the form for another
             # reason would drop it. For a load center Leviton doesn't report,
-            # it is the only choice besides "Not a sub-panel".
+            # it is the only choice besides "Not fed from another load center".
             feed = self.stored.get(sub_id)
             if feed and self._value(*feed) not in {option["value"] for option in offered}:
                 offered.append(
@@ -596,11 +597,14 @@ class _MainBreakerSection:
     """The options form's "Main breakers" section.
 
     Two fields for each load center Leviton reports, as in the sub-panel
-    section: one named after the load center for where its main breaker is
-    drawn (next to positions 1 and 2, which follow the panel's direction, or
-    at the top or the bottom), and one ending in (A) for its rating in amps,
-    left empty for a main-lug panel. Leviton reports neither. Offered from one
-    load center up, unlike the sub-panel section.
+    section. The one named after the load center says whether it is a main
+    panel and where its main breaker is drawn (next to positions 1 and 2,
+    which follow the panel's direction, or at the top or the bottom), or a
+    sub-panel without a main breaker. The one ending in (A) is its load
+    capacity in amps: a main panel's main breaker rating, or the rating of
+    what feeds a sub-panel (a main breaker by the meter, say). It is left
+    empty for a main-lug panel. Leviton reports neither. Offered from one load
+    center up, unlike the sub-panel section.
 
     A load center the options cover but Leviton no longer reports keeps its
     settings and gets no fields. As with the sub-panel section, the options
@@ -635,14 +639,15 @@ class _MainBreakerSection:
         if not self.fields:
             return {}
         places = [
-            selector.SelectOptionDict(value=MAIN_AUTO, label="Next to positions 1 and 2"),
-            selector.SelectOptionDict(value=MAIN_TOP, label="Top"),
-            selector.SelectOptionDict(value=MAIN_BOTTOM, label="Bottom"),
+            selector.SelectOptionDict(value=MAIN_AUTO, label="Main panel, main breaker next to positions 1 and 2"),
+            selector.SelectOptionDict(value=MAIN_TOP, label="Main panel, main breaker at the top"),
+            selector.SelectOptionDict(value=MAIN_BOTTOM, label="Main panel, main breaker at the bottom"),
+            selector.SelectOptionDict(value=MAIN_NONE, label="Sub-panel, no main breaker"),
         ]
         fields = {}
         for field, panel_id in self.fields.items():
             place = (chosen or {}).get(field) or self.stored_positions.get(panel_id, MAIN_AUTO)
-            if place not in (MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM):
+            if place not in (MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM, MAIN_NONE):
                 place = MAIN_AUTO
             fields[vol.Required(field, default=place)] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
@@ -683,7 +688,7 @@ class _MainBreakerSection:
             if size is not None:
                 entry["rating"] = size
             place = chosen.get(field)
-            if place in (MAIN_TOP, MAIN_BOTTOM):
+            if place in (MAIN_TOP, MAIN_BOTTOM, MAIN_NONE):
                 entry["position"] = place
             if entry:
                 settings[panel_id] = entry

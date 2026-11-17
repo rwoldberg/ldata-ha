@@ -80,8 +80,8 @@
                 },
                 "sections": {
                     "main_breakers": {
-                        "name": "Hovedsikringer",
-                        "description": "Leviton rapporterer ikke hovedsikringen i et sikringsskap. Angi merkestrømmen i feltet som slutter på (A), under navnet på sikringsskapet, slik at kortet kan vise hovedsikringen og hvor mye av den som brukes, både på siden i sidepanelet og på kort i dashbord som ikke har sin egen verdi. La feltet stå tomt for et sikringsskap uten hovedsikring. Feltet med navnet på sikringsskapet angir hvor hovedsikringen vises: ved plass 1 og 2, som følger retningen sikringsskapet er montert i, eller øverst eller nederst."
+                        "name": "Tavletype og belastningskapasitet",
+                        "description": "Leviton rapporterer ikke hvor mye et sikringsskap tåler. Angi under navnet på hvert sikringsskap om det er en hovedfordeling med egen hovedsikring eller en underfordeling uten, og skriv inn belastningskapasiteten i ampere i feltet som slutter på (A): for en hovedfordeling merkestrømmen til hovedsikringen, for en underfordeling merkestrømmen til sikringen som forsyner den, for eksempel en hovedsikring ved strømmåleren. Kortet viser da hvor mye av den som brukes, både på siden i sidepanelet og på kort i dashbord som ikke har sin egen verdi, og viser hovedsikringen til en hovedfordeling med merkestrømmen ved plass 1 og 2 (som følger retningen sikringsskapet er montert i), øverst eller nederst. La kapasiteten stå tom for å vise ingen av delene."
                     },
                     "sub_panels": {
                         "name": "Underfordelinger",
@@ -105,14 +105,15 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Ikke en underfordeling"
+                "none": "Forsynes ikke fra et annet sikringsskap"
             }
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Ved plass 1 og 2",
-                "top": "Øverst",
-                "bottom": "Nederst"
+                "auto": "Hovedfordeling, hovedsikring ved plass 1 og 2",
+                "top": "Hovedfordeling, hovedsikring øverst",
+                "bottom": "Hovedfordeling, hovedsikring nederst",
+                "none": "Underfordeling, ingen hovedsikring"
             }
         }
     },
