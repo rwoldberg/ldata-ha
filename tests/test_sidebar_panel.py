@@ -509,6 +509,7 @@ async def test_setup_unload_and_removal_all_refresh_the_sidebar() -> None:
     with (
         patch.object(ldata, "async_update_sidebar_panel", updater),
         patch.object(ldata, "LDATAUpdateCoordinator", _FakeCoordinator),
+        patch.object(ldata, "_async_migrate_unique_id_prefix", AsyncMock()),
         patch.object(ldata, "_async_reconcile_subentries", AsyncMock()),
         patch.object(ldata, "_async_ensure_panel_devices"),
         patch.object(ldata, "_async_purge_orphaned_devices", AsyncMock()),
