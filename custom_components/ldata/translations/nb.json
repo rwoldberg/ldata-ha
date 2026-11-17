@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Hovedsikringer",
-                        "description": "Leviton rapporterer ikke hovedsikringen i et sikringsskap. Angi merkestrømmen ved siden av navnet på sikringsskapet, slik at kortet kan vise hovedsikringen og hvor mye av den som brukes, både på siden i sidepanelet og på kort i dashbord som ikke har sin egen verdi. La feltet stå tomt for et sikringsskap uten hovedsikring."
+                        "description": "Leviton rapporterer ikke hovedsikringen i et sikringsskap. Angi merkestrømmen i feltet som slutter på (A), under navnet på sikringsskapet, slik at kortet kan vise hovedsikringen og hvor mye av den som brukes, både på siden i sidepanelet og på kort i dashbord som ikke har sin egen verdi. La feltet stå tomt for et sikringsskap uten hovedsikring. Feltet med navnet på sikringsskapet angir hvor hovedsikringen vises: ved plass 1 og 2, som følger retningen sikringsskapet er montert i, eller øverst eller nederst."
                     },
                     "sub_panels": {
                         "name": "Underfordelinger",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Ikke en underfordeling"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Ved plass 1 og 2",
+                "top": "Øverst",
+                "bottom": "Nederst"
             }
         }
     },

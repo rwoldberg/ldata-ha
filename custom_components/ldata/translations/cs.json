@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Hlavní jističe",
-                        "description": "Leviton údaje o hlavním jističi rozvaděče neposkytuje. Zadejte jeho jmenovitý proud u názvu rozvaděče, aby karta mohla hlavní jistič zobrazit a ukázat, jakou část z něj rozvaděč využívá, na stránce v postranním panelu i na kartách v ovládacích panelech, které nemají vlastní hodnotu. U rozvaděče bez hlavního jističe ponechte prázdné."
+                        "description": "Leviton údaje o hlavním jističi rozvaděče neposkytuje. Zadejte jeho jmenovitý proud do pole končícího (A) pod názvem rozvaděče, aby karta mohla hlavní jistič zobrazit a ukázat, jakou část z něj rozvaděč využívá, na stránce v postranním panelu i na kartách v ovládacích panelech, které nemají vlastní hodnotu. U rozvaděče bez hlavního jističe ponechte prázdné. Pole s názvem rozvaděče určuje, kde se hlavní jistič zobrazí: u pozic 1 a 2, které se řídí orientací rozvaděče, nebo nahoře či dole."
                     },
                     "sub_panels": {
                         "name": "Podružné rozvaděče",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Není podružný rozvaděč"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "U pozic 1 a 2",
+                "top": "Nahoře",
+                "bottom": "Dole"
             }
         }
     },

@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Wyłączniki główne",
-                        "description": "Leviton nie udostępnia danych wyłącznika głównego rozdzielnicy. Wpisz jego prąd znamionowy obok nazwy rozdzielnicy, aby karta mogła pokazać wyłącznik główny i jaka jego część jest wykorzystywana, na stronie w pasku bocznym i na kartach w dashboardach, które nie mają własnej wartości. Pozostaw puste w przypadku rozdzielnicy bez wyłącznika głównego."
+                        "description": "Leviton nie udostępnia danych wyłącznika głównego rozdzielnicy. Wpisz jego prąd znamionowy w polu zakończonym (A) pod nazwą rozdzielnicy, aby karta mogła pokazać wyłącznik główny i jaka jego część jest wykorzystywana, na stronie w pasku bocznym i na kartach w dashboardach, które nie mają własnej wartości. Pozostaw puste w przypadku rozdzielnicy bez wyłącznika głównego. Pole z nazwą rozdzielnicy określa, gdzie jest pokazany wyłącznik główny: obok pozycji 1 i 2, które podążają za kierunkiem montażu rozdzielnicy, albo na górze lub na dole."
                     },
                     "sub_panels": {
                         "name": "Podrozdzielnice",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "To nie jest podrozdzielnica"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Obok pozycji 1 i 2",
+                "top": "Na górze",
+                "bottom": "Na dole"
             }
         }
     },

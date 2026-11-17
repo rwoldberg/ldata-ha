@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Main breakers",
-                        "description": "Leviton doesn't report a load center's main breaker. Enter its rating next to the load center's name, so the card can draw the main breaker and show how much of it is in use, on the sidebar page and on dashboard cards that don't set their own. Leave it empty for a main-lug panel."
+                        "description": "Leviton doesn't report a load center's main breaker. Enter its rating in the field ending in (A) under the load center's name, so the card can draw the main breaker and show how much of it is in use, on the sidebar page and on dashboard cards that don't set their own. Leave it empty for a main-lug panel. The field with the load center's name says where the main breaker is drawn: next to positions 1 and 2, which follow the panel's direction, or at the top or the bottom."
                     },
                     "sub_panels": {
                         "name": "Sub-panels",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Not a sub-panel"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Next to positions 1 and 2",
+                "top": "Top",
+                "bottom": "Bottom"
             }
         }
     },

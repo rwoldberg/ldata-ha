@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Interruptores principales",
-                        "description": "Leviton no reporta el interruptor principal de un centro de carga. Escriba su capacidad junto al nombre del centro de carga, para que la tarjeta muestre el interruptor principal y cuánto de él se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor. Déjelo vacío si el centro de carga es de zapatas principales (sin interruptor principal)."
+                        "description": "Leviton no reporta el interruptor principal de un centro de carga. Escriba su capacidad en el campo terminado en (A) debajo del nombre del centro de carga, para que la tarjeta muestre el interruptor principal y cuánto de él se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor. Déjelo vacío si el centro de carga es de zapatas principales (sin interruptor principal). El campo con el nombre del centro de carga indica dónde se muestra el interruptor principal: junto a las posiciones 1 y 2, que siguen la orientación del centro de carga, o arriba o abajo."
                     },
                     "sub_panels": {
                         "name": "Subpaneles",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "No es un subpanel"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Junto a las posiciones 1 y 2",
+                "top": "Arriba",
+                "bottom": "Abajo"
             }
         }
     },

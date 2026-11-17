@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Főmegszakítók",
-                        "description": "A Leviton nem közli az elosztótábla főmegszakítóját. Adja meg a névleges áramát az elosztótábla neve mellett, hogy a kártya megjeleníthesse a főmegszakítót, és megmutathassa, mennyi van használatban belőle, az oldalsáv oldalán és azokon az irányítópult-kártyákon, amelyeknek nincs saját értéke. Főmegszakító nélküli elosztótáblánál hagyja üresen."
+                        "description": "A Leviton nem közli az elosztótábla főmegszakítóját. Adja meg a névleges áramát az elosztótábla neve alatti, (A) végű mezőben, hogy a kártya megjeleníthesse a főmegszakítót, és megmutathassa, mennyi van használatban belőle, az oldalsáv oldalán és azokon az irányítópult-kártyákon, amelyeknek nincs saját értéke. Főmegszakító nélküli elosztótáblánál hagyja üresen. Az elosztótábla nevét viselő mező adja meg, hol jelenjen meg a főmegszakító: az 1. és 2. hely mellett, amelyek a tábla irányát követik, vagy felül vagy alul."
                     },
                     "sub_panels": {
                         "name": "Alelosztók",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Nem alelosztó"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Az 1. és 2. hely mellett",
+                "top": "Felül",
+                "bottom": "Alul"
             }
         }
     },

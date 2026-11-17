@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Hoofdschakelaars",
-                        "description": "Leviton geeft de hoofdschakelaar van een groepenkast niet door. Vul de nominale stroom in naast de naam van de groepenkast, zodat de kaart de hoofdschakelaar kan tonen en hoeveel ervan in gebruik is, op de pagina in de zijbalk en op dashboardkaarten zonder eigen waarde. Laat leeg voor een groepenkast zonder hoofdschakelaar."
+                        "description": "Leviton geeft de hoofdschakelaar van een groepenkast niet door. Vul de nominale stroom in het veld onder de naam van de groepenkast in dat eindigt op (A), zodat de kaart de hoofdschakelaar kan tonen en hoeveel ervan in gebruik is, op de pagina in de zijbalk en op dashboardkaarten zonder eigen waarde. Laat leeg voor een groepenkast zonder hoofdschakelaar. Het veld met de naam van de groepenkast bepaalt waar de hoofdschakelaar wordt getoond: naast posities 1 en 2, die de richting van de groepenkast volgen, of boven of onder."
                     },
                     "sub_panels": {
                         "name": "Onderverdelers",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Geen onderverdeler"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Naast posities 1 en 2",
+                "top": "Boven",
+                "bottom": "Onder"
             }
         }
     },

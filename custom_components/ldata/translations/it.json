@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Interruttori generali",
-                        "description": "Leviton non comunica l'interruttore generale di un quadro elettrico. Inserisci la sua corrente nominale accanto al nome del quadro, così la scheda può mostrare l'interruttore generale e quanto ne viene usato, nella pagina della barra laterale e nelle schede delle plance che non hanno un valore proprio. Lascia vuoto per un quadro senza interruttore generale."
+                        "description": "Leviton non comunica l'interruttore generale di un quadro elettrico. Inserisci la sua corrente nominale nel campo che termina con (A) sotto il nome del quadro, così la scheda può mostrare l'interruttore generale e quanto ne viene usato, nella pagina della barra laterale e nelle schede delle plance che non hanno un valore proprio. Lascia vuoto per un quadro senza interruttore generale. Il campo con il nome del quadro indica dove viene mostrato l'interruttore generale: accanto alle posizioni 1 e 2, che seguono l'orientamento del quadro, oppure in alto o in basso."
                     },
                     "sub_panels": {
                         "name": "Sottoquadri",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Non è un sottoquadro"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Accanto alle posizioni 1 e 2",
+                "top": "In alto",
+                "bottom": "In basso"
             }
         }
     },

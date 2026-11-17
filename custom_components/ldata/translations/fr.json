@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Disjoncteurs principaux",
-                        "description": "Leviton ne transmet pas le disjoncteur principal d'un panneau électrique. Indiquez son courant nominal en face du nom du panneau, pour que la carte puisse afficher le disjoncteur principal et la part qui en est utilisée, sur la page de la barre latérale et sur les cartes des tableaux de bord qui n'ont pas leur propre valeur. Laissez vide pour un panneau sans disjoncteur principal (à cosses principales)."
+                        "description": "Leviton ne transmet pas le disjoncteur principal d'un panneau électrique. Indiquez son courant nominal dans le champ se terminant par (A) sous le nom du panneau, pour que la carte puisse afficher le disjoncteur principal et la part qui en est utilisée, sur la page de la barre latérale et sur les cartes des tableaux de bord qui n'ont pas leur propre valeur. Laissez vide pour un panneau sans disjoncteur principal (à cosses principales). Le champ portant le nom du panneau indique où le disjoncteur principal est affiché : à côté des emplacements 1 et 2, qui suivent le sens du panneau, ou en haut ou en bas."
                     },
                     "sub_panels": {
                         "name": "Panneaux secondaires",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Pas un panneau secondaire"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "À côté des emplacements 1 et 2",
+                "top": "En haut",
+                "bottom": "En bas"
             }
         }
     },

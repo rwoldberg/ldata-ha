@@ -48,7 +48,9 @@
  *   main_breaker: 200          # optional, show a main breaker with this rating
  *                              # (the header then shows how much of it is in use);
  *                              # without it, the rating set for this load center
- *                              # in the integration's options, if any
+ *                              # in the integration's options, if any. The
+ *                              # integration's options also say where it is drawn:
+ *                              # next to positions 1 and 2, at the top or the bottom
  *   rotate_180: true           # optional override — by default the card reads
  *                              # the panel's reported mounting orientation.
  *   sub_panels:                # optional — link a breaker that feeds a
@@ -237,7 +239,7 @@ function fallbackRole(match, entityIds, role, test) {
 // outage can still draw the panel. Nothing is kept that the states don't
 // already carry.
 const BREAKER_LAYOUT = ["position", "poles", "model", "hardware", "rating", "canRemoteOn", "leg"];
-const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from", "main_breaker"];
+const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from", "main_breaker", "main_breaker_position"];
 const LAYOUT_STORE = "ldata.layout.v1."; // + the panel's device id
 const layouts = new Map(); // entity id -> what its state last carried, and the handle seen then
 const layoutSeen = new Map(); // entity id -> the state object that was read
@@ -1503,6 +1505,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       cfg.show_power,
       cfg.show_panel_info,
       this._mainBreaker(ca),
+      this._mainLow(ca, rotate),
       Object.keys(d.panel.roles).sort(),
       d.cts.map((c) => [c.deviceId, c.name]),
       placed.map((p) => [
@@ -1534,6 +1537,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       structKey,
       panelDevice,
       mainBreaker: this._mainBreaker(ca),
+      mainLow: this._mainLow(ca, rotate),
     };
   }
 
@@ -1671,6 +1675,14 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     return positive(this._config.main_breaker) ?? positive(layout && layout.main_breaker);
   }
 
+  // Whether the main breaker is drawn at the bottom of the panel: where the
+  // integration's options put it, or else next to positions 1 and 2, which
+  // are at the bottom of a panel turned 180°.
+  _mainLow(layout, rotate) {
+    const place = layout && layout.main_breaker_position;
+    return place === "bottom" ? true : place === "top" ? false : !!rotate;
+  }
+
   _headDynamics(st, d) {
     const r = d.panel.roles;
     const val = (eid) => (eid && st[eid] ? numOrNull(st[eid].state) : null);
@@ -1767,7 +1779,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
 
     this._content.innerHTML = `
       <div class="stage">
-        <div class="cover${main ? " has-main" : ""}${main && m.rotate ? " main-low" : ""}" style="--rows:${rows}">
+        <div class="cover${main ? " has-main" : ""}${main && m.mainLow ? " main-low" : ""}" style="--rows:${rows}">
           <i class="screw screw--tl"></i><i class="screw screw--tr"></i><i class="screw screw--bl"></i><i class="screw screw--br"></i>
           ${this._headHtml(m)}
           <div class="body">

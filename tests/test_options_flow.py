@@ -583,7 +583,12 @@ def _mains(form):
 
 
 def _suggested_mains(form) -> dict:
-    return {str(m): (m.description or {}).get("suggested_value") for m in _mains(form).schema.schema}
+    """The rating fields' suggested values and the position fields' defaults."""
+    shown = {}
+    for marker in _mains(form).schema.schema:
+        name = str(marker)
+        shown[name] = (marker.description or {}).get("suggested_value") if name.endswith("(A)") else marker.default()
+    return shown
 
 
 async def test_main_breakers_are_asked_about_from_one_load_center() -> None:
@@ -591,13 +596,17 @@ async def test_main_breakers_are_asked_about_from_one_load_center() -> None:
 
     section = _mains(await _flow(_entry({}), one).async_step_init())
 
-    # Closed until there is something in it, with a field for each load
-    # center, named after it, for its main breaker's rating in amps.
+    # Closed until there is something in it. Two fields for each load
+    # center, as under Sub-panels: one named after it, for where the main
+    # breaker is drawn, and one ending in (A) for its rating.
     assert section.options == {"collapsed": True}
-    assert [str(m) for m in section.schema.schema] == ["Main Panel"]
-    marker = next(iter(section.schema.schema))
-    assert isinstance(marker, vol.Optional)
-    assert section.schema.schema[marker].config["unit_of_measurement"] == "A"
+    assert [str(m) for m in section.schema.schema] == ["Main Panel", "Main Panel (A)"]
+    place, rating = list(section.schema.schema)
+    assert place.default() == "auto"
+    assert section.schema.schema[place].config["translation_key"] == "main_breaker_position"
+    assert [o["value"] for o in section.schema.schema[place].config["options"]] == ["auto", "top", "bottom"]
+    assert isinstance(rating, vol.Optional)
+    assert section.schema.schema[rating].config["unit_of_measurement"] == "A"
     # Not while the entry is not loaded and its load centers are unknown.
     assert _mains(await _flow(_entry({})).async_step_init()) is None
 
@@ -606,42 +615,60 @@ async def test_main_breaker_ratings_are_stored_by_load_center() -> None:
     entry = _entry(_stored_options())
 
     result = await _flow(entry, _two_load_centers()).async_step_init(
-        {MAIN_BREAKERS: {"Casita": 100, "Main Panel": 200}}
+        {MAIN_BREAKERS: {"Casita": "auto", "Casita (A)": 100, "Main Panel": "bottom", "Main Panel (A)": 200}}
     )
 
-    assert result["data"][MAIN_BREAKERS] == {"casita": 100.0, "main": 200.0}
+    # Where the panel's direction puts it is the default, and isn't stored.
+    assert result["data"][MAIN_BREAKERS] == {
+        "casita": {"rating": 100.0},
+        "main": {"rating": 200.0, "position": "bottom"},
+    }
     # Nothing else the form does not manage is lost with them.
     assert result["data"]["confirmed_solar_import_uids"] == CONFIRMED_SOLAR
 
 
+async def test_main_breaker_position_is_kept_without_a_rating() -> None:
+    result = await _flow(_entry({}), _two_load_centers()).async_step_init(
+        {MAIN_BREAKERS: {"Casita": "auto", "Main Panel": "top"}}
+    )
+
+    assert result["data"][MAIN_BREAKERS] == {"main": {"position": "top"}}
+
+
 async def test_stored_main_breaker_is_suggested_and_can_be_emptied() -> None:
-    entry = _entry({MAIN_BREAKERS: {"main": 200, "casita": 100}})
+    # The casita's rating as the first test builds stored it: a bare number.
+    entry = _entry({MAIN_BREAKERS: {"main": {"rating": 200, "position": "bottom"}, "casita": 100}})
     flow = _flow(entry, _two_load_centers())
 
     form = await flow.async_step_init()
 
     assert _mains(form).options == {"collapsed": False}
-    assert _suggested_mains(form) == {"Casita": 100, "Main Panel": 200}
+    assert _suggested_mains(form) == {"Casita": "auto", "Casita (A)": 100, "Main Panel": "bottom", "Main Panel (A)": 200}
     # The frontend leaves an emptied field out of the submission.
-    result = await flow.async_step_init(form["data_schema"]({MAIN_BREAKERS: {"Main Panel": 225}}))
-    assert result["data"][MAIN_BREAKERS] == {"main": 225.0}
+    result = await flow.async_step_init(
+        form["data_schema"]({MAIN_BREAKERS: {"Casita": "auto", "Main Panel": "bottom", "Main Panel (A)": 225}})
+    )
+    assert result["data"][MAIN_BREAKERS] == {"main": {"rating": 225.0, "position": "bottom"}}
 
 
 async def test_main_breaker_of_a_load_center_leviton_no_longer_reports_is_kept() -> None:
-    entry = _entry({MAIN_BREAKERS: {"gone": 150, "main": 200}})
+    entry = _entry({MAIN_BREAKERS: {"gone": {"rating": 150, "position": "top"}, "main": 200}})
 
-    result = await _flow(entry, _two_load_centers()).async_step_init({MAIN_BREAKERS: {"Main Panel": 200}})
+    result = await _flow(entry, _two_load_centers()).async_step_init(
+        {MAIN_BREAKERS: {"Casita": "auto", "Main Panel": "auto", "Main Panel (A)": 200}}
+    )
 
-    assert result["data"][MAIN_BREAKERS] == {"gone": 150.0, "main": 200.0}
+    assert result["data"][MAIN_BREAKERS] == {"gone": {"rating": 150.0, "position": "top"}, "main": {"rating": 200.0}}
 
 
 async def test_main_breakers_are_left_alone_without_their_section() -> None:
     """Not loaded, the form has no section; a submission without it changes nothing."""
-    entry = _entry({MAIN_BREAKERS: {"main": 200}})
+    stored = {"main": {"rating": 200, "position": "bottom"}}
+    entry = _entry({MAIN_BREAKERS: stored})
 
     for coordinator in (None, _two_load_centers()):
         result = await _flow(entry, coordinator).async_step_init({HA_INFORM_RATE: 30.0})
-        assert result["data"][MAIN_BREAKERS] == {"main": 200}
+        assert result["data"][MAIN_BREAKERS] == stored
 
 
 async def test_load_centers_with_the_same_name_get_their_own_main_breaker_fields() -> None:
@@ -649,9 +676,11 @@ async def test_load_centers_with_the_same_name_get_their_own_main_breaker_fields
 
     form = await _flow(_entry({}), twins).async_step_init()
 
-    assert [str(m) for m in _mains(form).schema.schema] == ["Panel", "Panel (b)"]
-    result = await _flow(_entry({}), twins).async_step_init({MAIN_BREAKERS: {"Panel (b)": 100}})
-    assert result["data"][MAIN_BREAKERS] == {"b": 100.0}
+    assert [str(m) for m in _mains(form).schema.schema] == ["Panel", "Panel (A)", "Panel (b)", "Panel (b) (A)"]
+    result = await _flow(_entry({}), twins).async_step_init(
+        {MAIN_BREAKERS: {"Panel": "auto", "Panel (b)": "top", "Panel (b) (A)": 100}}
+    )
+    assert result["data"][MAIN_BREAKERS] == {"b": {"rating": 100.0, "position": "top"}}
 
 
 async def test_refused_form_keeps_the_main_breakers_entered() -> None:
@@ -661,12 +690,12 @@ async def test_refused_form_keeps_the_main_breakers_entered() -> None:
     form = await flow.async_step_init(
         {
             "sub_panels": {"Casita": "main|38", "Main Panel": "casita|1"},
-            MAIN_BREAKERS: {"Main Panel": 200},
+            MAIN_BREAKERS: {"Casita": "auto", "Main Panel": "bottom", "Main Panel (A)": 200},
         }
     )
 
     assert form["errors"] == {"base": "sub_panel_loop"}
-    assert _suggested_mains(form) == {"Casita": None, "Main Panel": 200}
+    assert _suggested_mains(form) == {"Casita": "auto", "Casita (A)": None, "Main Panel": "bottom", "Main Panel (A)": 200}
 
 
 def _config_flow(entry: ConfigEntry) -> ConfigFlow:

@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Interruptores generales",
-                        "description": "Leviton no informa del interruptor general de un cuadro eléctrico. Escribe su calibre junto al nombre del cuadro, para que la tarjeta muestre el interruptor general y cuánto de él se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor. Déjalo vacío si el cuadro no tiene interruptor general."
+                        "description": "Leviton no informa del interruptor general de un cuadro eléctrico. Escribe su calibre en el campo terminado en (A) debajo del nombre del cuadro, para que la tarjeta muestre el interruptor general y cuánto de él se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor. Déjalo vacío si el cuadro no tiene interruptor general. El campo con el nombre del cuadro indica dónde se muestra el interruptor general: junto a las posiciones 1 y 2, que siguen la orientación del cuadro, o arriba o abajo."
                     },
                     "sub_panels": {
                         "name": "Subcuadros",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "No es un subcuadro"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Junto a las posiciones 1 y 2",
+                "top": "Arriba",
+                "bottom": "Abajo"
             }
         }
     },

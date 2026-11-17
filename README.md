@@ -266,10 +266,11 @@ There's no registry mapping a device id to "the dashboard view showing its card"
 Leviton doesn't report a load center's main breaker either. Give its rating once, and every panel card draws the main breaker and shows how much of it is in use under **Panel load**, e.g. *40% of 200 A*, on the [sidebar page](#sidebar-page) and on dashboard cards alike:
 
 1. Open **Settings > Devices & Services > Leviton LDATA > Configure** and expand **Main breakers**.
-2. Enter the rating in amps next to each load center that has a main breaker. Leave a main-lug panel empty.
-3. Save. The integration reloads, and the cards show it without a restart.
+2. Each load center has two fields under its name. Enter its main breaker's rating in amps in the one ending in **(A)**; leave it empty for a main-lug panel.
+3. The field with the load center's name says where the main breaker is drawn: **Next to positions 1 and 2** (the default: at the top, or at the bottom of a panel turned 180°), **Top** or **Bottom**.
+4. Save. The integration reloads, and the cards show it without a restart.
 
-A dashboard card's own `main_breaker` wins over this setting.
+A dashboard card's own `main_breaker` rating wins over the one set here; the position applies to every card of that load center.
 
 ## Sidebar page
 
@@ -407,7 +408,7 @@ Addon is auto reloading on submit.
   - Adds a sidebar item that opens a full-page, interactive view of your load center(s). See [Sidebar page](#sidebar-page).
 
 - Main breakers
-  - The rating of each load center's main breaker, which Leviton doesn't report. Leave it empty for a main-lug panel. See [Main breakers](#main-breakers).
+  - The rating of each load center's main breaker, which Leviton doesn't report, and where it is drawn. Leave the rating empty for a main-lug panel. See [Main breakers](#main-breakers).
 
 - Sub-panels (shown with two or more load centers)
   - For a load center that is fed from a breaker in another one, the breaker that feeds it. See [Sub-panels](#sub-panels).

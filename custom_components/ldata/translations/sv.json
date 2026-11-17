@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Huvudbrytare",
-                        "description": "Leviton rapporterar inte en elcentrals huvudbrytare. Ange dess märkström bredvid elcentralens namn, så att kortet kan visa huvudbrytaren och hur mycket av den som används, på sidan i sidofältet och på kort i instrumentpaneler som inte har ett eget värde. Lämna tomt för en elcentral utan huvudbrytare."
+                        "description": "Leviton rapporterar inte en elcentrals huvudbrytare. Ange dess märkström i fältet som slutar på (A) under elcentralens namn, så att kortet kan visa huvudbrytaren och hur mycket av den som används, på sidan i sidofältet och på kort i instrumentpaneler som inte har ett eget värde. Lämna tomt för en elcentral utan huvudbrytare. Fältet med elcentralens namn anger var huvudbrytaren visas: bredvid plats 1 och 2, som följer elcentralens riktning, eller överst eller nederst."
                     },
                     "sub_panels": {
                         "name": "Undercentraler",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Inte en undercentral"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Bredvid plats 1 och 2",
+                "top": "Överst",
+                "bottom": "Nederst"
             }
         }
     },

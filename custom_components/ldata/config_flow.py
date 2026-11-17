@@ -43,12 +43,16 @@ from .const import (
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 from .sub_panels import (
+    MAIN_AUTO,
+    MAIN_BOTTOM,
     MAIN_BREAKERS,
+    MAIN_TOP,
     NOT_FED,
     SUB_PANELS,
     amps,
     feed_ratings,
     looped,
+    main_breaker_positions,
     main_breaker_ratings,
     panel_subentries,
     shared,
@@ -591,14 +595,16 @@ class _SubPanelSection:
 class _MainBreakerSection:
     """The options form's "Main breakers" section.
 
-    One field for each load center Leviton reports: the rating of its main
-    breaker in amps, which Leviton doesn't report. It stays empty for a
-    main-lug panel. Offered from one load center up, unlike the sub-panel
-    section. Each field is named after its load center, as there.
+    Two fields for each load center Leviton reports, as in the sub-panel
+    section: one named after the load center for where its main breaker is
+    drawn (next to positions 1 and 2, which follow the panel's direction, or
+    at the top or the bottom), and one ending in (A) for its rating in amps,
+    left empty for a main-lug panel. Leviton reports neither. Offered from one
+    load center up, unlike the sub-panel section.
 
-    A load center the options rate but Leviton no longer reports keeps its
-    rating and gets no field. As with the sub-panel section, the options flow
-    keeps the section it showed for reading the answer.
+    A load center the options cover but Leviton no longer reports keeps its
+    settings and gets no fields. As with the sub-panel section, the options
+    flow keeps the section it showed for reading the answer.
     """
 
     def __init__(self, coordinator: Any, options: Mapping[str, Any]) -> None:
@@ -607,45 +613,81 @@ class _MainBreakerSection:
             (panel for panel in data.get("panels", []) if panel.get("id")),
             key=lambda panel: (str(panel.get("name") or "").casefold(), str(panel["id"])),
         )
-        self.stored = main_breaker_ratings(options)
-        self.fields: dict[str, str] = {}  # field -> the load center it is about
+        self.stored_ratings = main_breaker_ratings(options)
+        self.stored_positions = main_breaker_positions(options)
+        self.fields: dict[str, str] = {}  # where it is drawn -> the load center
+        self.rating_fields: dict[str, str] = {}  # its rating -> the load center
+        # A field's name is taken together with its rating field's, as in the
+        # sub-panel section.
+        taken: set[str] = set()
         for panel in panels:
             label = str(panel.get("name") or panel["id"])
             name, tries = label, 1
-            while name in self.fields:
+            while name in taken or f"{name} (A)" in taken:
                 tries += 1
                 name = f"{label} ({panel['id']})" if tries == 2 else f"{label} ({panel['id']} {tries})"
+            taken.update((name, f"{name} (A)"))
             self.fields[name] = panel["id"]
+            self.rating_fields[f"{name} (A)"] = panel["id"]
 
     def schema(self, chosen: Mapping[str, Any] | None) -> dict[Any, Any]:
-        """Return the section for the form, or nothing without a load center to rate."""
+        """Return the section for the form, or nothing without a load center to set."""
         if not self.fields:
             return {}
+        places = [
+            selector.SelectOptionDict(value=MAIN_AUTO, label="Next to positions 1 and 2"),
+            selector.SelectOptionDict(value=MAIN_TOP, label="Top"),
+            selector.SelectOptionDict(value=MAIN_BOTTOM, label="Bottom"),
+        ]
         fields = {}
         for field, panel_id in self.fields.items():
+            place = (chosen or {}).get(field) or self.stored_positions.get(panel_id, MAIN_AUTO)
+            if place not in (MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM):
+                place = MAIN_AUTO
+            fields[vol.Required(field, default=place)] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=places,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    translation_key="main_breaker_position",
+                )
+            )
+            rating_field = f"{field} (A)"
             # Suggested rather than default, so that it can be emptied.
-            rating = chosen.get(field) if chosen is not None else self.stored.get(panel_id)
-            fields[vol.Optional(field, description={"suggested_value": rating})] = selector.NumberSelector(
+            rating = chosen.get(rating_field) if chosen is not None else self.stored_ratings.get(panel_id)
+            fields[vol.Optional(rating_field, description={"suggested_value": rating})] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=1, max=1200, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="A"
                 )
             )
-        rated = any(panel_id in self.stored for panel_id in self.fields.values())
+        shown = set(self.fields.values())
+        stored = any(panel_id in shown for panel_id in (*self.stored_ratings, *self.stored_positions))
         return {
             vol.Optional(MAIN_BREAKERS): section(
-                vol.Schema(fields), {"collapsed": not (rated or chosen)}
+                vol.Schema(fields), {"collapsed": not (stored or chosen)}
             )
         }
 
-    def read(self, chosen: Mapping[str, Any]) -> dict[str, float]:
-        """Return every rating after the form: what was entered, and what it did not show."""
+    def read(self, chosen: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        """Return every load center's settings after the form: what was entered, and what it did not show."""
         shown = set(self.fields.values())
-        sizes = {panel_id: size for panel_id, size in self.stored.items() if panel_id not in shown}
+        settings: dict[str, dict[str, Any]] = {}
+        for panel_id, size in self.stored_ratings.items():
+            if panel_id not in shown:
+                settings.setdefault(panel_id, {})["rating"] = size
+        for panel_id, place in self.stored_positions.items():
+            if panel_id not in shown:
+                settings.setdefault(panel_id, {})["position"] = place
         for field, panel_id in self.fields.items():
-            size = amps(chosen.get(field))
+            entry: dict[str, Any] = {}
+            size = amps(chosen.get(f"{field} (A)"))
             if size is not None:
-                sizes[panel_id] = size
-        return sizes
+                entry["rating"] = size
+            place = chosen.get(field)
+            if place in (MAIN_TOP, MAIN_BOTTOM):
+                entry["position"] = place
+            if entry:
+                settings[panel_id] = entry
+        return settings
 
 
 class OptionsFlow(config_entries.OptionsFlow):

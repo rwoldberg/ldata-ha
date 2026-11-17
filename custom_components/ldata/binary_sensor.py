@@ -21,6 +21,7 @@ from .sub_panels import (
     feed_ratings,
     feeder_rating,
     feeds_of,
+    main_breaker_positions,
     main_breaker_ratings,
     panel_device,
     sub_panel_feeds,
@@ -210,22 +211,30 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         attributes["panel_size"] = self.panel_data.get("panel_size")
         attributes["dumb_breakers"] = self.panel_data.get("dumb_breakers", [])
         attributes["sub_panels"], attributes["fed_from"] = self._feeds()
-        if (main_breaker := self._main_breaker()) is not None:
-            attributes["main_breaker"] = main_breaker
+        rating, position = self._main_breaker()
+        if rating is not None:
+            attributes["main_breaker"] = rating
+        if position is not None:
+            attributes["main_breaker_position"] = position
         return attributes
 
-    def _main_breaker(self) -> float | None:
-        """Return the rating of this panel's main breaker, if the user gave one.
+    def _main_breaker(self) -> tuple[float | None, str | None]:
+        """Return this panel's main breaker rating and position, as far as the user gave them.
 
-        Leviton doesn't report it; it is set in the integration's options (see
-        sub_panels.py). The panel card reads it here, so the sidebar page and
-        every dashboard card without a main_breaker of its own draw the main
-        breaker and show how much of it the load center uses.
+        Leviton reports neither; they are set in the integration's options
+        (see sub_panels.py). The panel card reads them here, so the sidebar
+        page and every dashboard card without a main_breaker of its own draw
+        the main breaker, at the top or the bottom, and show how much of it
+        the load center uses.
         """
         entry = getattr(self.coordinator, "config_entry", None)
         if entry is None:
-            return None
-        return main_breaker_ratings(entry.options).get(self.panel_data.get("id"))
+            return None, None
+        panel_id = self.panel_data.get("id")
+        return (
+            main_breaker_ratings(entry.options).get(panel_id),
+            main_breaker_positions(entry.options).get(panel_id),
+        )
 
     def _feeds(self) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """Return this panel's breakers that feed another load center, and what feeds it.

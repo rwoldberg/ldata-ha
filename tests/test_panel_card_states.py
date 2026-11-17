@@ -174,9 +174,15 @@ def test_main_breaker_comes_from_the_card_or_else_the_integration() -> None:
     assert "cfg.main_breaker" not in CARD
 
 
-def test_main_breaker_sits_next_to_positions_1_and_2() -> None:
-    """On a panel turned 180°, positions 1 and 2 are at the bottom, and so is the main breaker."""
-    assert '${main && m.rotate ? " main-low" : ""}' in CARD
+def test_main_breaker_is_drawn_where_the_options_put_it() -> None:
+    """Next to positions 1 and 2 (at the bottom of a panel turned 180°) unless the options say top or bottom."""
+    layout = re.search(r"const PANEL_LAYOUT = \[(.*?)\];", CARD)
+    assert layout is not None and '"main_breaker_position"' in layout.group(1)
+    helper = re.search(r"\n  _mainLow\(layout, rotate\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
+    assert helper is not None
+    assert 'place === "bottom" ? true : place === "top" ? false : !!rotate' in helper.group(1)
+    assert '${main && m.mainLow ? " main-low" : ""}' in CARD
+    assert "this._mainLow(ca, rotate)," in CARD  # in the rebuild key too
     low = re.search(r"\.main-low \.main \{([^}]*)\}", CARD)
     assert low is not None and "grid-row: -2" in low.group(1)
     # The room it needs moves to the bottom row with it.

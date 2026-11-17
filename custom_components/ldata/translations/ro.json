@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Disjunctoare generale",
-                        "description": "Leviton nu raportează disjunctorul general al unui tablou electric. Introdu curentul său nominal în dreptul numelui tabloului, ca fișa să poată afișa disjunctorul general și cât din el este folosit, pe pagina din bara laterală și pe fișele din tablourile de bord care nu au o valoare proprie. Lasă necompletat pentru un tablou fără disjunctor general."
+                        "description": "Leviton nu raportează disjunctorul general al unui tablou electric. Introdu curentul său nominal în câmpul terminat în (A) de sub numele tabloului, ca fișa să poată afișa disjunctorul general și cât din el este folosit, pe pagina din bara laterală și pe fișele din tablourile de bord care nu au o valoare proprie. Lasă necompletat pentru un tablou fără disjunctor general. Câmpul cu numele tabloului stabilește unde este afișat disjunctorul general: lângă pozițiile 1 și 2, care urmează orientarea tabloului, sau sus ori jos."
                     },
                     "sub_panels": {
                         "name": "Tablouri secundare",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Nu este tablou secundar"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Lângă pozițiile 1 și 2",
+                "top": "Sus",
+                "bottom": "Jos"
             }
         }
     },

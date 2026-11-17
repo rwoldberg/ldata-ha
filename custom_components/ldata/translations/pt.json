@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Disjuntores gerais",
-                        "description": "A Leviton não fornece informação sobre o disjuntor geral de um quadro elétrico. Indique a corrente nominal junto ao nome do quadro, para que o cartão mostre o disjuntor geral e quanto dele está em uso, na página da barra lateral e nos cartões dos painéis que não tenham um valor próprio. Deixe vazio se o quadro não tiver disjuntor geral."
+                        "description": "A Leviton não fornece informação sobre o disjuntor geral de um quadro elétrico. Indique a corrente nominal no campo terminado em (A) por baixo do nome do quadro, para que o cartão mostre o disjuntor geral e quanto dele está em uso, na página da barra lateral e nos cartões dos painéis que não tenham um valor próprio. Deixe vazio se o quadro não tiver disjuntor geral. O campo com o nome do quadro define onde o disjuntor geral aparece: ao lado das posições 1 e 2, que seguem a orientação do quadro, ou em cima ou em baixo."
                     },
                     "sub_panels": {
                         "name": "Quadros parciais",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Não é um quadro parcial"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Ao lado das posições 1 e 2",
+                "top": "Em cima",
+                "bottom": "Em baixo"
             }
         }
     },

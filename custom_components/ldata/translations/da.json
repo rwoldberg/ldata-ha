@@ -81,7 +81,7 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Hovedafbrydere",
-                        "description": "Leviton rapporterer ikke en eltavles hovedafbryder. Angiv dens mærkestrøm ud for eltavlens navn, så kortet kan vise hovedafbryderen og hvor meget af den der bruges, både på siden i sidepanelet og på kort i dashboards, der ikke har deres egen værdi. Lad feltet stå tomt for en eltavle uden hovedafbryder."
+                        "description": "Leviton rapporterer ikke en eltavles hovedafbryder. Angiv dens mærkestrøm i feltet, der ender på (A), under eltavlens navn, så kortet kan vise hovedafbryderen og hvor meget af den der bruges, både på siden i sidepanelet og på kort i dashboards, der ikke har deres egen værdi. Lad feltet stå tomt for en eltavle uden hovedafbryder. Feltet med eltavlens navn angiver, hvor hovedafbryderen vises: ved position 1 og 2, som følger eltavlens retning, eller øverst eller nederst."
                     },
                     "sub_panels": {
                         "name": "Undertavler",
@@ -106,6 +106,13 @@
         "sub_panel_feed": {
             "options": {
                 "none": "Ikke en undertavle"
+            }
+        },
+        "main_breaker_position": {
+            "options": {
+                "auto": "Ved position 1 og 2",
+                "top": "Øverst",
+                "bottom": "Nederst"
             }
         }
     },

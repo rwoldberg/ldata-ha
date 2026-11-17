@@ -22,13 +22,15 @@ most. The link is used in two places:
   it (sidebar.py).
 
 Leviton doesn't report a load center's main breaker either. The user can
-give its rating, in amps, in the same options:
+give its rating, in amps, and where it is, in the same options:
 
-    options["main_breakers"] = {"<panel id>": 200}
+    options["main_breakers"] = {"<panel id>": {"rating": 200, "position": "bottom"}}
 
-A main-lug panel has none. The panel's Cloud Connected entity passes it on,
-so the panel card draws the main breaker and shows how much of it is in use
-on the sidebar page and on any dashboard card that doesn't set its own.
+A main-lug panel has no rating. Without a position, the card draws the main
+breaker next to positions 1 and 2, which follow the panel's direction. The
+panel's Cloud Connected entity passes both on, so the panel card draws the
+main breaker and shows how much of it is in use on the sidebar page and on
+any dashboard card that doesn't set its own rating.
 """
 from __future__ import annotations
 
@@ -43,6 +45,10 @@ from .const import DOMAIN, PANEL_SUBENTRY_TYPE
 
 SUB_PANELS = "sub_panels"
 MAIN_BREAKERS = "main_breakers"
+# Where a load center's main breaker is drawn: next to positions 1 and 2
+# (MAIN_AUTO, which follows the panel's direction), or at the top or the
+# bottom of the panel.
+MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM = "auto", "top", "bottom"
 # The form's choice for a load center that no other one feeds.
 NOT_FED = "none"
 
@@ -111,15 +117,35 @@ def amps(value: Any) -> float | None:
     return size if math.isfinite(size) and size > 0 else None
 
 
-def main_breaker_ratings(options: Mapping[str, Any]) -> dict[str, float]:
-    """Return {load center id: amps} for the main breakers the user gave a rating."""
+def _main_breaker_entries(options: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    """Return {load center id: its stored main breaker settings}.
+
+    A bare number is a rating, as the first test builds stored it.
+    """
     raw = options.get(MAIN_BREAKERS)
     if not isinstance(raw, Mapping):
         return {}
     return {
-        str(panel_id): size
+        str(panel_id): value if isinstance(value, Mapping) else {"rating": value}
         for panel_id, value in raw.items()
-        if (size := amps(value)) is not None
+    }
+
+
+def main_breaker_ratings(options: Mapping[str, Any]) -> dict[str, float]:
+    """Return {load center id: amps} for the main breakers the user gave a rating."""
+    return {
+        panel_id: size
+        for panel_id, entry in _main_breaker_entries(options).items()
+        if (size := amps(entry.get("rating"))) is not None
+    }
+
+
+def main_breaker_positions(options: Mapping[str, Any]) -> dict[str, str]:
+    """Return {load center id: "top" or "bottom"} where the user placed the main breaker."""
+    return {
+        panel_id: entry["position"]
+        for panel_id, entry in _main_breaker_entries(options).items()
+        if entry.get("position") in (MAIN_TOP, MAIN_BOTTOM)
     }
 
 
