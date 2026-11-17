@@ -2656,7 +2656,10 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
     """Breaker operational state diagnostic sensor.
 
     Reports the operationalState field from the Leviton API.
-    Normally "Normal"; other values indicate a fault condition.
+    Normally "Normal"; other values indicate a fault condition. The second
+    pole of a 2-pole breaker reports its own (operationalState2), kept in the
+    second_pole_state attribute. A fault on the second pole alone is the
+    breaker's state too, as Leviton's app shows it.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -2666,6 +2669,7 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("operationalState", "Normal")
+        self._second = data.get("operationalState2") or None
         self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
@@ -2675,13 +2679,33 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
             if breakers := self.coordinator.data.get("breakers"):
                 if new_data := breakers.get(self.breaker_data["id"]):
                     self._state = new_data.get("operationalState", "Normal")
+                    self._second = new_data.get("operationalState2") or None
         except (KeyError, TypeError):
             pass
         self.async_write_ha_state()
 
+    @staticmethod
+    def _fine(state: Any) -> bool:
+        """Return whether a pole's operational state is no fault.
+
+        Leviton reports UNDEFINED for a pole that has nothing to say.
+        """
+        return not state or str(state).casefold() in ("normal", "undefined")
+
     @property
     def native_value(self) -> StateType:
+        """Return the first pole's state, or the second's when only it is faulted."""
+        if self._fine(self._state) and not self._fine(self._second):
+            return self._second
         return self._state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the breaker's leg and its second pole's operational state.
+
+        The second pole's state is None on a 1-pole breaker.
+        """
+        return {**super().extra_state_attributes, "second_pole_state": self._second}
 
     @property
     def name_suffix(self) -> str | None:
@@ -2693,7 +2717,7 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
 
     @property
     def icon(self) -> str:
-        if self._state and self._state != "Normal":
+        if not (self._fine(self._state) and self._fine(self._second)):
             return "mdi:alert-circle"
         return "mdi:check-circle-outline"
 

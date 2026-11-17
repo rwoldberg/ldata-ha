@@ -35,6 +35,10 @@ ALLOW_LED_BLINK = "allow_led_blink"
 ALLOW_LED_BLINK_DEFAULT = False
 ENABLE_DECORA = "enable_decora"
 ENABLE_DECORA_DEFAULT = False
+# Adds the load center card to Home Assistant's sidebar as a page of its own
+# (see sidebar.py). Off unless the user turns it on.
+SHOW_SIDEBAR_PANEL = "show_sidebar_panel"
+SHOW_SIDEBAR_PANEL_DEFAULT = False
 
 HA_INFORM_RATE = "ha_inform_rate"
 HA_INFORM_RATE_DEFAULT = 60.0

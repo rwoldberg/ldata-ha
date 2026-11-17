@@ -1368,9 +1368,11 @@ class LDATAService:
     def _is_panel_connected(self, panel: dict) -> bool:
         """Return whether a panel should be treated as connected.
 
-        DAU models report status="READY" instead of connected=True.
+        DAU models report status="READY" instead of connected=True. A hub that
+        is "SYNCHRONIZING" is online too; Leviton's app only shows NOT_READY
+        as disconnected.
         """
-        if panel.get("model") == "DAU" and panel.get("status") == "READY":
+        if panel.get("model") == "DAU" and panel.get("status") in ("READY", "SYNCHRONIZING"):
             return True
         return bool(panel.get("connected", False))
 
@@ -1739,6 +1741,8 @@ class LDATAService:
         # Diagnostic/alarm fields (arrive via WS status-only messages)
         if "operationalState" in raw:
             existing["operationalState"] = raw["operationalState"]
+        if "operationalState2" in raw:
+            existing["operationalState2"] = raw["operationalState2"]
         if "overCurrent" in raw:
             existing["overCurrent"] = raw["overCurrent"]
         if "overVoltage" in raw:
@@ -2379,6 +2383,8 @@ class LDATAService:
                             breaker_data["remoteState"] = "RemoteON"
                         # Diagnostic/alarm fields
                         breaker_data["operationalState"] = breaker.get("operationalState", "Normal")
+                        # The second pole of a 2-pole breaker reports its own health.
+                        breaker_data["operationalState2"] = breaker.get("operationalState2")
                         breaker_data["overCurrent"] = breaker.get("overCurrent", False)
                         breaker_data["overVoltage"] = breaker.get("overVoltage", False)
                         breaker_data["underVoltage"] = breaker.get("underVoltage", False)
