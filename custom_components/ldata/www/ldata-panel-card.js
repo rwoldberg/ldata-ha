@@ -1767,7 +1767,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
 
     this._content.innerHTML = `
       <div class="stage">
-        <div class="cover${main ? " has-main" : ""}" style="--rows:${rows}">
+        <div class="cover${main ? " has-main" : ""}${main && m.rotate ? " main-low" : ""}" style="--rows:${rows}">
           <i class="screw screw--tl"></i><i class="screw screw--tr"></i><i class="screw screw--bl"></i><i class="screw screw--br"></i>
           ${this._headHtml(m)}
           <div class="body">
@@ -3139,10 +3139,13 @@ button { font: inherit; }
     calc(var(--u) * 0.2)
     repeat(var(--rows), var(--u))
     calc(var(--u) * 0.2)
-    calc(var(--u) * (0.78 * var(--k) + 0.25));
+    calc(var(--u) * (0.78 * var(--k) + 0.25) + var(--mainh-low, 0px));
   padding: 0 calc(var(--u) * var(--edge));
 }
 .has-main { --mainh: calc(var(--u) * 2.86); }
+/* A panel turned 180° has positions 1 and 2 at the bottom, and its main
+   breaker next to them. */
+.has-main.main-low { --mainh: 0px; --mainh-low: calc(var(--u) * 2.86); }
 /* The embossed surround, door opening and dead front rim: one nine-slice.
    Its middle is the flat dead front, so it also paints behind the breakers. */
 .well {
@@ -3249,8 +3252,10 @@ button { font: inherit; }
   pointer-events: none;
 }
 
-/* Main breaker, seen through its own opening above the columns. */
+/* Main breaker, seen through its own opening above the columns (below them
+   on a panel turned 180°). */
 .main { position: relative; grid-column: 3 / 6; grid-row: 1; align-self: end; justify-self: center; width: calc(var(--u) * 3.6); height: calc(var(--u) * 2.7); margin-bottom: calc(var(--u) * 0.16); }
+.main-low .main { grid-row: -2; align-self: start; margin-bottom: 0; margin-top: calc(var(--u) * 0.16); }
 .main-sp { position: absolute; inset: 0; display: block; width: 100%; height: 100%; user-select: none; }
 .main-cap {
   position: absolute;

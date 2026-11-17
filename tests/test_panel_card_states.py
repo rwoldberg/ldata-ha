@@ -172,3 +172,13 @@ def test_main_breaker_comes_from_the_card_or_else_the_integration() -> None:
     assert "const main = m.mainBreaker;" in CARD
     assert "this._mainBreaker(layout)].filter" in CARD
     assert "cfg.main_breaker" not in CARD
+
+
+def test_main_breaker_sits_next_to_positions_1_and_2() -> None:
+    """On a panel turned 180°, positions 1 and 2 are at the bottom, and so is the main breaker."""
+    assert '${main && m.rotate ? " main-low" : ""}' in CARD
+    low = re.search(r"\.main-low \.main \{([^}]*)\}", CARD)
+    assert low is not None and "grid-row: -2" in low.group(1)
+    # The room it needs moves to the bottom row with it.
+    assert re.search(r"\.has-main\.main-low \{ --mainh: 0px; --mainh-low: ", CARD)
+    assert "+ var(--mainh-low, 0px));" in CARD
