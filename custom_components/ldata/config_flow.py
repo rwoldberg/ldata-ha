@@ -120,6 +120,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         _after_auth() (which handles residence selection for new setups).
         """
         if self.reauth_entry:
+            # The Leviton user id names the account. Signing in to another
+            # account would point this entry at that account's homes: every
+            # device and entity would be a new one, and the old ones orphaned.
+            # An entry from 1.x has no user id stored and is not checked.
+            old_id = str(self.reauth_entry.data.get("userid") or "")
+            new_id = str(self.service.userid or "") if self.service else ""
+            if old_id and new_id and old_id != new_id:
+                return self.async_abort(reason="wrong_account")
             _LOGGER.debug("Re-auth successful, updating entry.")
             new_data = self.reauth_entry.data.copy()
             new_data[CONF_USERNAME] = self.user_data[CONF_USERNAME]

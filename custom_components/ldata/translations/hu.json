@@ -3,6 +3,7 @@
         "abort": {
             "already_configured": "A fiók már konfigurálva van",
             "reauth_successful": "Az újrahitelesítés sikeres volt",
+            "wrong_account": "Ez egy másik Leviton-fiók. Jelentkezzen be azzal a fiókkal, amellyel az integrációt beállították. Másik fiók használatához adja hozzá újra az integrációt.",
             "unknown": "Váratlan hiba"
         },
         "error": {

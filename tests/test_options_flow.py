@@ -1,7 +1,7 @@
 """Tests that saving the options form keeps the options it does not manage."""
 
 from types import MappingProxyType, SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import voluptuous as vol
@@ -594,6 +594,47 @@ async def test_reauth_asks_for_the_login_only() -> None:
 
     assert [str(m) for m in form["data_schema"].schema] == [CONF_USERNAME, CONF_PASSWORD]
     assert _marker(form, CONF_USERNAME).default() == "user@example.com"
+
+
+async def _reauth_signed_in_as(entry: ConfigEntry, userid: str | None):
+    """Finish a re-authentication whose sign-in returned this Leviton user id."""
+    flow = _config_flow(entry)
+    flow.hass.config_entries.async_reload = AsyncMock()
+    await flow.async_step_reauth(dict(entry.data))
+    flow.user_data.update({CONF_USERNAME: "user@example.com", CONF_PASSWORD: "new-secret"})
+    flow.service = SimpleNamespace(userid=userid, refresh_token="new-token")
+    return flow, await flow._finalize_entry("Leviton LDATA (user@example.com)")
+
+
+async def test_reauth_into_another_account_is_refused() -> None:
+    """Another account would make every device and entity a new one, so nothing is stored."""
+    flow, result = await _reauth_signed_in_as(_entry({}), "user-2")
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "wrong_account"
+    flow.hass.config_entries.async_update_entry.assert_not_called()
+    flow.hass.config_entries.async_reload.assert_not_called()
+
+
+async def test_reauth_into_the_same_account_stores_the_new_login() -> None:
+    flow, result = await _reauth_signed_in_as(_entry({}), "user-1")
+
+    assert result["reason"] == "reauth_successful"
+    data = flow.hass.config_entries.async_update_entry.call_args.kwargs["data"]
+    assert data[CONF_PASSWORD] == "new-secret"
+    assert data["refresh_token"] == "new-token"
+    flow.hass.config_entries.async_reload.assert_awaited_once()
+
+
+@pytest.mark.parametrize("stored, returned", [(None, "user-2"), ("user-1", None)])
+async def test_reauth_without_both_user_ids_is_not_checked(stored, returned) -> None:
+    """An entry from 1.x stores no user id, so there is nothing to compare."""
+    entry = _entry({})
+    object.__setattr__(entry, "data", MappingProxyType({**entry.data, "userid": stored}))
+
+    _, result = await _reauth_signed_in_as(entry, returned)
+
+    assert result["reason"] == "reauth_successful"
 
 
 async def test_refused_first_setup_comes_back_as_it_was_filled_in() -> None:
