@@ -7,9 +7,6 @@ import time
 import socket
 import re
 import os
-
-_RE_HTML_TAGS = re.compile(r'<[^<]+?>')
-_RE_WHITESPACE = re.compile(r'\s+')
 import json
 import threading
 import requests
@@ -116,6 +113,51 @@ class _DeadlineSession(requests.Session):
             if timeout is None or timeout > left:
                 kwargs["timeout"] = left
         return super().request(method, url, *args, **kwargs)
+# Debug logs end up pasted into public GitHub issues, so nothing logged here
+# may carry a response body, the account's email, or a user, account or
+# residence id. Leviton's URLs carry those ids in their paths
+# (/api/Person/<user id>/..., /api/Residences/<residence id>/...), and
+# requests and urllib3 put the URL into their error text.
+_RE_URL = re.compile(r"https?://\S+|\burl: \S+")
+# The error code in a Leviton (LoopBack) error body, e.g. LOGIN_FAILED or
+# MODEL_NOT_FOUND. A fixed token, unlike the free-text message beside it.
+_RE_ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+
+
+def _safe_error(ex: BaseException) -> str:
+    """Describe an exception for the log, with any URL in its text cut out."""
+    return f"{type(ex).__name__}: {_RE_URL.sub('<url>', str(ex))}"
+
+
+def _endpoint(url: str) -> str:
+    """Name a Leviton API endpoint for the log, e.g. Residences/<id>/iotWhems.
+
+    Leviton paths alternate collection names and ids, so every second
+    segment is an id and is left out.
+    """
+    path = url.split("/api/", 1)[-1].split("?", 1)[0]
+    return "/".join(
+        part if i % 2 == 0 else "<id>" for i, part in enumerate(path.split("/"))
+    )
+
+
+def _response_summary(result) -> str:
+    """Describe an HTTP response for the log by status, reason and error code.
+
+    Never the body: an error body can echo what was sent (a failed login
+    names the email), and a listing holds residences and device ids.
+    """
+    summary = f"HTTP {result.status_code}"
+    reason = getattr(result, "reason", None)
+    if isinstance(reason, str) and reason:
+        summary += f" {reason}"
+    try:
+        code = (result.json().get("error") or {}).get("code")
+    except Exception:  # pylint: disable=broad-except - not a JSON error object
+        code = None
+    if isinstance(code, str) and _RE_ERROR_CODE.match(code):
+        summary += f" ({code})"
+    return summary
 
 
 def _panel_firmware_versions(panel: dict) -> tuple[str, str | None]:
@@ -396,21 +438,6 @@ class LDATAService:
         except socket.error:
             return "DOWN"
 
-    def _get_clean_error_msg(self, response_text: str) -> str:
-        """Helper to strip HTML and deduplicate common gateway errors."""
-        # Strip HTML tags
-        msg = _RE_HTML_TAGS.sub('', response_text)
-        # Collapse multiple spaces into one
-        msg = _RE_WHITESPACE.sub(' ', msg).strip()
-        
-        # Deduplicate common Nginx/Gateway error strings that appear twice
-        if "502 Bad Gateway" in msg:
-            return "502 Bad Gateway"
-        if "504 Gateway Time-out" in msg:
-            return "504 Gateway Time-out"
-            
-        return msg
-
     def clear_tokens(self) -> None:
         """Clear the tokens to force a re-login."""
         self.auth_token = ""
@@ -450,8 +477,6 @@ class LDATAService:
 
         # Treat both 401 and 406 as potential auth failures
         if result.status_code == 401 or result.status_code == 406:
-            clean_msg = self._get_clean_error_msg(result.text)
-
             if "InsufficientData:Personusestwofactorauthentication.Requirescode." in result.text:
                 # NOT a failure — this is Leviton's normal signal that the
                 # account has 2FA enabled and a code is needed next, on the
@@ -466,7 +491,7 @@ class LDATAService:
                 raise TwoFactorRequired
             else:
                 _LOGGER.warning(
-                    f"[v{self.version}] Authentication failed (HTTP {result.status_code}): {clean_msg}"
+                    f"[v{self.version}] Authentication failed ({_response_summary(result)})"
                 )
                 raise LDATAAuthError(f"[v{self.version}] Invalid username or password")
 
@@ -507,8 +532,7 @@ class LDATAService:
             return True
         
         # Failed 2FA
-        clean_msg = self._get_clean_error_msg(result.text)
-        _LOGGER.warning(f"[v{self.version}] 2FA completion failed (HTTP {result.status_code}). Response: {clean_msg}")
+        _LOGGER.warning(f"[v{self.version}] 2FA completion failed ({_response_summary(result)})")
         raise LDATAAuthError(f"[v{self.version}] Invalid 2FA code")
 
     def refresh_auth(self) -> bool:
@@ -565,9 +589,8 @@ class LDATAService:
                 
                 # Handle Server Errors (500, 502, 503, etc)
                 else:
-                    clean_msg = self._get_clean_error_msg(result.text)
                     _LOGGER.warning(
-                        f"[v{self.version}] Server error during token check (Attempt {attempts}/{max_attempts}): {result.status_code} {result.reason} - {clean_msg}. Waiting..."
+                        f"[v{self.version}] Server error during token check (Attempt {attempts}/{max_attempts}): {_response_summary(result)}. Waiting..."
                     )
                     if attempts < max_attempts:
                         self._pause(5)
@@ -577,10 +600,10 @@ class LDATAService:
 
             except requests.exceptions.RequestException as ex:
                 # Handle Network Errors (DNS, Timeout, etc)
-                msg = str(ex)
-                if hasattr(ex, "response") and ex.response is not None:
-                     clean_msg = self._get_clean_error_msg(ex.response.text)
-                     msg = f"{ex.response.status_code} {ex.response.reason} - {clean_msg}"
+                if getattr(ex, "response", None) is not None:
+                    msg = _response_summary(ex.response)
+                else:
+                    msg = _safe_error(ex)
 
                 _LOGGER.warning(
                     f"[v{self.version}] Network error during token check (Attempt {attempts}/{max_attempts}): {msg}. Waiting..."
@@ -591,9 +614,9 @@ class LDATAService:
                 else:
                     raise
             except Exception as ex:
-                _LOGGER.error(f"[v{self.version}] Unexpected error during token check: {ex}")
+                _LOGGER.error(f"[v{self.version}] Unexpected error during token check: {_safe_error(ex)}")
                 self.clear_tokens()
-                raise LDATAAuthError(f"[v{self.version}] Token validation error: {ex}") from ex
+                raise LDATAAuthError(f"[v{self.version}] Token validation error: {_safe_error(ex)}") from ex
         
         return False
 
@@ -623,7 +646,7 @@ class LDATAService:
         except requests.exceptions.ConnectionError as ex:
             if isinstance(ex, requests.exceptions.Timeout):
                 raise
-            _LOGGER.debug(f"[v{self.version}] REST GET failed on a dropped connection ({ex}); retrying on a new connection")
+            _LOGGER.debug(f"[v{self.version}] REST GET failed on a dropped connection ({_safe_error(ex)}); retrying on a new connection")
             return self.session.get(url, **kwargs)
 
     def _residence_api_get(self, url: str, context_str: str, clear_tokens_on_failure: bool = False):
@@ -637,7 +660,7 @@ class LDATAService:
         self._residence_api_last_failed = True
         try:
             result = self.session.get(url, headers=headers, timeout=15)
-            _LOGGER.debug(f"[v{self.version}] Get {context_str} result {result.status_code}: {result.text}")
+            _LOGGER.debug(f"[v{self.version}] Get {context_str}: HTTP {result.status_code}")
 
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(
@@ -659,7 +682,7 @@ class LDATAService:
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting {context_str}!")
+            _LOGGER.error(f"[v{self.version}] Exception while getting {context_str}: {_safe_error(e)}")
             if clear_tokens_on_failure:
                 self.clear_tokens()
 
@@ -832,17 +855,16 @@ class LDATAService:
                         sw["_residenceId"] = residenceId
                     all_switches.extend(switches)
                 else:
-                    clean_msg = self._get_clean_error_msg(result.text)
                     _LOGGER.warning(
-                        f"[v{self.version}] Failed to get iotSwitches for residence {residenceId} "
-                        f"(HTTP {result.status_code}): {clean_msg}"
+                        f"[v{self.version}] Failed to get iotSwitches for a residence "
+                        f"({_response_summary(result)})"
                     )
                     self._incomplete_fetches.add(self.FETCH_DECORA)
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
                 _LOGGER.warning(
-                    f"[v{self.version}] Exception getting iotSwitches for residence {residenceId}: {e}"
+                    f"[v{self.version}] Exception getting iotSwitches for a residence: {_safe_error(e)}"
                 )
                 self._incomplete_fetches.add(self.FETCH_DECORA)
         return all_switches if all_switches else None
@@ -866,7 +888,7 @@ class LDATAService:
                     )
                 else:
                     _LOGGER.debug(
-                        f"[v{self.version}] Could not fetch iotBridges for residence {residenceId} "
+                        f"[v{self.version}] Could not fetch iotBridges for a residence "
                         f"(HTTP {result.status_code})"
                     )
                     self._incomplete_fetches.add(self.FETCH_DECORA)
@@ -874,7 +896,7 @@ class LDATAService:
                 if isinstance(e, LDATAAuthError):
                     raise
                 _LOGGER.debug(
-                    f"[v{self.version}] Could not fetch iotBridges for residence {residenceId}: {e}"
+                    f"[v{self.version}] Could not fetch iotBridges for a residence: {_safe_error(e)}"
                 )
                 self._incomplete_fetches.add(self.FETCH_DECORA)
         return all_bridges
@@ -898,7 +920,7 @@ class LDATAService:
                 if isinstance(e, LDATAAuthError):
                     raise
                 _LOGGER.debug(
-                    f"[v{self.version}] Could not fetch rooms for residence {residenceId}: {e}"
+                    f"[v{self.version}] Could not fetch rooms for a residence: {_safe_error(e)}"
                 )
         return rooms
 
@@ -1022,24 +1044,21 @@ class LDATAService:
                 headers=headers,
                 timeout=15,
             )
-            _LOGGER.debug(
-                f"[v{self.version}] Get WHEMS {label} result {result.status_code}: {result.text}"
-            )
+            _LOGGER.debug(f"[v{self.version}] Get WHEMS {label}: HTTP {result.status_code}")
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_Whems_{label}. Status code: {result.status_code}")
 
             if result.status_code == 200:
                 return result.json()
 
-            clean_msg = self._get_clean_error_msg(result.text)
             if result.status_code >= 500:
-                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} for {label} — will retry next cycle ({clean_msg})")
+                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {_response_summary(result)} for {label} — will retry next cycle")
             else:
-                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS {label}! HTTP {result.status_code}: {clean_msg}")
+                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS {label}! {_response_summary(result)}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS {label}!")
+            _LOGGER.error(f"[v{self.version}] Exception while getting WHEMS {label}: {_safe_error(e)}")
         self._incomplete_fetches.add(self.FETCH_PANELS)
         return None
 
@@ -1081,26 +1100,25 @@ class LDATAService:
                 
                 if result.status_code in (403, 406):
                      _LOGGER.warning(
-                        f"[v{self.version}] Access forbidden or not acceptable (HTTP {result.status_code}) when getting {panel_type} panels for residence {residenceId}. "
+                        f"[v{self.version}] Access forbidden or not acceptable (HTTP {result.status_code}) when getting {panel_type} panels for a residence. "
                         "This may be a permission issue. Skipping."
                     )
                      self._incomplete_fetches.add(self.FETCH_PANELS)
                      continue 
 
                 if result.status_code == 200:
-                    _LOGGER.debug(
-                        f"[v{self.version}] Get {panel_type} Panels result {result.status_code}: {result.text}"
-                    )
-                    
                     try:
                         returnPanels = result.json()
                     except json.JSONDecodeError:
                         _LOGGER.warning(
-                            f"[v{self.version}] API returned invalid JSON for {panel_type} panels despite 200 OK. Response starts with: {result.text[:100]}..."
+                            f"[v{self.version}] API returned invalid JSON for {panel_type} panels despite 200 OK."
                         )
                         self._incomplete_fetches.add(self.FETCH_PANELS)
                         continue # Skip this residence/attempt and try the next one
-                        
+                    _LOGGER.debug(
+                        f"[v{self.version}] Get {panel_type} panels: HTTP 200, {len(returnPanels)} panel(s)"
+                    )
+
                     for panel in returnPanels:
                         panel["ModuleType"] = panel_type
 
@@ -1136,7 +1154,7 @@ class LDATAService:
                                 # often too fast — the cloud returns stale cached values.
                                 self._bandwidth_toggle(panel["id"], panel.get("ModuleType", "WHEMS"))
                             except requests.exceptions.RequestException as e:
-                               _LOGGER.warning(f"[v{self.version}] Failed to request update from panel {panel.get('name', panel['id'])}: {e}")
+                               _LOGGER.warning(f"[v{self.version}] Failed to request update from panel {panel.get('name', panel['id'])}: {_safe_error(e)}")
                             except LDATAAuthError as e:
                                 _LOGGER.warning(f"[v{self.version}] Auth failed during panel update for {panel.get('name', panel['id'])}: {e}")
                                 raise
@@ -1172,16 +1190,15 @@ class LDATAService:
                         allPanels.append(panel)
                 
                 else:
-                    clean_msg = self._get_clean_error_msg(result.text)
-                    _LOGGER.warning(f"[v{self.version}] Failed to get {panel_type} panels (HTTP {result.status_code}): {clean_msg}")
+                    _LOGGER.warning(f"[v{self.version}] Failed to get {panel_type} panels ({_response_summary(result)})")
                     self._incomplete_fetches.add(self.FETCH_PANELS)
 
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
-                
+
                 # STOP! Do not clear tokens for generic errors.
-                _LOGGER.exception(f"[v{self.version}] Exception while getting {panel_type} Panels! Ignoring.")
+                _LOGGER.error(f"[v{self.version}] Exception while getting {panel_type} panels, ignoring: {_safe_error(e)}")
                 self._incomplete_fetches.add(self.FETCH_PANELS)
         
         return allPanels
@@ -1197,16 +1214,16 @@ class LDATAService:
         try:
             result = self.session.get(url, headers=self._auth_headers(**headers), timeout=15)
             if result.status_code != 200:
-                _LOGGER.debug(f"[v{self.version}] Device inventory: {url} returned HTTP {result.status_code}")
+                _LOGGER.debug(f"[v{self.version}] Device inventory: {_endpoint(url)} returned HTTP {result.status_code}")
                 return None
             payload = result.json()
         except (requests.exceptions.RequestException, ValueError) as e:
             # ValueError covers invalid JSON (json and requests both raise
             # a ValueError subclass).
-            _LOGGER.debug(f"[v{self.version}] Device inventory: {url} failed: {e}")
+            _LOGGER.debug(f"[v{self.version}] Device inventory: {_endpoint(url)} failed: {_safe_error(e)}")
             return None
         if not isinstance(payload, expect):
-            _LOGGER.debug(f"[v{self.version}] Device inventory: {url} did not return a {expect.__name__}")
+            _LOGGER.debug(f"[v{self.version}] Device inventory: {_endpoint(url)} did not return a {expect.__name__}")
             return None
         return payload
 
@@ -1374,16 +1391,15 @@ class LDATAService:
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid (HTTP {result.status_code}) during {context_str}")
 
-            clean_msg = self._get_clean_error_msg(result.text)
             if result.status_code >= 500:
-                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} during {context_str} — will retry ({clean_msg})")
+                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {_response_summary(result)} during {context_str} — will retry")
             else:
-                _LOGGER.error(f"[v{self.version}] Failed to execute {context_str}! HTTP {result.status_code}: {clean_msg}")
-        
+                _LOGGER.error(f"[v{self.version}] Failed to execute {context_str}! {_response_summary(result)}")
+
         except Exception as e:
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception(f"[v{self.version}] Exception during {context_str}: {e}")
+            _LOGGER.error(f"[v{self.version}] Exception during {context_str}: {_safe_error(e)}")
         
         return None
 
@@ -1785,6 +1801,8 @@ class LDATAService:
         # Diagnostic/alarm fields (arrive via WS status-only messages)
         if "operationalState" in raw:
             existing["operationalState"] = raw["operationalState"]
+        if "operationalState2" in raw:
+            existing["operationalState2"] = raw["operationalState2"]
         if "overCurrent" in raw:
             existing["overCurrent"] = raw["overCurrent"]
         if "overVoltage" in raw:
@@ -1991,17 +2009,17 @@ class LDATAService:
              # This is a network/DNS error, raise it for UpdateFailed
             
             # Extract response details if the exception wraps a response
-            msg = str(ex)
-            if hasattr(ex, "response") and ex.response is not None:
-                 clean_msg = self._get_clean_error_msg(ex.response.text)
-                 msg = f"{ex.response.status_code} {ex.response.reason} - {clean_msg}"
-            
+            if getattr(ex, "response", None) is not None:
+                msg = _response_summary(ex.response)
+            else:
+                msg = _safe_error(ex)
+
             _LOGGER.warning(f"[v{self.version}] Network error in status(): {msg}")
             raise
         except Exception as ex:
-            _LOGGER.error(f"[v{self.version}] Unknown error during auth: {ex}")
+            _LOGGER.error(f"[v{self.version}] Unknown error during auth: {_safe_error(ex)}")
             # Wrap unknown error
-            raise Exception(f"Unknown error during auth: {ex}") from ex
+            raise Exception(f"Unknown error during auth: {_safe_error(ex)}") from ex
 
         if self.auth_token is None or self.auth_token == "":
             _LOGGER.error(f"[v{self.version}] Still no auth token after all attempts.")
@@ -2024,11 +2042,12 @@ class LDATAService:
             # is scoped to, and this is the single most important line for
             # diagnosing whether that's because configured_residence_id
             # isn't resolving (falls through to the "every residence"
-            # fallback below) as opposed to a bug further downstream.
+            # fallback below) as opposed to a bug further downstream. Says
+            # whether a residence is configured, not which one.
             _LOGGER.info(
                 f"[v{self.version}] Residence scope resolution: entry_present="
-                f"{self.entry is not None}, configured_residence_id="
-                f"{configured_residence_id!r}"
+                f"{self.entry is not None}, configured residence: "
+                f"{'yes' if configured_residence_id else 'no (every residence on the account)'}"
             )
             if configured_residence_id:
                 # This entry was set up via the residence picker (config
@@ -2073,7 +2092,7 @@ class LDATAService:
             _LOGGER.error(f"[v{self.version}] Could not get Residence ID.")
             raise Exception("Could not get LDATA Residence ID.")
 
-        _LOGGER.info(f"[v{self.version}] Final residence_id_list for this poll: {self.residence_id_list}")
+        _LOGGER.info(f"[v{self.version}] Residences in this poll: {len(self.residence_id_list)}")
         
         self._incomplete_fetches = set()
         if self._residence_discovery_incomplete:
@@ -2122,7 +2141,7 @@ class LDATAService:
                     bridge_devices = self.parse_bridge_devices(bridges_json)
                     result["decora_devices"].update(bridge_devices)
                 except Exception as e:
-                    _LOGGER.debug(f"[v{self.version}] Could not fetch bridges: {e}")
+                    _LOGGER.debug(f"[v{self.version}] Could not fetch bridges: {_safe_error(e)}")
                     self._incomplete_fetches.add(self.FETCH_DECORA)
 
                 decora_count = len(result["decora_devices"])
@@ -2137,12 +2156,12 @@ class LDATAService:
                             if room_id and room_id in rooms:
                                 dev["roomName"] = rooms[room_id]
                     except Exception as e:
-                        _LOGGER.debug(f"[v{self.version}] Could not enrich devices with room names: {e}")
+                        _LOGGER.debug(f"[v{self.version}] Could not enrich devices with room names: {_safe_error(e)}")
                         result["rooms"] = {}
             except LDATAAuthError:
                 raise
             except Exception as e:
-                _LOGGER.warning(f"[v{self.version}] Failed to fetch Decora devices: {e}")
+                _LOGGER.warning(f"[v{self.version}] Failed to fetch Decora devices: {_safe_error(e)}")
                 self._incomplete_fetches.add(self.FETCH_DECORA)
                 result["decora_devices"] = {}
                 result["rooms"] = {}
@@ -2290,7 +2309,7 @@ class LDATAService:
             panel_data["serialNumber"] = panel.get("id")
             
             if not panel_data["id"]:
-                _LOGGER.warning(f"[v{self.version}] Skipping panel with missing ID: {panel}")
+                _LOGGER.warning(f"[v{self.version}] Skipping a panel listed without an id")
                 continue
             panel_data["panel_type"] = panel.get("ModuleType", "WHEMS")
             panel_data["connected"] = self._is_panel_connected(panel)
@@ -2473,6 +2492,8 @@ class LDATAService:
                             breaker_data["remoteState"] = "RemoteON"
                         # Diagnostic/alarm fields
                         breaker_data["operationalState"] = breaker.get("operationalState", "Normal")
+                        # The second pole of a 2-pole breaker reports its own health.
+                        breaker_data["operationalState2"] = breaker.get("operationalState2")
                         breaker_data["overCurrent"] = breaker.get("overCurrent", False)
                         breaker_data["overVoltage"] = breaker.get("overVoltage", False)
                         breaker_data["underVoltage"] = breaker.get("underVoltage", False)
@@ -2748,7 +2769,7 @@ class LDATAService:
         except LDATAAuthError:
             raise
         except Exception as e:
-            _LOGGER.debug(f"[v{self.version}] Bandwidth toggle for panel {panel_id}: {e}")
+            _LOGGER.debug(f"[v{self.version}] Bandwidth toggle for panel {panel_id}: {_safe_error(e)}")
         finally:
             # Clear the toggle flag.  Use discard() so it's safe even if
             # the flag was already removed (shouldn't happen, but defensive).
@@ -3139,7 +3160,7 @@ class LDATAService:
                 except LDATAAuthError:
                     raise
                 except Exception as e:
-                    _LOGGER.warning(f"[v{self.version}] Error refreshing CT data for panel {panel_id}: {e}")
+                    _LOGGER.warning(f"[v{self.version}] Error refreshing CT data for panel {panel_id}: {_safe_error(e)}")
             return results
         finally:
             self._rest_poll_lock.release()
@@ -3225,7 +3246,7 @@ class LDATAService:
         at INFO when a poll succeeds after that.
         """
         self._panel_status_poll_failures += 1
-        error = f"{type(ex).__name__}: {ex}"
+        error = _safe_error(ex)
         if (
             self._panel_status_poll_failures >= PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD
             and not self._panel_status_poll_warned
@@ -3659,7 +3680,7 @@ class LDATAService:
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    _LOGGER.debug(f"[v{self.version}] Bandwidth PATCH panel {panel_id} failed: {e}")
+                    _LOGGER.debug(f"[v{self.version}] Bandwidth PATCH panel {panel_id} failed: {_safe_error(e)}")
 
     async def _ws_apiversion_heartbeat(self, session: aiohttp.ClientSession) -> None:
         """GET /apiversion — the Leviton web app polls this every ~10s.
@@ -3734,7 +3755,7 @@ class LDATAService:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            _LOGGER.debug(f"[v{self.version}] API version heartbeat failed: {e}")
+            _LOGGER.debug(f"[v{self.version}] API version heartbeat failed: {_safe_error(e)}")
 
     def _ws_build_subscriptions(self) -> list:
         """Build the subscribe-message list for the current residences/panels/breakers/CTs."""
@@ -3786,7 +3807,9 @@ class LDATAService:
                 })
         return subscriptions
 
-    async def async_run_websocket(self, update_callback, connection_callback=None, decora_callback=None):
+    async def async_run_websocket(
+        self, update_callback, connection_callback=None, decora_callback=None, auth_rejected_callback=None
+    ):
         """Run the WebSocket connection loop — PRIMARY data source.
 
         WS-FIRST Strategy:
@@ -3809,6 +3832,11 @@ class LDATAService:
         immediate, no debounce (unlike update_callback, which the coordinator
         debounces via HA_INFORM_RATE). Falls back to update_callback if not
         provided, so Decora updates still surface even without it wired up.
+
+        auth_rejected_callback: called when Leviton rejects the WebSocket
+        login, so the coordinator can log in again for a new token. The loop
+        keeps backing off as for any failed attempt and uses whatever token
+        the service holds at its next attempt.
         """
         uri = "wss://socket.cloud.leviton.com/"
         # Wait before every connect attempt after the first. Each attempt
@@ -3871,7 +3899,7 @@ class LDATAService:
                 try:
                     connection_callback(connected)
                 except Exception as e:
-                    _LOGGER.error(f"[v{self.version}] Connection callback error: {e}")
+                    _LOGGER.error(f"[v{self.version}] Connection callback error: {_safe_error(e)}")
         
         def log_attempt_failure(message: str) -> None:
             nonlocal failed_attempts
@@ -3946,12 +3974,12 @@ class LDATAService:
                         if connectivity == "DOWN":
                             _LOGGER.warning(
                                 f"[v{self.version}] WS connect failed — "
-                                f"no internet connectivity: {e}"
+                                f"no internet connectivity: {_safe_error(e)}"
                             )
                         else:
                             _LOGGER.warning(
                                 f"[v{self.version}] WS connect failed — "
-                                f"internet up but Leviton cloud unreachable: {e}"
+                                f"internet up but Leviton cloud unreachable: {_safe_error(e)}"
                             )
                         failed_attempts += 1
                         notify_connection(False)
@@ -3994,8 +4022,13 @@ class LDATAService:
                                             _LOGGER.debug(f"[v{self.version}] WebSocket re-authenticated.")
                                         break
                                     elif "error" in data:
-                                        _LOGGER.error(f"[v{self.version}] Auth error: {data}")
+                                        _LOGGER.error(f"[v{self.version}] Leviton rejected the WebSocket login")
                                         failed_attempts += 1
+                                        if auth_rejected_callback:
+                                            try:
+                                                auth_rejected_callback()
+                                            except Exception as e:  # pylint: disable=broad-except
+                                                _LOGGER.error(f"[v{self.version}] Auth rejected callback error: {type(e).__name__}")
                                         break
                                 elif msg.type in (
                                     aiohttp.WSMsgType.CLOSE,
@@ -4211,7 +4244,7 @@ class LDATAService:
                                             try:
                                                 update_callback()
                                             except Exception as e:
-                                                _LOGGER.error(f"[v{self.version}] Callback error: {e}")
+                                                _LOGGER.error(f"[v{self.version}] Callback error: {_safe_error(e)}")
                                         # Decora is checked unconditionally alongside the LDATA
                                         # update above — the two match mutually exclusive
                                         # modelNames, so this is a no-op for LDATA notifications.
@@ -4222,7 +4255,7 @@ class LDATAService:
                                                 else:
                                                     update_callback()
                                             except Exception as e:
-                                                _LOGGER.error(f"[v{self.version}] Decora callback error: {e}")
+                                                _LOGGER.error(f"[v{self.version}] Decora callback error: {_safe_error(e)}")
                                     elif payload.get("type") == "keepalive":
                                         # Server-level liveness frame. It proves the
                                         # connection is up, not that subscriptions
@@ -4232,7 +4265,7 @@ class LDATAService:
                                         # (up to 15 s) receive wait.
                                         last_keepalive_time = asyncio.get_event_loop().time()
                                 except (ValueError, json.JSONDecodeError) as e:
-                                    _LOGGER.warning(f"[v{self.version}] Invalid JSON: {e}")
+                                    _LOGGER.warning(f"[v{self.version}] Invalid JSON: {_safe_error(e)}")
                                     
                             elif msg.type == aiohttp.WSMsgType.ERROR:
                                 _LOGGER.error(f"[v{self.version}] WS error: {ws.exception()}")
@@ -4272,7 +4305,7 @@ class LDATAService:
             
             except (aiohttp.ClientError, ConnectionResetError) as ex:
                 notify_connection(False)
-                _LOGGER.warning(f"[v{self.version}] WS client error: {ex}. Reconnecting in {connect_wait}s...")
+                _LOGGER.warning(f"[v{self.version}] WS client error: {_safe_error(ex)}. Reconnecting in {connect_wait}s...")
             except Exception as ex:
                 notify_connection(False)
-                _LOGGER.error(f"[v{self.version}] WS error: {type(ex).__name__}: {ex}. Reconnecting in {connect_wait}s...")
+                _LOGGER.error(f"[v{self.version}] WS error: {_safe_error(ex)}. Reconnecting in {connect_wait}s...")

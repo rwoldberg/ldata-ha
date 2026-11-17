@@ -1971,6 +1971,28 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 return not self.coordinator._service.panel_has_hw_counters(panel_id)
         return False  # default: hw counter path (safe for v1)
 
+    def _source_offline(self, new_data: dict) -> bool:
+        """Return True while the breaker or its panel is reported offline.
+
+        The coordinator keeps re-publishing the last data it has while a hub
+        is down. To the guards below such a repeat looks like a fresh reading,
+        which would restart the plausibility clock every update: after a long
+        outage the first real reading would then be judged against only a
+        minute of elapsed time and rejected as implausible. An offline source
+        sends no readings, so they are skipped and the clock keeps measuring
+        from the last reading that actually came from the hub.
+
+        Only an explicit ``connected: False`` counts; a missing flag means
+        online.
+        """
+        if new_data.get("connected") is False:
+            return True
+        panel_id = self.breaker_data.get("panel_id")
+        for panel in (self.coordinator.data or {}).get("panels") or []:
+            if panel.get("id") == panel_id:
+                return panel.get("connected") is False
+        return False
+
     def _is_implausible_increase(self, new_value: float, new_data: dict) -> bool:
         """Return True if the counter rose more than this breaker could have drawn.
 
@@ -2059,6 +2081,10 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                         return
 
                     # ── v1 hardware counter path ──────────────────────────────
+                    # An offline hub re-publishes stale data, not readings.
+                    if self._source_offline(new_data):
+                        return
+
                     raw = new_data.get(self.entity_description.key)
                     if raw is None:
                         return  # Field missing — keep last state
@@ -2616,7 +2642,10 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
     """Breaker operational state diagnostic sensor.
 
     Reports the operationalState field from the Leviton API.
-    Normally "Normal"; other values indicate a fault condition.
+    Normally "Normal"; other values indicate a fault condition. The second
+    pole of a 2-pole breaker reports its own (operationalState2), kept in the
+    second_pole_state attribute. A fault on the second pole alone is the
+    breaker's state too, as Leviton's app shows it.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -2626,6 +2655,8 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("operationalState", "Normal")
+        self._second = data.get("operationalState2") or None
+        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2634,13 +2665,33 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
             if breakers := self.coordinator.data.get("breakers"):
                 if new_data := breakers.get(self.breaker_data["id"]):
                     self._state = new_data.get("operationalState", "Normal")
+                    self._second = new_data.get("operationalState2") or None
         except (KeyError, TypeError):
             pass
         self.async_write_ha_state()
 
+    @staticmethod
+    def _fine(state: Any) -> bool:
+        """Return whether a pole's operational state is no fault.
+
+        Leviton reports UNDEFINED for a pole that has nothing to say.
+        """
+        return not state or str(state).casefold() in ("normal", "undefined")
+
     @property
     def native_value(self) -> StateType:
+        """Return the first pole's state, or the second's when only it is faulted."""
+        if self._fine(self._state) and not self._fine(self._second):
+            return self._second
         return self._state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the breaker's leg and its second pole's operational state.
+
+        The second pole's state is None on a 1-pole breaker.
+        """
+        return {**super().extra_state_attributes, "second_pole_state": self._second}
 
     @property
     def name_suffix(self) -> str | None:
@@ -2652,7 +2703,7 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
 
     @property
     def icon(self) -> str:
-        if self._state and self._state != "Normal":
+        if not (self._fine(self._state) and self._fine(self._second)):
             return "mdi:alert-circle"
         return "mdi:check-circle-outline"
 

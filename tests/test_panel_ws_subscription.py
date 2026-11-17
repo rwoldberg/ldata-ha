@@ -133,6 +133,18 @@ def test_dau_status_not_ready_is_disconnected() -> None:
     assert panel["connected"] is False
 
 
+def test_dau_status_synchronizing_is_connected() -> None:
+    # Leviton's breakerPanelStatus is READY, NOT_READY or SYNCHRONIZING, and
+    # its app shows only NOT_READY as disconnected.
+    service = _dau_service()
+
+    synchronizing = _notify(service, "ResidentialBreakerPanel", "LDATA-1", {"connected": False, "status": "SYNCHRONIZING"})
+    assert synchronizing["connected"] is True
+
+    not_ready = _notify(service, "ResidentialBreakerPanel", "LDATA-1", {"connected": False, "status": "NOT_READY"})
+    assert not_ready["connected"] is False
+
+
 def test_iotwhem_connected_is_copied_unchanged() -> None:
     panel = _notify(_service(), "IotWhem", "1000_ABCD", {"connected": False})
 

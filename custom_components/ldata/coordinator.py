@@ -2,15 +2,15 @@
 
 import asyncio
 import logging
+import time
 import requests
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, BREAKER_POLL_INTERVAL, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL, STATUS_TIMEOUT
-from .ldata_service import LDATAService, LDATAAuthError
-
+from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, AUTH_RENEWAL_BACKOFF, AUTH_RENEWAL_BACKOFF_MAX, BREAKER_POLL_INTERVAL, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL, STATUS_TIMEOUT
+from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired, _safe_error
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 # Grace period (seconds) before REST poll loops start actively polling.
@@ -38,6 +38,13 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         self._debounce_timer = None
         self._websocket_connected = False
         self._websocket_ever_connected = False
+        # Token renewal after setup, see _async_auth_failed.
+        self._auth_lock = asyncio.Lock()
+        self._auth_retry_at = 0.0
+        self._auth_backoff = AUTH_RENEWAL_BACKOFF
+        # Set when Leviton refused the stored credentials themselves; only
+        # the reauth flow (which reloads the entry) can clear it.
+        self._auth_failed = False
 
         super().__init__(
             hass,
@@ -55,6 +62,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 self._handle_websocket_update,
                 self._handle_connection_change,
                 self._handle_decora_websocket_update,
+                self._handle_websocket_auth_rejected,
             ),
             "ldata_websocket"
         )
@@ -84,6 +92,79 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self._panel_status_poll_loop(),
             "ldata_panel_status_poll"
         )
+
+    @callback
+    def _handle_websocket_auth_rejected(self) -> None:
+        """Renew the token after Leviton rejected the WebSocket login."""
+        self.config_entry.async_create_background_task(
+            self._hass,
+            self._async_auth_failed("WebSocket login"),
+            "ldata_auth_renewal",
+        )
+
+    async def _async_auth_failed(self, source: str) -> None:
+        """Log in again with the stored credentials after Leviton refused the token.
+
+        Leviton tokens expire, and a password change revokes them. Nothing
+        else renews one after setup: status() falls back to the stored
+        credentials, but it only runs at setup and on a refresh requested
+        while the WebSocket is down. Without this the WebSocket retried the
+        refused token and the REST polls kept failing, while every entity
+        stayed available showing frozen values.
+
+        Several loops report the same refusal, so reports while a login is
+        under way are dropped, and after a login the next one waits for
+        _auth_retry_at, backing off while logins keep failing. If Leviton
+        refuses the credentials themselves, or the account now needs a 2FA
+        code, nothing here can fix it: that starts Home Assistant's reauth
+        flow, and the entities go unavailable until it completes.
+        """
+        if self._auth_failed or self._auth_lock.locked() or self._service._shutdown_requested:
+            return
+        async with self._auth_lock:
+            if time.monotonic() < self._auth_retry_at:
+                return
+            _LOGGER.warning(
+                f"[v{self._service.version}] Leviton refused the stored token ({source}); "
+                f"logging in again with the stored credentials"
+            )
+            try:
+                await self._hass.async_add_executor_job(self._service.auth_with_credentials)
+            except (LDATAAuthError, TwoFactorRequired):
+                self._auth_failed = True
+                # An empty token stops the WebSocket and the REST polls from
+                # retrying one Leviton refuses; reauth reloads the entry.
+                self._service.clear_tokens()
+                _LOGGER.error(
+                    f"[v{self._service.version}] Leviton refused the stored credentials, or the "
+                    f"account now needs a 2FA code; please reauthenticate the integration"
+                )
+                self.async_set_update_error(
+                    UpdateFailed("Leviton refused the stored credentials")
+                )
+                self.config_entry.async_start_reauth(self._hass)
+                return
+            except Exception as ex:  # pylint: disable=broad-except
+                # The login service could not be reached or failed; try again later.
+                self._auth_retry_at = time.monotonic() + self._auth_backoff
+                _LOGGER.warning(
+                    f"[v{self._service.version}] Logging in again failed ({type(ex).__name__}); "
+                    f"next attempt in {self._auth_backoff:.0f}s"
+                )
+                self._auth_backoff = min(self._auth_backoff * 2, AUTH_RENEWAL_BACKOFF_MAX)
+                if not self._websocket_connected:
+                    # No data is arriving: show that instead of frozen values.
+                    self.async_set_update_error(
+                        UpdateFailed("Leviton refused the stored token and logging in again failed")
+                    )
+                return
+
+            self._auth_backoff = AUTH_RENEWAL_BACKOFF
+            self._auth_retry_at = time.monotonic() + AUTH_RENEWAL_BACKOFF
+            self._persist_refreshed_tokens()
+            _LOGGER.info(f"[v{self._service.version}] Logged in again; using the new token")
+            if not self.last_update_success and self._service.status_data:
+                self.async_set_updated_data(self._service.status_data)
 
     def _handle_connection_change(self, connected: bool):
         """Handle WebSocket connection state changes."""
@@ -204,9 +285,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 break
             except LDATAAuthError as ex:
                 _LOGGER.warning(f"[v{self._service.version}] {loop_name} auth error: {ex}")
+                await self._async_auth_failed(loop_name)
                 await asyncio.sleep(60)
             except Exception as ex:
-                _LOGGER.warning(f"[v{self._service.version}] {loop_name} error: {ex}")
+                _LOGGER.warning(f"[v{self._service.version}] {loop_name} error: {_safe_error(ex)}")
                 await asyncio.sleep(30)
 
         _LOGGER.debug(f"[v{self._service.version}] {loop_name} loop stopped")
@@ -323,7 +405,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         try:
             data = self._service.status_data
 
-            if not data:
+            # While the credentials are refused, a socket that is still open
+            # must not make the entities available again (see
+            # _async_auth_failed).
+            if not data or self._auth_failed:
                 return
 
             # Log data if enabled
@@ -340,7 +425,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self.async_set_updated_data(data)
 
         except Exception as e:
-            _LOGGER.error(f"[v{self._service.version}] Error in debounced update: {e}")
+            _LOGGER.error(f"[v{self._service.version}] Error in debounced update: {_safe_error(e)}")
 
         finally:
             # ALWAYS re-arm the timer so updates never stall, unless the
@@ -363,7 +448,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         responsive UI matters more than reducing DB writes.
         """
         data = self._service.status_data
-        if not data:
+        if not data or self._auth_failed:
             return
 
         decora_count = len(data.get("decora_devices", {}))
@@ -387,39 +472,60 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
                 log_output = {}
                 if data:
-                    for ct_id, ct_data in data.get('cts', {}).items():
+                    for ct_data in data.get('cts', {}).values():
                         for field in fields_to_log:
                             if field in ct_data:
-                                log_output[f"CT_{ct_id}_{field}"] = ct_data[field]
+                                log_output[f"CT_{ct_data.get('channel', '?')}_{field}"] = ct_data[field]
                     
                     for b_id, b_data in data.get('breakers', {}).items():
                         for field in fields_to_log:
                             if field in b_data:
-                                log_output[f"Breaker_{b_data.get('name', b_id)}_{field}"] = b_data[field]
-                    
+                                log_output[f"Breaker_{b_data.get('name', '?')}_{field}"] = b_data[field]
+
                     for panel in data.get('panels', []):
                         for field in fields_to_log:
                             if field in panel:
-                                log_output[f"Panel_{panel.get('name', panel.get('id', '?'))}_{field}"] = panel[field]
-                
+                                log_output[f"Panel_{panel.get('name', '?')}_{field}"] = panel[field]
+
                 if log_output:
-                    _LOGGER.warning("Leviton %s Selected Data: %s", source, log_output)
+                    # The chosen fields get the same redaction as the full dump.
+                    _LOGGER.warning("Leviton %s Selected Data: %s", source, self._redact_data(log_output))
 
     _REDACT_KEYS = frozenset({
         "IP", "Token", "residenceId", "mac", "residentialRoomId",
         "id", "userId", "accountId", "auth_token", "refresh_token",
         "password", "serialNumber", "ttl", "created",
+        # Device identifiers and the LAN address the parsed data also holds.
+        "stable_id", "panel_id", "serial", "localIP",
     })
+    # Collections in the parsed data keyed by breaker, CT, device or room id.
+    _ID_KEYED = frozenset({"breakers", "cts", "decora_devices", "rooms"})
 
-    def _redact_data(self, data):
-        """Redact sensitive fields from data for logging."""
+    def _redact_data(self, data, parent=None):
+        """Redact sensitive fields from data for logging.
+
+        Ids appear as keys too: the breaker, CT, Decora device and room
+        collections are keyed by id, and each panel's total power is kept
+        under "<panel id>totalPower". Those keys are replaced by numbers.
+        A field named in the specific-field logging option, e.g.
+        "Breaker_Dryer_serialNumber", is redacted by its field name.
+        """
         if isinstance(data, dict):
             redacted = {}
-            for key, value in data.items():
-                if key in self._REDACT_KEYS:
+            totals = 0
+            for index, (key, value) in enumerate(data.items(), start=1):
+                field = key
+                if parent in self._ID_KEYED:
+                    key = f"#{index}"
+                elif isinstance(key, str) and key.endswith("totalPower") and key != "totalPower":
+                    totals += 1
+                    key = f"#{totals} totalPower"
+                elif isinstance(key, str) and key.startswith(("Breaker_", "Panel_", "CT_")):
+                    field = key.rsplit("_", 1)[-1]
+                if field in self._REDACT_KEYS:
                     redacted[key] = "***REDACTED***"
                 else:
-                    redacted[key] = self._redact_data(value)
+                    redacted[key] = self._redact_data(value, field)
             return redacted
         elif isinstance(data, list):
             return [self._redact_data(item) for item in data]
@@ -469,17 +575,17 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         except requests.exceptions.RequestException as ex:
             # This is a network/DNS/timeout error from ldata_service.
-            # This is NOT an auth failure, just a temporary error.
-            _LOGGER.warning("Connection error communicating with LDATA: %s", ex)
-            raise UpdateFailed(f"Connection error: {ex}") from ex
+            # This is NOT an auth failure, just a temporary error. The
+            # UpdateFailed text is logged by Home Assistant too, so it gets
+            # the same URL-free description.
+            _LOGGER.warning("Connection error communicating with LDATA: %s", _safe_error(ex))
+            raise UpdateFailed(f"Connection error: {_safe_error(ex)}") from ex
 
         except Exception as ex:
             # This catches all other errors (e.g., "Could not get Account ID")
-            _LOGGER.warning(
-                "Unexpected error communicating with LDATA for %s: %s", self.user, ex
-            )
+            _LOGGER.warning("Unexpected error communicating with LDATA: %s", _safe_error(ex))
             # This will result in the "Failed setup, will retry" message
-            raise UpdateFailed(f"Error communicating with LDATA: {ex}") from ex
+            raise UpdateFailed(f"Error communicating with LDATA: {_safe_error(ex)}") from ex
 
     def _persist_refreshed_tokens(self) -> None:
         """Persist a token refreshed during status() into the config entry.
