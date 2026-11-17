@@ -108,12 +108,11 @@
                 "none": "不由其他配电箱供电"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "总配电箱，总开关在顶部",
-                "bottom": "总配电箱，总开关在底部",
-                "none": "分配电箱，没有总开关",
-                "none_flipped": "分配电箱，没有总开关，倒装"
+                "main": "总配电箱（总开关）",
+                "main_hidden": "总配电箱（隐藏总开关）",
+                "sub": "分配电箱（没有总开关）"
             }
         }
     },

@@ -108,12 +108,11 @@
                 "none": "Non alimentato da un altro quadro"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Quadro generale, interruttore generale in alto",
-                "bottom": "Quadro generale, interruttore generale in basso",
-                "none": "Sottoquadro, senza interruttore generale",
-                "none_flipped": "Sottoquadro, senza interruttore generale, capovolto"
+                "main": "Quadro generale (interruttore generale)",
+                "main_hidden": "Quadro generale (nascondi interruttore generale)",
+                "sub": "Sottoquadro (senza interruttore generale)"
             }
         }
     },

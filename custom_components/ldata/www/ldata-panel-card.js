@@ -51,14 +51,11 @@
  *                              # as its rating. Without it, the capacity set for
  *                              # this load center in the integration's options,
  *                              # which also say whether it is a main panel or a
- *                              # sub-panel, and where its main breaker is drawn.
+ *                              # sub-panel, and whether to draw its main breaker.
  *                              # (Called main_breaker in the first test builds,
  *                              # which is still read.)
- *   rotate_180: true           # optional override — by default the panel is
- *                              # drawn the way up its panel type in the
- *                              # integration's options says (a main breaker at
- *                              # the bottom, or a flipped sub-panel, turns it
- *                              # 180°), or else as Leviton reports it mounted.
+ *   rotate_180: true           # optional override — by default the card reads
+ *                              # the panel's reported mounting orientation.
  *   sub_panels:                # optional — link a breaker that feeds a
  *                              # downstream sub-panel to that panel's device, so
  *                              # its label shows the sub-panel's live load and
@@ -247,7 +244,7 @@ function fallbackRole(match, entityIds, role, test) {
 // outage can still draw the panel. Nothing is kept that the states don't
 // already carry.
 const BREAKER_LAYOUT = ["position", "poles", "model", "hardware", "rating", "canRemoteOn", "leg"];
-const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from", "load_capacity", "main_breaker_position"];
+const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from", "load_capacity", "panel_type"];
 const LAYOUT_STORE = "ldata.layout.v1."; // + the panel's device id
 const layouts = new Map(); // entity id -> what its state last carried, and the handle seen then
 const layoutSeen = new Map(); // entity id -> the state object that was read
@@ -851,8 +848,8 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       confirm: true,
       show_panel_info: true,
       appearance: "auto",
-      // rotate_180 intentionally has no default — unset means "the way up
-      // the integration's options or Leviton say" (see _upsideDown).
+      // rotate_180 intentionally has no default — unset means "use the
+      // panel's own reported orientation".
       ...config,
       sub_panels: Array.isArray(config.sub_panels) ? config.sub_panels : [],
     };
@@ -1680,26 +1677,21 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   }
 
   // The main breaker to draw: its rating (the capacity), or null for none.
-  // Only a main panel, one the integration's options put a main breaker at
-  // the top or the bottom of, has one. A load center is a sub-panel until
-  // said otherwise: its capacity is what feeds it, such as a main breaker by
-  // the meter, and still says how much of it is in use.
+  // Only a main panel draws one, and not when the integration's options hide
+  // it. A load center is a sub-panel until said otherwise: its capacity is
+  // what feeds it, such as a main breaker by the meter. Either way the
+  // capacity still says how much of it is in use.
   _mainDrawn(layout) {
-    const place = layout && layout.main_breaker_position;
-    return place === "top" || place === "bottom" ? this._capacity(layout) : null;
+    return layout && layout.panel_type === "main" ? this._capacity(layout) : null;
   }
 
   // Whether the panel is drawn turned 180°, with positions 1 and 2 at the
-  // bottom: as this card's rotate_180 says, or else as the panel type in the
-  // integration's options says (a main breaker at the bottom, or a flipped
-  // sub-panel), or else as Leviton reports the panel mounted. A main breaker
-  // is always next to positions 1 and 2, so it turns with them.
+  // bottom: as this card's rotate_180 says, or else as Leviton reports the
+  // panel mounted. A main breaker is always next to positions 1 and 2, so it
+  // turns with them.
   _upsideDown(layout) {
     const turn = this._config.rotate_180;
     if (turn !== undefined && turn !== null) return !!turn;
-    const place = layout && layout.main_breaker_position;
-    if (place === "top" || place === "none") return false;
-    if (place === "bottom" || place === "none_flipped") return true;
     return Number(layout && layout.orientation) === 180;
   }
 

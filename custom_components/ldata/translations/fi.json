@@ -108,12 +108,11 @@
                 "none": "Ei syötetä toisesta sähkökeskuksesta"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Pääkeskus, pääkatkaisija ylhäällä",
-                "bottom": "Pääkeskus, pääkatkaisija alhaalla",
-                "none": "Alakeskus, ei pääkatkaisijaa",
-                "none_flipped": "Alakeskus, ei pääkatkaisijaa, ylösalaisin"
+                "main": "Pääkeskus (pääkatkaisija)",
+                "main_hidden": "Pääkeskus (piilota pääkatkaisija)",
+                "sub": "Alakeskus (ei pääkatkaisijaa)"
             }
         }
     },

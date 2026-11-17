@@ -108,12 +108,11 @@
                 "none": "Nem másik elosztótábláról táplált"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Főelosztó, főmegszakító felül",
-                "bottom": "Főelosztó, főmegszakító alul",
-                "none": "Alelosztó, főmegszakító nélkül",
-                "none_flipped": "Alelosztó, főmegszakító nélkül, fejjel lefelé"
+                "main": "Főelosztó (főmegszakító)",
+                "main_hidden": "Főelosztó (főmegszakító elrejtése)",
+                "sub": "Alelosztó (főmegszakító nélkül)"
             }
         }
     },

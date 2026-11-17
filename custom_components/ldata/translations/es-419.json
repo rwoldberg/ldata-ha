@@ -108,12 +108,11 @@
                 "none": "No se alimenta de otro centro de carga"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Principal, interruptor principal arriba",
-                "bottom": "Principal, interruptor principal abajo",
-                "none": "Subpanel, sin interruptor principal",
-                "none_flipped": "Subpanel, sin interruptor principal, invertido"
+                "main": "Principal (interruptor principal)",
+                "main_hidden": "Principal (ocultar interruptor principal)",
+                "sub": "Subpanel (sin interruptor principal)"
             }
         }
     },

@@ -108,12 +108,11 @@
         "none": "Not fed from another load center"
       }
     },
-    "main_breaker_position": {
+    "panel_type": {
       "options": {
-        "top": "Main panel, main breaker at the top",
-        "bottom": "Main panel, main breaker at the bottom",
-        "none": "Sub-panel, no main breaker",
-        "none_flipped": "Sub-panel, no main breaker, flipped"
+        "main": "Main panel (main breaker)",
+        "main_hidden": "Main panel (hide main breaker)",
+        "sub": "Sub-panel (no main breaker)"
       }
     }
   },

@@ -108,12 +108,11 @@
                 "none": "Pas alimenté par un autre panneau"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Panneau principal, disjoncteur principal en haut",
-                "bottom": "Panneau principal, disjoncteur principal en bas",
-                "none": "Panneau secondaire, sans disjoncteur principal",
-                "none_flipped": "Panneau secondaire, sans disjoncteur principal, inversé"
+                "main": "Panneau principal (disjoncteur principal)",
+                "main_hidden": "Panneau principal (masquer le disjoncteur principal)",
+                "sub": "Panneau secondaire (sans disjoncteur principal)"
             }
         }
     },

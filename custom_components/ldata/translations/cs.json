@@ -108,12 +108,11 @@
                 "none": "Nenapájí ho jiný rozvaděč"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Hlavní rozvaděč, hlavní jistič nahoře",
-                "bottom": "Hlavní rozvaděč, hlavní jistič dole",
-                "none": "Podružný rozvaděč, bez hlavního jističe",
-                "none_flipped": "Podružný rozvaděč, bez hlavního jističe, obrácený"
+                "main": "Hlavní rozvaděč (hlavní jistič)",
+                "main_hidden": "Hlavní rozvaděč (skrýt hlavní jistič)",
+                "sub": "Podružný rozvaděč (bez hlavního jističe)"
             }
         }
     },

@@ -108,12 +108,11 @@
                 "none": "Nicht von einem anderen Sicherungskasten versorgt"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Hauptverteilung, Hauptsicherung oben",
-                "bottom": "Hauptverteilung, Hauptsicherung unten",
-                "none": "Unterverteilung, keine Hauptsicherung",
-                "none_flipped": "Unterverteilung, keine Hauptsicherung, kopfüber"
+                "main": "Hauptverteilung (Hauptsicherung)",
+                "main_hidden": "Hauptverteilung (Hauptsicherung ausblenden)",
+                "sub": "Unterverteilung (keine Hauptsicherung)"
             }
         }
     },

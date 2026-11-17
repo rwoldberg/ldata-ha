@@ -108,12 +108,11 @@
                 "none": "Nu este alimentat din alt tablou"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Tablou general, disjunctor general sus",
-                "bottom": "Tablou general, disjunctor general jos",
-                "none": "Tablou secundar, fără disjunctor general",
-                "none_flipped": "Tablou secundar, fără disjunctor general, inversat"
+                "main": "Tablou general (disjunctor general)",
+                "main_hidden": "Tablou general (ascunde disjunctorul general)",
+                "sub": "Tablou secundar (fără disjunctor general)"
             }
         }
     },

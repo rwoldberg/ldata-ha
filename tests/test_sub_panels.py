@@ -14,13 +14,12 @@ from custom_components.ldata.sidebar import async_update_sidebar_panel
 from custom_components.ldata.sub_panels import (
     MAIN_BREAKERS,
     SUB_PANELS,
-    default_position,
     feed_ratings,
     feeder_rating,
     feeds_of,
     looped,
-    main_breaker_positions,
     main_breaker_ratings,
+    panel_types,
     shared,
     sub_panel_feeds,
 )
@@ -202,30 +201,36 @@ async def test_links_carry_the_size_of_the_feeding_breaker() -> None:
 
 def test_main_breaker_settings_are_read_from_the_options() -> None:
     raw = {
-        "p1": {"rating": 200, "position": "bottom"},
-        "p2": {"rating": "100", "position": "auto"},
-        "p3": {"rating": 0, "position": "top"},
-        "p4": {"rating": "x", "position": "sideways"},
+        "p1": {"rating": 200, "type": "main"},
+        "p2": {"rating": "100", "type": "main_hidden"},
+        "p3": {"rating": 0, "type": "sub"},
+        "p4": {"rating": "x", "type": "sideways"},
         "p5": True,
-        "p6": 150,  # a bare rating, as the first test builds stored it
+        "p6": 150,  # a bare rating, as the very first test build stored it
         "p7": None,
-        "p8": {"rating": 200, "position": "none"},  # a sub-panel: no main breaker drawn
-        "p9": {"position": "none_flipped"},  # one mounted upside down
+        "p8": {"rating": 200, "type": "sub"},  # a sub-panel: no main breaker drawn
     }
     assert main_breaker_ratings({MAIN_BREAKERS: raw}) == {"p1": 200.0, "p2": 100.0, "p6": 150.0, "p8": 200.0}
-    assert main_breaker_positions({MAIN_BREAKERS: raw}) == {
-        "p1": "bottom", "p3": "top", "p8": "none", "p9": "none_flipped"
+    assert panel_types({MAIN_BREAKERS: raw}) == {
+        "p1": "main", "p2": "main_hidden", "p3": "sub", "p6": "main", "p8": "sub"
     }
-    assert main_breaker_ratings({}) == {} == main_breaker_positions({})
+    assert main_breaker_ratings({}) == {} == panel_types({})
     assert main_breaker_ratings({MAIN_BREAKERS: ["p1"]}) == {}
 
 
-def test_a_load_center_starts_as_a_sub_panel_the_way_up_leviton_reports_it() -> None:
-    assert default_position({"orientation": 180}) == "none_flipped"
-    assert default_position({"orientation": "180"}) == "none_flipped"
-    # Upright, or an LDATA hub's load center, which reports no orientation.
-    for panel in ({"orientation": 0}, {}, {"orientation": None}, {"orientation": "sideways"}):
-        assert default_position(panel) == "none", panel
+def test_the_first_test_builds_settings_keep_their_meaning() -> None:
+    """They stored a main breaker's position, not a type: a main breaker anywhere, or a capacity alone, was a main panel."""
+    raw = {
+        "top": {"rating": 200, "position": "top"},
+        "bottom": {"position": "bottom"},
+        "none": {"rating": 200, "position": "none"},
+        "flipped": {"position": "none_flipped"},
+        "default": {"rating": 100},  # the old default, next to positions 1 and 2
+        "unknown": {"position": "sideways"},
+    }
+    assert panel_types({MAIN_BREAKERS: raw}) == {
+        "top": "main", "bottom": "main", "none": "sub", "flipped": "sub", "default": "main"
+    }
 
 
 @pytest.mark.asyncio
@@ -233,7 +238,7 @@ async def test_cloud_connected_carries_the_main_breaker_settings() -> None:
     async with _home_assistant() as hass:
         entry = _entry(
             hass,
-            options={MAIN_BREAKERS: {"p1": {"rating": 200, "position": "bottom"}}},
+            options={MAIN_BREAKERS: {"p1": {"rating": 200, "type": "main_hidden"}}},
             panels=[("p1", "Main Panel"), ("p2", "Garage")],
         )
 
@@ -241,11 +246,11 @@ async def test_cloud_connected_carries_the_main_breaker_settings() -> None:
         garage = _cloud_sensor(hass, entry, "p2").extra_state_attributes
 
         assert main["load_capacity"] == 200.0
-        assert main["main_breaker_position"] == "bottom"
+        assert main["panel_type"] == "main_hidden"
         # The capacity isn't called a main breaker: a sub-panel has none.
-        assert "main_breaker" not in main
+        assert "main_breaker" not in main and "main_breaker_position" not in main
         # One without settings (a main-lug panel) has neither.
-        assert "load_capacity" not in garage and "main_breaker_position" not in garage
+        assert "load_capacity" not in garage and "panel_type" not in garage
 
 
 @pytest.mark.asyncio

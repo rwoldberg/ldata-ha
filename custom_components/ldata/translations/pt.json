@@ -108,12 +108,11 @@
                 "none": "Não é alimentado por outro quadro"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Quadro geral, disjuntor geral em cima",
-                "bottom": "Quadro geral, disjuntor geral em baixo",
-                "none": "Quadro parcial, sem disjuntor geral",
-                "none_flipped": "Quadro parcial, sem disjuntor geral, invertido"
+                "main": "Quadro geral (disjuntor geral)",
+                "main_hidden": "Quadro geral (ocultar disjuntor geral)",
+                "sub": "Quadro parcial (sem disjuntor geral)"
             }
         }
     },

@@ -43,21 +43,19 @@ from .const import (
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 from .sub_panels import (
-    MAIN_BOTTOM,
     MAIN_BREAKERS,
-    MAIN_NONE,
-    MAIN_NONE_FLIPPED,
-    MAIN_TOP,
     NOT_FED,
+    PANEL_MAIN,
+    PANEL_MAIN_HIDDEN,
+    PANEL_SUB,
     PANEL_TYPES,
     SUB_PANELS,
     amps,
-    default_position,
     feed_ratings,
     looped,
-    main_breaker_positions,
     main_breaker_ratings,
     panel_subentries,
+    panel_types,
     shared,
     sub_panel_feeds,
 )
@@ -599,17 +597,15 @@ class _MainBreakerSection:
     """The options form's "Panel type and load capacity" section.
 
     Two fields for each load center Leviton reports, as in the sub-panel
-    section. The one named after the load center says whether it is a main
-    panel with its main breaker at the top, or at the bottom of a panel
-    mounted upside down, or a sub-panel without a main breaker, flipped or
-    not. Each one is a sub-panel until the user says otherwise, flipped if
-    Leviton reports it turned 180°; that default isn't stored, so the card
-    goes on following Leviton until the user picks something else. The one
-    ending in (Amps) is its load capacity: a main panel's main
-    breaker rating, or the rating of what feeds a sub-panel (a main breaker
-    by the meter, say). It is left empty for a main-lug panel. Leviton
-    reports neither. Offered from one load center up, unlike the sub-panel
-    section.
+    section. The one named after the load center is its type: a main panel
+    with its main breaker drawn, or hidden, or a sub-panel without one. Each
+    one is a sub-panel until the user says otherwise, so that is stored only
+    next to a capacity. Which way up it is drawn is Leviton's to report, not
+    a choice here. The
+    one ending in (Amps) is its load capacity: a main panel's main breaker
+    rating, or the rating of what feeds a sub-panel (a main breaker by the
+    meter, say). It is left empty for a main-lug panel. Leviton reports
+    neither. Offered from one load center up, unlike the sub-panel section.
 
     A load center the options cover but Leviton no longer reports keeps its
     settings and gets no fields. As with the sub-panel section, the options
@@ -623,10 +619,9 @@ class _MainBreakerSection:
             key=lambda panel: (str(panel.get("name") or "").casefold(), str(panel["id"])),
         )
         self.stored_ratings = main_breaker_ratings(options)
-        self.stored_positions = main_breaker_positions(options)
+        self.stored_types = panel_types(options)
         self.fields: dict[str, str] = {}  # where it is drawn -> the load center
         self.rating_fields: dict[str, str] = {}  # its rating -> the load center
-        self.defaults: dict[str, str] = {}  # the load center -> its type until said otherwise
         # A field's name is taken together with its rating field's, as in the
         # sub-panel section.
         taken: set[str] = set()
@@ -639,28 +634,26 @@ class _MainBreakerSection:
             taken.update((name, f"{name} (Amps)"))
             self.fields[name] = panel["id"]
             self.rating_fields[f"{name} (Amps)"] = panel["id"]
-            self.defaults[panel["id"]] = default_position(panel)
 
     def schema(self, chosen: Mapping[str, Any] | None) -> dict[Any, Any]:
         """Return the section for the form, or nothing without a load center to set."""
         if not self.fields:
             return {}
-        places = [
-            selector.SelectOptionDict(value=MAIN_TOP, label="Main panel, main breaker at the top"),
-            selector.SelectOptionDict(value=MAIN_BOTTOM, label="Main panel, main breaker at the bottom"),
-            selector.SelectOptionDict(value=MAIN_NONE, label="Sub-panel, no main breaker"),
-            selector.SelectOptionDict(value=MAIN_NONE_FLIPPED, label="Sub-panel, no main breaker, flipped"),
+        kinds = [
+            selector.SelectOptionDict(value=PANEL_MAIN, label="Main panel (main breaker)"),
+            selector.SelectOptionDict(value=PANEL_MAIN_HIDDEN, label="Main panel (hide main breaker)"),
+            selector.SelectOptionDict(value=PANEL_SUB, label="Sub-panel (no main breaker)"),
         ]
         fields = {}
         for field, panel_id in self.fields.items():
-            place = (chosen or {}).get(field) or self.stored_positions.get(panel_id)
-            if place not in PANEL_TYPES:
-                place = self.defaults[panel_id]
-            fields[vol.Required(field, default=place)] = selector.SelectSelector(
+            kind = (chosen or {}).get(field) or self.stored_types.get(panel_id)
+            if kind not in PANEL_TYPES:
+                kind = PANEL_SUB
+            fields[vol.Required(field, default=kind)] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
-                    options=places,
+                    options=kinds,
                     mode=selector.SelectSelectorMode.DROPDOWN,
-                    translation_key="main_breaker_position",
+                    translation_key="panel_type",
                 )
             )
             rating_field = f"{field} (Amps)"
@@ -672,7 +665,7 @@ class _MainBreakerSection:
                 )
             )
         shown = set(self.fields.values())
-        stored = any(panel_id in shown for panel_id in (*self.stored_ratings, *self.stored_positions))
+        stored = any(panel_id in shown for panel_id in (*self.stored_ratings, *self.stored_types))
         return {
             vol.Optional(MAIN_BREAKERS): section(
                 vol.Schema(fields), {"collapsed": not (stored or chosen)}
@@ -686,19 +679,20 @@ class _MainBreakerSection:
         for panel_id, size in self.stored_ratings.items():
             if panel_id not in shown:
                 settings.setdefault(panel_id, {})["rating"] = size
-        for panel_id, place in self.stored_positions.items():
+        for panel_id, kind in self.stored_types.items():
             if panel_id not in shown:
-                settings.setdefault(panel_id, {})["position"] = place
+                settings.setdefault(panel_id, {})["type"] = kind
         for field, panel_id in self.fields.items():
             entry: dict[str, Any] = {}
             size = amps(chosen.get(f"{field} (Amps)"))
             if size is not None:
                 entry["rating"] = size
-            place = chosen.get(field)
-            # A load center's default type needs no storing: the card
-            # follows the way up Leviton reports it.
-            if place in PANEL_TYPES and place != self.defaults[panel_id]:
-                entry["position"] = place
+            kind = chosen.get(field)
+            # A sub-panel is what a load center is until said otherwise, so
+            # it is stored only next to a capacity: there, a missing type
+            # means a main panel, as the first test builds stored it.
+            if kind in PANEL_TYPES and (kind != PANEL_SUB or entry):
+                entry["type"] = kind
             if entry:
                 settings[panel_id] = entry
         return settings

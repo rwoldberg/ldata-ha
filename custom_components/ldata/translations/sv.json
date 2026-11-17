@@ -108,12 +108,11 @@
                 "none": "Matas inte från en annan elcentral"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Huvudcentral, huvudbrytare överst",
-                "bottom": "Huvudcentral, huvudbrytare nederst",
-                "none": "Undercentral, ingen huvudbrytare",
-                "none_flipped": "Undercentral, ingen huvudbrytare, upp och ner"
+                "main": "Huvudcentral (huvudbrytare)",
+                "main_hidden": "Huvudcentral (dölj huvudbrytare)",
+                "sub": "Undercentral (ingen huvudbrytare)"
             }
         }
     },

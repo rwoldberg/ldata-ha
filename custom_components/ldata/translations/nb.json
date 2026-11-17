@@ -108,12 +108,11 @@
                 "none": "Forsynes ikke fra et annet sikringsskap"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Hovedfordeling, hovedsikring øverst",
-                "bottom": "Hovedfordeling, hovedsikring nederst",
-                "none": "Underfordeling, ingen hovedsikring",
-                "none_flipped": "Underfordeling, ingen hovedsikring, opp ned"
+                "main": "Hovedfordeling (hovedsikring)",
+                "main_hidden": "Hovedfordeling (skjul hovedsikring)",
+                "sub": "Underfordeling (ingen hovedsikring)"
             }
         }
     },

@@ -21,9 +21,9 @@ from .sub_panels import (
     feed_ratings,
     feeder_rating,
     feeds_of,
-    main_breaker_positions,
     main_breaker_ratings,
     panel_device,
+    panel_types,
     sub_panel_feeds,
 )
 
@@ -211,26 +211,25 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         attributes["panel_size"] = self.panel_data.get("panel_size")
         attributes["dumb_breakers"] = self.panel_data.get("dumb_breakers", [])
         attributes["sub_panels"], attributes["fed_from"] = self._feeds()
-        capacity, position = self._load_capacity()
+        capacity, kind = self._load_capacity()
         if capacity is not None:
             attributes["load_capacity"] = capacity
-        if position is not None:
-            attributes["main_breaker_position"] = position
+        if kind is not None:
+            attributes["panel_type"] = kind
         return attributes
 
     def _load_capacity(self) -> tuple[float | None, str | None]:
-        """Return this panel's load capacity and its main breaker's position, as far as the user gave them.
+        """Return this panel's load capacity and its type, as far as the user gave them.
 
         Leviton reports neither; they are set in the integration's options
         (see sub_panels.py). The capacity is a main panel's main breaker
-        rating, or the rating of what feeds a sub-panel; a main panel's
-        position is "top" or "bottom", a sub-panel's "none" or, mounted
-        upside down, "none_flipped". Without one it is a sub-panel the way up
-        Leviton reports it. The panel card reads them here, so the sidebar
-        page and every dashboard card without a load_capacity of its own show
-        how much of that capacity the load center uses, and draw a main
-        panel's main breaker. A main breaker at the bottom, or a flipped
-        sub-panel, turns the whole panel: the card draws it upside down.
+        rating, or the rating of what feeds a sub-panel. The type is "main",
+        "main_hidden" for a main panel whose main breaker isn't drawn, or
+        "sub"; without one it is a sub-panel. The panel card reads them here,
+        so the sidebar page and every dashboard card without a load_capacity
+        of its own show how much of that capacity the load center uses, and
+        draw a main panel's main breaker, next to positions 1 and 2 whichever
+        way up Leviton reports the panel.
         """
         entry = getattr(self.coordinator, "config_entry", None)
         if entry is None:
@@ -238,7 +237,7 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         panel_id = self.panel_data.get("id")
         return (
             main_breaker_ratings(entry.options).get(panel_id),
-            main_breaker_positions(entry.options).get(panel_id),
+            panel_types(entry.options).get(panel_id),
         )
 
     def _feeds(self) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:

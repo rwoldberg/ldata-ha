@@ -108,12 +108,11 @@
                 "none": "Nie jest zasilana z innej rozdzielnicy"
             }
         },
-        "main_breaker_position": {
+        "panel_type": {
             "options": {
-                "top": "Rozdzielnica główna, wyłącznik główny na górze",
-                "bottom": "Rozdzielnica główna, wyłącznik główny na dole",
-                "none": "Podrozdzielnica, bez wyłącznika głównego",
-                "none_flipped": "Podrozdzielnica, bez wyłącznika głównego, odwrócona"
+                "main": "Rozdzielnica główna (wyłącznik główny)",
+                "main_hidden": "Rozdzielnica główna (ukryj wyłącznik główny)",
+                "sub": "Podrozdzielnica (bez wyłącznika głównego)"
             }
         }
     },
