@@ -195,15 +195,28 @@ def test_old_main_breaker_setting_still_works() -> None:
     assert 'load_capacity: "editor.load_capacity",' in CARD and 'load_capacity: "editor.load_capacity_help",' in CARD
 
 
-def test_main_breaker_is_drawn_where_the_options_put_it() -> None:
-    """Next to positions 1 and 2 (at the bottom of a panel turned 180°) unless the options say top or bottom."""
+def test_the_panel_turns_with_its_main_breaker() -> None:
+    """A main breaker at the bottom means the panel is mounted upside down: positions 1 and 2 are next to it."""
     layout = re.search(r"const PANEL_LAYOUT = \[(.*?)\];", CARD)
     assert layout is not None and '"main_breaker_position"' in layout.group(1)
-    helper = re.search(r"\n  _mainLow\(layout, rotate\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
+    helper = re.search(r"\n  _upsideDown\(layout\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
     assert helper is not None
-    assert 'place === "bottom" ? true : place === "top" ? false : !!rotate' in helper.group(1)
-    assert '${main && m.mainLow ? " main-low" : ""}' in CARD
-    assert "this._mainLow(ca, rotate)," in CARD  # in the rebuild key too
+    body = helper.group(1)
+    # The card's own rotate_180 first, then the integration's options, then
+    # the way up Leviton reports the panel.
+    assert body.index("this._config.rotate_180") < body.index("main_breaker_position") < body.index("orientation")
+    # A main breaker at the bottom, or a flipped sub-panel, turns it.
+    assert 'if (place === "top" || place === "none") return false;' in body
+    assert 'if (place === "bottom" || place === "none_flipped") return true;' in body
+    assert "return Number(layout && layout.orientation) === 180;" in body
+    # One answer for the breakers, their numbers and the main breaker alike,
+    # and the rebuild key.
+    assert "const rotate = this._upsideDown(ca);" in CARD
+    assert "this._computeLayout(slots, rotate)" in CARD
+    assert "const structKey = JSON.stringify([\n      rotate," in CARD
+    assert "const low = !!(main && m.rotate);" in CARD
+    assert '${low ? " main-low" : ""}' in CARD
+    assert "_mainLow" not in CARD
     low = re.search(r"\.main-low \.main \{([^}]*)\}", CARD)
     assert low is not None and "grid-row: -2" in low.group(1)
     # The room it needs moves to the bottom row with it.
@@ -215,7 +228,9 @@ def test_sub_panel_draws_no_main_breaker_but_its_capacity_counts() -> None:
     """A sub-panel, fed from a main breaker by the meter, say: no main breaker in it, but the share in use stays."""
     helper = re.search(r"\n  _mainDrawn\(layout\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
     assert helper is not None
-    assert 'layout.main_breaker_position === "none" ? null : this._capacity(layout)' in helper.group(1)
+    # Only a main panel has one: a load center is a sub-panel until the
+    # integration's options put its main breaker at the top or the bottom.
+    assert 'return place === "top" || place === "bottom" ? this._capacity(layout) : null;' in helper.group(1)
     # The drawing and the rebuild key go by what is drawn...
     assert "mainBreaker: this._mainDrawn(ca)," in CARD
     assert "this._mainDrawn(ca)," in CARD.split("const structKey")[1].split("]);")[0]

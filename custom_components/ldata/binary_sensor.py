@@ -223,12 +223,14 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
 
         Leviton reports neither; they are set in the integration's options
         (see sub_panels.py). The capacity is a main panel's main breaker
-        rating, or the rating of what feeds a sub-panel; the position is
-        "none" for a sub-panel, which has no main breaker. The panel card
-        reads them here, so the sidebar page and every dashboard card
-        without a main_breaker of its own show how much of that capacity the
-        load center uses, and draw a main panel's main breaker at the top or
-        the bottom.
+        rating, or the rating of what feeds a sub-panel; a main panel's
+        position is "top" or "bottom", a sub-panel's "none" or, mounted
+        upside down, "none_flipped". Without one it is a sub-panel the way up
+        Leviton reports it. The panel card reads them here, so the sidebar
+        page and every dashboard card without a load_capacity of its own show
+        how much of that capacity the load center uses, and draw a main
+        panel's main breaker. A main breaker at the bottom, or a flipped
+        sub-panel, turns the whole panel: the card draws it upside down.
         """
         entry = getattr(self.coordinator, "config_entry", None)
         if entry is None:

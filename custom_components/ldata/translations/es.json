@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Tipo de cuadro y capacidad de carga",
-                        "description": "Leviton no informa de cuánta carga admite un cuadro eléctrico. Debajo del nombre de cada cuadro, indica si es un cuadro general, con su propio interruptor general, o un subcuadro sin él, y escribe su capacidad de carga en amperios en el campo terminado en (A): para un cuadro general, el calibre de su interruptor general; para un subcuadro, el del interruptor que lo alimenta, por ejemplo un interruptor general junto al contador. La tarjeta mostrará cuánto de ella se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor, y mostrará el interruptor general de un cuadro general con su calibre: junto a las posiciones 1 y 2 (que siguen la orientación del cuadro), arriba o abajo. Deja la capacidad vacía para no mostrar ninguna de las dos cosas."
+                        "description": "Leviton no informa de la capacidad de los cuadros eléctricos, así que configúrala debajo del nombre de cada cuadro. Selecciona cuadro general o subcuadro y escribe su capacidad (Amps): el calibre del interruptor general para un cuadro general, o el del interruptor que lo alimenta para un subcuadro. La tarjeta la usa para mostrar el uso de la capacidad en la barra lateral y en las tarjetas de los paneles de control. Los cuadros generales también muestran su interruptor general y su calibre arriba o abajo, según la orientación. Deja la capacidad vacía para ocultar ambas cosas."
                     },
                     "sub_panels": {
                         "name": "Subcuadros",
-                        "description": "Si un cuadro eléctrico se alimenta desde un magnetotérmico de otro cuadro, elige ese magnetotérmico junto a su nombre. Ese magnetotérmico mostrará entonces la carga en tiempo real del subcuadro y permitirá ir a él. Si ese magnetotérmico no es inteligente, escribe su calibre en el campo terminado en (A) de debajo, para que la tarjeta muestre cuánto de él usa el subcuadro."
+                        "description": "Si un cuadro eléctrico se alimenta desde un magnetotérmico de otro cuadro, elige ese magnetotérmico junto a su nombre. Ese magnetotérmico mostrará entonces la carga en tiempo real del subcuadro y permitirá ir a él. Si ese magnetotérmico no es inteligente, escribe su calibre en el campo terminado en (Amps) de debajo, para que la tarjeta muestre cuánto de él usa el subcuadro."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Cuadro general, interruptor general junto a las posiciones 1 y 2",
                 "top": "Cuadro general, interruptor general arriba",
                 "bottom": "Cuadro general, interruptor general abajo",
-                "none": "Subcuadro, sin interruptor general"
+                "none": "Subcuadro, sin interruptor general",
+                "none_flipped": "Subcuadro, sin interruptor general, invertido"
             }
         }
     },

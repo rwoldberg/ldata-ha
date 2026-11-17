@@ -43,14 +43,16 @@ from .const import (
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 from .sub_panels import (
-    MAIN_AUTO,
     MAIN_BOTTOM,
     MAIN_BREAKERS,
     MAIN_NONE,
+    MAIN_NONE_FLIPPED,
     MAIN_TOP,
     NOT_FED,
+    PANEL_TYPES,
     SUB_PANELS,
     amps,
+    default_position,
     feed_ratings,
     looped,
     main_breaker_positions,
@@ -447,24 +449,24 @@ class _SubPanelSection:
             return
 
         # A field's name is taken together with its size field's: next to a
-        # load center called "Garage", one called "Garage (A)" gets its id
+        # load center called "Garage", one called "Garage (Amps)" gets its id
         # added, as does the second of two with the same name.
         taken: set[str] = set()
         names: dict[str, str] = {}
 
         def field_for(panel_id: str, label: str) -> str:
             name, tries = label, 1
-            while name in taken or f"{name} (A)" in taken:
+            while name in taken or f"{name} (Amps)" in taken:
                 tries += 1
                 name = f"{label} ({panel_id})" if tries == 2 else f"{label} ({panel_id} {tries})"
-            taken.update((name, f"{name} (A)"))
+            taken.update((name, f"{name} (Amps)"))
             names[panel_id] = name
             return name
 
         for panel in asked:
             name = field_for(panel["id"], str(panel.get("name") or panel["id"]))
             self.fields[name] = panel["id"]
-            self.rating_fields[f"{name} (A)"] = panel["id"]
+            self.rating_fields[f"{name} (Amps)"] = panel["id"]
         for sub_id in self._unreported:
             self.fields[field_for(sub_id, str(titles.get(sub_id) or sub_id))] = sub_id
 
@@ -546,7 +548,7 @@ class _SubPanelSection:
                     translation_key="sub_panel_feed",
                 )
             )
-            rating_field = f"{field} (A)"
+            rating_field = f"{field} (Amps)"
             if rating_field not in self.rating_fields:
                 # A load center Leviton doesn't report: its feed can only be
                 # kept or taken off, and its size is kept with it.
@@ -594,17 +596,20 @@ class _SubPanelSection:
 
 
 class _MainBreakerSection:
-    """The options form's "Main breakers" section.
+    """The options form's "Panel type and load capacity" section.
 
     Two fields for each load center Leviton reports, as in the sub-panel
     section. The one named after the load center says whether it is a main
-    panel and where its main breaker is drawn (next to positions 1 and 2,
-    which follow the panel's direction, or at the top or the bottom), or a
-    sub-panel without a main breaker. The one ending in (A) is its load
-    capacity in amps: a main panel's main breaker rating, or the rating of
-    what feeds a sub-panel (a main breaker by the meter, say). It is left
-    empty for a main-lug panel. Leviton reports neither. Offered from one load
-    center up, unlike the sub-panel section.
+    panel with its main breaker at the top, or at the bottom of a panel
+    mounted upside down, or a sub-panel without a main breaker, flipped or
+    not. Each one is a sub-panel until the user says otherwise, flipped if
+    Leviton reports it turned 180°; that default isn't stored, so the card
+    goes on following Leviton until the user picks something else. The one
+    ending in (Amps) is its load capacity: a main panel's main
+    breaker rating, or the rating of what feeds a sub-panel (a main breaker
+    by the meter, say). It is left empty for a main-lug panel. Leviton
+    reports neither. Offered from one load center up, unlike the sub-panel
+    section.
 
     A load center the options cover but Leviton no longer reports keeps its
     settings and gets no fields. As with the sub-panel section, the options
@@ -621,34 +626,36 @@ class _MainBreakerSection:
         self.stored_positions = main_breaker_positions(options)
         self.fields: dict[str, str] = {}  # where it is drawn -> the load center
         self.rating_fields: dict[str, str] = {}  # its rating -> the load center
+        self.defaults: dict[str, str] = {}  # the load center -> its type until said otherwise
         # A field's name is taken together with its rating field's, as in the
         # sub-panel section.
         taken: set[str] = set()
         for panel in panels:
             label = str(panel.get("name") or panel["id"])
             name, tries = label, 1
-            while name in taken or f"{name} (A)" in taken:
+            while name in taken or f"{name} (Amps)" in taken:
                 tries += 1
                 name = f"{label} ({panel['id']})" if tries == 2 else f"{label} ({panel['id']} {tries})"
-            taken.update((name, f"{name} (A)"))
+            taken.update((name, f"{name} (Amps)"))
             self.fields[name] = panel["id"]
-            self.rating_fields[f"{name} (A)"] = panel["id"]
+            self.rating_fields[f"{name} (Amps)"] = panel["id"]
+            self.defaults[panel["id"]] = default_position(panel)
 
     def schema(self, chosen: Mapping[str, Any] | None) -> dict[Any, Any]:
         """Return the section for the form, or nothing without a load center to set."""
         if not self.fields:
             return {}
         places = [
-            selector.SelectOptionDict(value=MAIN_AUTO, label="Main panel, main breaker next to positions 1 and 2"),
             selector.SelectOptionDict(value=MAIN_TOP, label="Main panel, main breaker at the top"),
             selector.SelectOptionDict(value=MAIN_BOTTOM, label="Main panel, main breaker at the bottom"),
             selector.SelectOptionDict(value=MAIN_NONE, label="Sub-panel, no main breaker"),
+            selector.SelectOptionDict(value=MAIN_NONE_FLIPPED, label="Sub-panel, no main breaker, flipped"),
         ]
         fields = {}
         for field, panel_id in self.fields.items():
-            place = (chosen or {}).get(field) or self.stored_positions.get(panel_id, MAIN_AUTO)
-            if place not in (MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM, MAIN_NONE):
-                place = MAIN_AUTO
+            place = (chosen or {}).get(field) or self.stored_positions.get(panel_id)
+            if place not in PANEL_TYPES:
+                place = self.defaults[panel_id]
             fields[vol.Required(field, default=place)] = selector.SelectSelector(
                 selector.SelectSelectorConfig(
                     options=places,
@@ -656,7 +663,7 @@ class _MainBreakerSection:
                     translation_key="main_breaker_position",
                 )
             )
-            rating_field = f"{field} (A)"
+            rating_field = f"{field} (Amps)"
             # Suggested rather than default, so that it can be emptied.
             rating = chosen.get(rating_field) if chosen is not None else self.stored_ratings.get(panel_id)
             fields[vol.Optional(rating_field, description={"suggested_value": rating})] = selector.NumberSelector(
@@ -684,11 +691,13 @@ class _MainBreakerSection:
                 settings.setdefault(panel_id, {})["position"] = place
         for field, panel_id in self.fields.items():
             entry: dict[str, Any] = {}
-            size = amps(chosen.get(f"{field} (A)"))
+            size = amps(chosen.get(f"{field} (Amps)"))
             if size is not None:
                 entry["rating"] = size
             place = chosen.get(field)
-            if place in (MAIN_TOP, MAIN_BOTTOM, MAIN_NONE):
+            # A load center's default type needs no storing: the card
+            # follows the way up Leviton reports it.
+            if place in PANEL_TYPES and place != self.defaults[panel_id]:
                 entry["position"] = place
             if entry:
                 settings[panel_id] = entry

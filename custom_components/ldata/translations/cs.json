@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Typ rozvaděče a zatížitelnost",
-                        "description": "Leviton neuvádí, jakou zátěž rozvaděč unese. U názvu každého rozvaděče uveďte, zda jde o hlavní rozvaděč s vlastním hlavním jističem, nebo o podružný rozvaděč bez něj, a do pole končícího (A) zadejte jeho zatížitelnost v ampérech: u hlavního rozvaděče jmenovitý proud jeho hlavního jističe, u podružného rozvaděče jmenovitý proud jističe, který ho napájí, například hlavního jističe u elektroměru. Karta pak ukáže, jaká část je využita, na stránce v postranním panelu i na kartách v ovládacích panelech, které nemají vlastní hodnotu, a u hlavního rozvaděče zobrazí hlavní jistič s jeho jmenovitým proudem: u pozic 1 a 2 (které se řídí orientací rozvaděče), nahoře nebo dole. Pokud zatížitelnost nevyplníte, nezobrazí se ani jedno."
+                        "description": "Leviton neuvádí zatížitelnost rozvaděče, proto ji nastavte pod názvem každého rozvaděče. Vyberte hlavní nebo podružný rozvaděč a zadejte jeho zatížitelnost (Amps): u hlavního rozvaděče jmenovitý proud hlavního jističe, u podružného jmenovitý proud jističe, který ho napájí. Karta podle ní ukazuje využití kapacity na stránce v postranním panelu i na kartách v ovládacích panelech. Hlavní rozvaděče navíc zobrazují svůj hlavní jistič s jeho jmenovitým proudem nahoře nebo dole, podle orientace. Pokud zatížitelnost nevyplníte, nezobrazí se ani jedno."
                     },
                     "sub_panels": {
                         "name": "Podružné rozvaděče",
-                        "description": "Pokud je rozvaděč napájen z jističe v jiném rozvaděči, vyberte tento jistič u jeho názvu. U tohoto jističe se pak zobrazuje aktuální zatížení podružného rozvaděče a lze z něj na podružný rozvaděč přejít. Pokud tento jistič není chytrý jistič, zadejte jeho jmenovitý proud do pole končícího (A) pod ním, aby karta mohla ukázat, jakou část z něj podružný rozvaděč využívá."
+                        "description": "Pokud je rozvaděč napájen z jističe v jiném rozvaděči, vyberte tento jistič u jeho názvu. U tohoto jističe se pak zobrazuje aktuální zatížení podružného rozvaděče a lze z něj na podružný rozvaděč přejít. Pokud tento jistič není chytrý jistič, zadejte jeho jmenovitý proud do pole končícího (Amps) pod ním, aby karta mohla ukázat, jakou část z něj podružný rozvaděč využívá."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Hlavní rozvaděč, hlavní jistič u pozic 1 a 2",
                 "top": "Hlavní rozvaděč, hlavní jistič nahoře",
                 "bottom": "Hlavní rozvaděč, hlavní jistič dole",
-                "none": "Podružný rozvaděč, bez hlavního jističe"
+                "none": "Podružný rozvaděč, bez hlavního jističe",
+                "none_flipped": "Podružný rozvaděč, bez hlavního jističe, obrácený"
             }
         }
     },

@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Soort verdeler en belastbaarheid",
-                        "description": "Leviton geeft niet door hoeveel een groepenkast kan dragen. Geef onder de naam van elke groepenkast aan of het een hoofdverdeler is, met een eigen hoofdschakelaar, of een onderverdeler zonder, en vul de belastbaarheid in ampère in het veld in dat eindigt op (A): bij een hoofdverdeler de nominale stroom van de hoofdschakelaar, bij een onderverdeler die van de schakelaar die hem voedt, bijvoorbeeld een hoofdschakelaar bij de meter. De kaart laat dan zien hoeveel ervan in gebruik is, op de pagina in de zijbalk en op dashboardkaarten zonder eigen waarde, en toont bij een hoofdverdeler de hoofdschakelaar met zijn nominale stroom: naast posities 1 en 2 (die de richting van de groepenkast volgen), boven of onder. Laat de belastbaarheid leeg om geen van beide te tonen."
+                        "description": "Leviton geeft de belastbaarheid van groepenkasten niet door, dus stel die in onder de naam van elke groepenkast. Kies hoofdverdeler of onderverdeler en vul daarna de belastbaarheid (Amps) in: de nominale stroom van de hoofdschakelaar bij een hoofdverdeler, of die van de schakelaar die hem voedt bij een onderverdeler. De kaart gebruikt dit om te tonen hoeveel van de capaciteit in gebruik is, in de zijbalk en op dashboardkaarten. Hoofdverdelers tonen ook hun hoofdschakelaar en nominale stroom boven of onder, afhankelijk van de richting. Laat de belastbaarheid leeg om beide te verbergen."
                     },
                     "sub_panels": {
                         "name": "Onderverdelers",
-                        "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe. Is die automaat geen slimme automaat, vul dan de grootte in het veld eronder in dat eindigt op (A), zodat de kaart kan tonen hoeveel ervan de onderverdeler gebruikt."
+                        "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe. Is die automaat geen slimme automaat, vul dan de grootte in het veld eronder in dat eindigt op (Amps), zodat de kaart kan tonen hoeveel ervan de onderverdeler gebruikt."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Hoofdverdeler, hoofdschakelaar naast posities 1 en 2",
                 "top": "Hoofdverdeler, hoofdschakelaar boven",
                 "bottom": "Hoofdverdeler, hoofdschakelaar onder",
-                "none": "Onderverdeler, geen hoofdschakelaar"
+                "none": "Onderverdeler, geen hoofdschakelaar",
+                "none_flipped": "Onderverdeler, geen hoofdschakelaar, ondersteboven"
             }
         }
     },

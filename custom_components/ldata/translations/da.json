@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Tavletype og belastningskapacitet",
-                        "description": "Leviton rapporterer ikke, hvor meget en eltavle kan bære. Angiv under hver eltavles navn, om den er en hovedtavle med sin egen hovedafbryder eller en undertavle uden, og skriv dens belastningskapacitet i ampere i feltet, der ender på (A): for en hovedtavle hovedafbryderens mærkestrøm, for en undertavle mærkestrømmen på den afbryder, der forsyner den, for eksempel en hovedafbryder ved elmåleren. Kortet viser så, hvor meget af den der bruges, både på siden i sidepanelet og på kort i dashboards, der ikke har deres egen værdi, og viser en hovedtavles hovedafbryder med dens mærkestrøm ved position 1 og 2 (som følger eltavlens retning), øverst eller nederst. Lad kapaciteten stå tom for at vise ingen af delene."
+                        "description": "Leviton rapporterer ikke eltavlens kapacitet, så angiv den under hver eltavles navn. Vælg hovedtavle eller undertavle, og skriv derefter dens kapacitet (Amps): hovedafbryderens mærkestrøm for en hovedtavle eller mærkestrømmen på den afbryder, der forsyner den, for en undertavle. Kortet bruger den til at vise udnyttelsen af kapaciteten på siden i sidepanelet og på kort i dashboards. Hovedtavler viser også deres hovedafbryder og mærkestrøm øverst eller nederst, afhængigt af retningen. Lad kapaciteten stå tom for at skjule begge dele."
                     },
                     "sub_panels": {
                         "name": "Undertavler",
-                        "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen. Hvis automatsikringen ikke er en smart automatsikring, skal du angive dens størrelse i feltet, der ender på (A), under den, så kortet kan vise, hvor meget af den undertavlen bruger."
+                        "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen. Hvis automatsikringen ikke er en smart automatsikring, skal du angive dens størrelse i feltet, der ender på (Amps), under den, så kortet kan vise, hvor meget af den undertavlen bruger."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Hovedtavle, hovedafbryder ved position 1 og 2",
                 "top": "Hovedtavle, hovedafbryder øverst",
                 "bottom": "Hovedtavle, hovedafbryder nederst",
-                "none": "Undertavle, ingen hovedafbryder"
+                "none": "Undertavle, ingen hovedafbryder",
+                "none_flipped": "Undertavle, ingen hovedafbryder, vendt på hovedet"
             }
         }
     },

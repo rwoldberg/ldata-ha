@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Tipul tabloului și capacitatea de încărcare",
-                        "description": "Leviton nu raportează ce sarcină suportă un tablou electric. Sub numele fiecărui tablou, spune dacă este un tablou general, cu propriul disjunctor general, sau un tablou secundar fără disjunctor general, și introdu capacitatea sa de încărcare în amperi în câmpul terminat în (A): pentru un tablou general, curentul nominal al disjunctorului său general; pentru un tablou secundar, pe cel al disjunctorului care îl alimentează, de exemplu un disjunctor general lângă contor. Fișa arată apoi cât din ea este folosit, pe pagina din bara laterală și pe fișele din tablourile de bord care nu au o valoare proprie, iar la un tablou general afișează disjunctorul general cu curentul său nominal: lângă pozițiile 1 și 2 (care urmează orientarea tabloului), sus sau jos. Lasă capacitatea necompletată ca să nu afișezi nimic din acestea."
+                        "description": "Leviton nu raportează capacitatea tablourilor electrice, așa că setează-o sub numele fiecărui tablou. Alege tablou general sau tablou secundar, apoi introdu capacitatea (Amps): curentul nominal al disjunctorului general pentru un tablou general sau al disjunctorului care îl alimentează pentru un tablou secundar. Fișa o folosește pentru a arăta cât din capacitate este folosit, în bara laterală și pe fișele din tablourile de bord. Tablourile generale își afișează și disjunctorul general cu curentul nominal sus sau jos, în funcție de orientare. Lasă capacitatea necompletată pentru a le ascunde pe amândouă."
                     },
                     "sub_panels": {
                         "name": "Tablouri secundare",
-                        "description": "Dacă un tablou electric este alimentat dintr-un disjunctor al altui tablou, alege acel disjunctor în dreptul numelui său. Disjunctorul va afișa apoi sarcina în timp real a tabloului secundar și va permite deschiderea acestuia. Dacă acel disjunctor nu este inteligent, introdu curentul său nominal în câmpul terminat în (A) de dedesubt, ca fișa să poată arăta cât din el folosește tabloul secundar."
+                        "description": "Dacă un tablou electric este alimentat dintr-un disjunctor al altui tablou, alege acel disjunctor în dreptul numelui său. Disjunctorul va afișa apoi sarcina în timp real a tabloului secundar și va permite deschiderea acestuia. Dacă acel disjunctor nu este inteligent, introdu curentul său nominal în câmpul terminat în (Amps) de dedesubt, ca fișa să poată arăta cât din el folosește tabloul secundar."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Tablou general, disjunctor general lângă pozițiile 1 și 2",
                 "top": "Tablou general, disjunctor general sus",
                 "bottom": "Tablou general, disjunctor general jos",
-                "none": "Tablou secundar, fără disjunctor general"
+                "none": "Tablou secundar, fără disjunctor general",
+                "none_flipped": "Tablou secundar, fără disjunctor general, inversat"
             }
         }
     },

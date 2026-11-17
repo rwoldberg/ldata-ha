@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Verteilungsart und Belastbarkeit",
-                        "description": "Leviton meldet nicht, wie viel ein Sicherungskasten tragen kann. Gib unter dem Namen jedes Sicherungskastens an, ob er eine Hauptverteilung mit eigener Hauptsicherung ist oder eine Unterverteilung ohne, und trag seine Belastbarkeit in Ampere in das Feld mit (A) ein: bei einer Hauptverteilung den Nennstrom ihrer Hauptsicherung, bei einer Unterverteilung den Nennstrom der Sicherung, die sie versorgt, zum Beispiel einer Hauptsicherung beim Zähler. Die Karte zeigt dann, wie viel davon genutzt wird, auf der Seite in der Seitenleiste und auf Dashboard-Karten ohne eigenen Wert, und zeigt bei einer Hauptverteilung die Hauptsicherung mit ihrem Nennstrom: neben den Positionen 1 und 2 (die der Einbaurichtung folgen), oben oder unten. Lass die Belastbarkeit leer, um beides nicht zu zeigen."
+                        "description": "Leviton meldet nicht, wie viel ein Sicherungskasten tragen kann, also gib es unter dem Namen jedes Sicherungskastens an. Wähle Hauptverteilung oder Unterverteilung und trag dann die Belastbarkeit (Amps) ein: bei einer Hauptverteilung den Nennstrom der Hauptsicherung, bei einer Unterverteilung den Nennstrom der Sicherung, die sie versorgt. Die Karte zeigt damit die Auslastung auf der Seite in der Seitenleiste und auf Dashboard-Karten. Hauptverteilungen zeigen außerdem ihre Hauptsicherung mit Nennstrom oben oder unten, je nach Einbaurichtung. Lass die Belastbarkeit leer, um beides auszublenden."
                     },
                     "sub_panels": {
                         "name": "Unterverteilungen",
-                        "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr. Ist diese Sicherung keine smarte Sicherung, gib ihre Größe im Feld mit (A) darunter ein, damit die Karte zeigen kann, wie viel davon die Unterverteilung nutzt."
+                        "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr. Ist diese Sicherung keine smarte Sicherung, gib ihre Größe im Feld mit (Amps) darunter ein, damit die Karte zeigen kann, wie viel davon die Unterverteilung nutzt."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Hauptverteilung, Hauptsicherung neben den Positionen 1 und 2",
                 "top": "Hauptverteilung, Hauptsicherung oben",
                 "bottom": "Hauptverteilung, Hauptsicherung unten",
-                "none": "Unterverteilung, keine Hauptsicherung"
+                "none": "Unterverteilung, keine Hauptsicherung",
+                "none_flipped": "Unterverteilung, keine Hauptsicherung, kopfüber"
             }
         }
     },

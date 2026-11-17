@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Elosztótábla típusa és terhelhetősége",
-                        "description": "A Leviton nem közli, mekkora terhelést bír egy elosztótábla. Minden elosztótábla neve alatt adja meg, hogy saját főmegszakítóval rendelkező főelosztó, vagy főmegszakító nélküli alelosztó, és írja be a terhelhetőségét amperben az (A) végű mezőbe: főelosztónál a főmegszakító névleges áramát, alelosztónál az azt tápláló megszakítóét, például a mérőóránál lévő főmegszakítóét. A kártya ezután megmutatja, mennyi van használatban belőle, az oldalsáv oldalán és azokon az irányítópult-kártyákon, amelyeknek nincs saját értéke, főelosztónál pedig megjeleníti a főmegszakítót a névleges áramával: az 1. és 2. hely mellett (amelyek a tábla irányát követik), felül vagy alul. Ha egyiket sem szeretné megjeleníteni, hagyja üresen a terhelhetőséget."
+                        "description": "A Leviton nem közli az elosztótáblák terhelhetőségét, ezért adja meg minden tábla neve alatt. Válassza ki, hogy főelosztó vagy alelosztó, majd írja be a terhelhetőségét (Amps): főelosztónál a főmegszakító névleges áramát, alelosztónál az azt tápláló megszakítóét. A kártya ez alapján mutatja a kapacitás kihasználtságát az oldalsáv oldalán és az irányítópult-kártyákon. A főelosztók emellett megjelenítik a főmegszakítójukat és annak névleges áramát felül vagy alul, a tábla irányától függően. Ha egyiket sem szeretné megjeleníteni, hagyja üresen a terhelhetőséget."
                     },
                     "sub_panels": {
                         "name": "Alelosztók",
-                        "description": "Ha egy elosztótáblát egy másik elosztótábla megszakítója táplál, válassza ki azt a megszakítót a neve mellett. Ezután az a megszakító mutatja az alelosztó élő terhelését, és onnan megnyitható az alelosztó. Ha ez a megszakító nem okos megszakító, adja meg a névleges áramát az alatta lévő, (A) végű mezőben, hogy a kártya megmutathassa, mennyit használ belőle az alelosztó."
+                        "description": "Ha egy elosztótáblát egy másik elosztótábla megszakítója táplál, válassza ki azt a megszakítót a neve mellett. Ezután az a megszakító mutatja az alelosztó élő terhelését, és onnan megnyitható az alelosztó. Ha ez a megszakító nem okos megszakító, adja meg a névleges áramát az alatta lévő, (Amps) végű mezőben, hogy a kártya megmutathassa, mennyit használ belőle az alelosztó."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Főelosztó, főmegszakító az 1. és 2. hely mellett",
                 "top": "Főelosztó, főmegszakító felül",
                 "bottom": "Főelosztó, főmegszakító alul",
-                "none": "Alelosztó, főmegszakító nélkül"
+                "none": "Alelosztó, főmegszakító nélkül",
+                "none_flipped": "Alelosztó, főmegszakító nélkül, fejjel lefelé"
             }
         }
     },

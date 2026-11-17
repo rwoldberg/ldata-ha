@@ -14,6 +14,7 @@ from custom_components.ldata.sidebar import async_update_sidebar_panel
 from custom_components.ldata.sub_panels import (
     MAIN_BREAKERS,
     SUB_PANELS,
+    default_position,
     feed_ratings,
     feeder_rating,
     feeds_of,
@@ -209,11 +210,22 @@ def test_main_breaker_settings_are_read_from_the_options() -> None:
         "p6": 150,  # a bare rating, as the first test builds stored it
         "p7": None,
         "p8": {"rating": 200, "position": "none"},  # a sub-panel: no main breaker drawn
+        "p9": {"position": "none_flipped"},  # one mounted upside down
     }
     assert main_breaker_ratings({MAIN_BREAKERS: raw}) == {"p1": 200.0, "p2": 100.0, "p6": 150.0, "p8": 200.0}
-    assert main_breaker_positions({MAIN_BREAKERS: raw}) == {"p1": "bottom", "p3": "top", "p8": "none"}
+    assert main_breaker_positions({MAIN_BREAKERS: raw}) == {
+        "p1": "bottom", "p3": "top", "p8": "none", "p9": "none_flipped"
+    }
     assert main_breaker_ratings({}) == {} == main_breaker_positions({})
     assert main_breaker_ratings({MAIN_BREAKERS: ["p1"]}) == {}
+
+
+def test_a_load_center_starts_as_a_sub_panel_the_way_up_leviton_reports_it() -> None:
+    assert default_position({"orientation": 180}) == "none_flipped"
+    assert default_position({"orientation": "180"}) == "none_flipped"
+    # Upright, or an LDATA hub's load center, which reports no orientation.
+    for panel in ({"orientation": 0}, {}, {"orientation": None}, {"orientation": "sideways"}):
+        assert default_position(panel) == "none", panel
 
 
 @pytest.mark.asyncio

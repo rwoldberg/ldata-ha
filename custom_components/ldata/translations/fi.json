@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Keskuksen tyyppi ja kuormituskyky",
-                        "description": "Leviton ei ilmoita, kuinka paljon sähkökeskus kestää. Kerro kunkin sähkökeskuksen nimen alla, onko se pääkeskus, jolla on oma pääkatkaisija, vai alakeskus ilman sitä, ja anna sen kuormituskyky ampeereina kenttään, joka päättyy (A): pääkeskukselle sen pääkatkaisijan nimellisvirta, alakeskukselle sitä syöttävän katkaisijan nimellisvirta, esimerkiksi sähkömittarin luona olevan pääkatkaisijan. Kortti näyttää sitten, kuinka suuri osa siitä on käytössä, sekä sivupalkin sivulla että kojelautojen korteissa, joilla ei ole omaa arvoa, ja näyttää pääkeskuksen pääkatkaisijan nimellisvirtoineen paikkojen 1 ja 2 vieressä (jotka seuraavat keskuksen asennussuuntaa), ylhäällä tai alhaalla. Jätä kuormituskyky tyhjäksi, jos et halua näyttää kumpaakaan."
+                        "description": "Leviton ei ilmoita sähkökeskuksen kuormituskykyä, joten aseta se kunkin keskuksen nimen alle. Valitse pääkeskus tai alakeskus ja anna sitten sen kuormituskyky (Amps): pääkeskukselle pääkatkaisijan nimellisvirta, alakeskukselle sitä syöttävän katkaisijan nimellisvirta. Kortti näyttää sen avulla kapasiteetin käytön sivupalkin sivulla ja kojelautojen korteissa. Pääkeskukset näyttävät lisäksi pääkatkaisijansa ja sen nimellisvirran ylhäällä tai alhaalla asennussuunnan mukaan. Jätä kuormituskyky tyhjäksi, niin kumpaakaan ei näytetä."
                     },
                     "sub_panels": {
                         "name": "Alakeskukset",
-                        "description": "Jos sähkökeskusta syötetään toisen sähkökeskuksen johdonsuojasta, valitse kyseinen johdonsuoja keskuksen nimen kohdalta. Johdonsuoja näyttää sen jälkeen alakeskuksen reaaliaikaisen kuorman, ja siitä pääsee alakeskukseen. Jos johdonsuoja ei ole älyjohdonsuoja, anna sen koko alla olevaan kenttään, joka päättyy (A), jotta kortti voi näyttää, kuinka suuren osan siitä alakeskus käyttää."
+                        "description": "Jos sähkökeskusta syötetään toisen sähkökeskuksen johdonsuojasta, valitse kyseinen johdonsuoja keskuksen nimen kohdalta. Johdonsuoja näyttää sen jälkeen alakeskuksen reaaliaikaisen kuorman, ja siitä pääsee alakeskukseen. Jos johdonsuoja ei ole älyjohdonsuoja, anna sen koko alla olevaan kenttään, joka päättyy (Amps), jotta kortti voi näyttää, kuinka suuren osan siitä alakeskus käyttää."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Pääkeskus, pääkatkaisija paikkojen 1 ja 2 vieressä",
                 "top": "Pääkeskus, pääkatkaisija ylhäällä",
                 "bottom": "Pääkeskus, pääkatkaisija alhaalla",
-                "none": "Alakeskus, ei pääkatkaisijaa"
+                "none": "Alakeskus, ei pääkatkaisijaa",
+                "none_flipped": "Alakeskus, ei pääkatkaisijaa, ylösalaisin"
             }
         }
     },

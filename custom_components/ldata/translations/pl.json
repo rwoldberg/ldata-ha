@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Typ rozdzielnicy i obciążalność",
-                        "description": "Leviton nie podaje, jakie obciążenie wytrzyma rozdzielnica. Pod nazwą każdej rozdzielnicy wskaż, czy jest to rozdzielnica główna z własnym wyłącznikiem głównym, czy podrozdzielnica bez niego, i wpisz jej obciążalność w amperach w polu zakończonym (A): dla rozdzielnicy głównej prąd znamionowy jej wyłącznika głównego, dla podrozdzielnicy prąd znamionowy wyłącznika, który ją zasila, na przykład wyłącznika głównego przy liczniku. Karta pokaże wtedy, jaka część jest wykorzystywana, na stronie w pasku bocznym i na kartach w dashboardach, które nie mają własnej wartości, a w rozdzielnicy głównej pokaże wyłącznik główny z jego prądem znamionowym: obok pozycji 1 i 2 (które podążają za kierunkiem montażu rozdzielnicy), na górze lub na dole. Pozostaw obciążalność pustą, aby nie pokazywać żadnego z nich."
+                        "description": "Leviton nie podaje obciążalności rozdzielnic, więc ustaw ją pod nazwą każdej rozdzielnicy. Wybierz rozdzielnicę główną lub podrozdzielnicę, a następnie wpisz jej obciążalność (Amps): dla rozdzielnicy głównej prąd znamionowy wyłącznika głównego, dla podrozdzielnicy prąd znamionowy wyłącznika, który ją zasila. Karta pokazuje na tej podstawie wykorzystanie obciążalności na stronie w pasku bocznym i na kartach w dashboardach. Rozdzielnice główne pokazują też swój wyłącznik główny i jego prąd znamionowy na górze lub na dole, zależnie od kierunku montażu. Pozostaw obciążalność pustą, aby ukryć jedno i drugie."
                     },
                     "sub_panels": {
                         "name": "Podrozdzielnice",
-                        "description": "Jeśli rozdzielnica jest zasilana z wyłącznika w innej rozdzielnicy, wybierz ten wyłącznik obok jej nazwy. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy i będzie można z niego do niej przejść. Jeśli ten wyłącznik nie jest inteligentny, wpisz jego prąd znamionowy w polu zakończonym (A) pod nim, aby karta mogła pokazać, jaką jego część wykorzystuje podrozdzielnica."
+                        "description": "Jeśli rozdzielnica jest zasilana z wyłącznika w innej rozdzielnicy, wybierz ten wyłącznik obok jej nazwy. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy i będzie można z niego do niej przejść. Jeśli ten wyłącznik nie jest inteligentny, wpisz jego prąd znamionowy w polu zakończonym (Amps) pod nim, aby karta mogła pokazać, jaką jego część wykorzystuje podrozdzielnica."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Rozdzielnica główna, wyłącznik główny obok pozycji 1 i 2",
                 "top": "Rozdzielnica główna, wyłącznik główny na górze",
                 "bottom": "Rozdzielnica główna, wyłącznik główny na dole",
-                "none": "Podrozdzielnica, bez wyłącznika głównego"
+                "none": "Podrozdzielnica, bez wyłącznika głównego",
+                "none_flipped": "Podrozdzielnica, bez wyłącznika głównego, odwrócona"
             }
         }
     },

@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Centraltyp och belastningskapacitet",
-                        "description": "Leviton rapporterar inte hur mycket en elcentral klarar. Ange under varje elcentrals namn om den är en huvudcentral med egen huvudbrytare eller en undercentral utan, och skriv in dess belastningskapacitet i ampere i fältet som slutar på (A): för en huvudcentral huvudbrytarens märkström, för en undercentral märkströmmen hos brytaren som matar den, till exempel en huvudbrytare vid elmätaren. Kortet visar då hur mycket av den som används, på sidan i sidofältet och på kort i instrumentpaneler som inte har ett eget värde, och visar en huvudcentrals huvudbrytare med dess märkström bredvid plats 1 och 2 (som följer elcentralens riktning), överst eller nederst. Lämna kapaciteten tom för att inte visa något av dem."
+                        "description": "Leviton rapporterar inte elcentralens kapacitet, så ange den under varje elcentrals namn. Välj huvudcentral eller undercentral och skriv sedan in dess kapacitet (Amps): huvudbrytarens märkström för en huvudcentral, eller märkströmmen hos brytaren som matar den för en undercentral. Kortet använder den för att visa hur mycket av kapaciteten som används, på sidan i sidofältet och på kort i instrumentpaneler. Huvudcentraler visar också sin huvudbrytare och märkström överst eller nederst, beroende på riktningen. Lämna kapaciteten tom för att dölja båda."
                     },
                     "sub_panels": {
                         "name": "Undercentraler",
-                        "description": "Om en elcentral matas från en dvärgbrytare i en annan elcentral väljer du den dvärgbrytaren bredvid centralens namn. Dvärgbrytaren visar sedan undercentralens aktuella belastning och leder vidare till undercentralen. Om dvärgbrytaren inte är en smart brytare anger du dess storlek i fältet som slutar på (A) under den, så att kortet kan visa hur mycket av den undercentralen använder."
+                        "description": "Om en elcentral matas från en dvärgbrytare i en annan elcentral väljer du den dvärgbrytaren bredvid centralens namn. Dvärgbrytaren visar sedan undercentralens aktuella belastning och leder vidare till undercentralen. Om dvärgbrytaren inte är en smart brytare anger du dess storlek i fältet som slutar på (Amps) under den, så att kortet kan visa hur mycket av den undercentralen använder."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Huvudcentral, huvudbrytare bredvid plats 1 och 2",
                 "top": "Huvudcentral, huvudbrytare överst",
                 "bottom": "Huvudcentral, huvudbrytare nederst",
-                "none": "Undercentral, ingen huvudbrytare"
+                "none": "Undercentral, ingen huvudbrytare",
+                "none_flipped": "Undercentral, ingen huvudbrytare, upp och ner"
             }
         }
     },

@@ -83,7 +83,7 @@ Features:
 - Breakers show what the hardware shows, following Leviton's own handle and LED table: a green handle window when on, a white one with the handle switched over when turned off by hand, red with the handle centered when tripped. A breaker switched off remotely keeps its green handle and lights its "OFF" LED, as the real one does. Gen 1 smart breakers are drawn as they look: no "OFF" LED, their LEDs in a light strip down the seam, and on a plain one a single unlabelled LED that blinks when you identify the breaker (a protected one blinks its AF and GF LEDs). Switched off remotely, they show as tripped, because that is how Leviton switches them off.
 - AFCI, GFCI and dual function (AFCI/GFCI) breakers are drawn as they are, with their `AF` and `GF` LEDs and an `OFF/TEST` handle. When a breaker trips, its label says why (ground fault, arc fault, overload, short circuit) and the card lights the LED the real breaker lights for that cause: `GF` for a ground fault, `AF` for an arc fault. A breaker that reports a fault in itself (a failed self-test, end of life or a GFCI error, on either pole of a 2-pole breaker) is drawn tripped with those LEDs flashing fast, and its label says it needs service, as Leviton's app does. The LEDs blink at the rates in Leviton's spec sheets, which differ slightly between Gen 1 and Gen 2 breakers. The kind of breaker is read from its Leviton model number, so there is nothing to set up.
 - Left/right column placement and space numbering match the physical panel (odd positions left, even positions right). 2-pole (240V) breakers span both of their positions with the single handle where Leviton puts it, open spaces show filler plates, and non-smart breakers are shown as standard Leviton breakers.
-- Panel mounting orientation (normal vs. rotated 180°) is auto-detected from Leviton's own data — no config needed unless you want to force an orientation.
+- Panel mounting orientation (normal vs. rotated 180°) is auto-detected from Leviton's own data, and each load center's panel type can set it (see [Panel type and load capacity](#panel-type-and-load-capacity)) — no config needed unless you want to force an orientation.
 - Each circuit is labeled beside the door with its name, live power and current. The line under a label fills to show how close the circuit runs to its rating (amber above 50%, red above 80%). Over-current, over-voltage, under-voltage and fault alarms turn the label red.
 - Click a breaker's rocker to switch it. The card asks for confirmation first and shows the breaker as switching until Leviton confirms the change. Needs **Allow Breaker Control** in the integration options.
 - Click a label, or anywhere else on a breaker, for its detail sheet: on/off control, Identify (Blink LED), live power, current and load, today's and lifetime energy, every alarm, the raw breaker state and last change reason, Bluetooth signal, model, firmware and serial number. Each row opens Home Assistant's own dialog (with history) for that entity, and, for administrators, **Device page** goes to the breaker's device.
@@ -116,7 +116,7 @@ confirm: true              # optional, ask before switching a breaker
 show_panel_info: true      # optional, the panel's own readings above the door
 appearance: auto           # optional, auto (follow theme), light, or dark (dimmed lighting)
 # load_capacity: 200       # optional, what this load center can carry, in amps: the header shows how much of it is in use, and a main panel's main breaker is drawn with it as its rating (Leviton doesn't report it); overrides the capacity set under Panel type and load capacity in the integration's options. The first test builds called it main_breaker, which still works
-# rotate_180: true         # optional override — only set this if auto-detected orientation is wrong
+# rotate_180: true         # optional override — only set this if the panel is drawn the wrong way up
 ```
 
 If you have multiple panels, add one card per panel, each with its own `device_id`.
@@ -219,7 +219,7 @@ Leviton reports each load center separately; nothing in its data says that one o
 
 1. Open **Settings > Devices & Services > Leviton LDATA > Configure** and expand **Sub-panels**. The section is there when the integration has found two or more load centers.
 2. Each load center has a field under its name. For a sub-panel, choose the breaker in the other load center that feeds it (listed as *load center · position · breaker name*). Leave the others on **Not fed from another load center**.
-   If that breaker isn't a smart breaker, also enter its size in the field below, ending in **(A)**: Leviton knows a smart breaker's rating but not a dumb one's.
+   If that breaker isn't a smart breaker, also enter its size in the field below, ending in **(Amps)**: Leviton knows a smart breaker's rating but not a dumb one's.
 3. Save. The integration reloads, and the link shows without a restart.
 
 What you get:
@@ -263,16 +263,16 @@ There's no registry mapping a device id to "the dashboard view showing its card"
 
 ### Panel type and load capacity
 
-Leviton doesn't report what a load center can carry either. Say once whether each load center is a main panel, with its own main breaker, or a sub-panel without one, and give its load capacity. Every panel card then shows how much of it is in use under **Panel load**, e.g. *40% of 200 A*, on the [sidebar page](#sidebar-page) and on dashboard cards alike, and draws a main panel's main breaker:
+Leviton doesn't report what a load center can carry either. Give each load center's type and capacity once, and every panel card shows how much of it is in use under **Panel load**, e.g. *40% of 200 A*, on the [sidebar page](#sidebar-page) and on dashboard cards alike:
 
 1. Open **Settings > Devices & Services > Leviton LDATA > Configure** and expand **Panel type and load capacity**.
-2. Each load center has two fields under its name. In the one ending in **(A)**, enter its load capacity in amps: for a main panel, its main breaker's rating; for a sub-panel, the rating of the breaker that feeds it, such as a main breaker by the meter. Leave it empty for a main-lug panel, to show neither.
-3. In the field with the load center's name, choose what it is:
-   - **Main panel, main breaker next to positions 1 and 2** (the default: at the top, or at the bottom of a panel turned 180°), **at the top** or **at the bottom**;
-   - **Sub-panel, no main breaker**: nothing is drawn, and **Panel load** still shows how much of its capacity is in use. This suits a load center fed from a main breaker by the meter, as well as one fed from a breaker in another load center (see [Sub-panels](#sub-panels)).
+2. In the field with the load center's name, choose its type:
+   - **Main panel, main breaker at the top**, or **at the bottom** for a panel mounted upside down. The card draws the main breaker with your rating printed on it. At the bottom it turns the whole panel, so positions 1 and 2 are next to the main breaker there too.
+   - **Sub-panel, no main breaker**, or **Sub-panel, no main breaker, flipped** for one mounted upside down: one fed from a main breaker by the meter, or from a breaker in another load center (see [Sub-panels](#sub-panels)). No main breaker is drawn. Every load center starts as a sub-panel, flipped if Leviton reports it mounted upside down.
+3. In the field ending in **(Amps)**, enter its capacity: the main breaker's rating for a main panel, or the feeding breaker's rating for a sub-panel. Leave it empty to show neither.
 4. Save. The integration reloads, and the cards show it without a restart.
 
-The main breaker is drawn as Leviton's 2nd Gen one (LM100-T to LM225-T) with your rating printed on it, and shows as switched off when neither leg has voltage. At the bottom of the panel it is drawn upside down, as it is fitted there, with its handle next to positions 1 and 2. A dashboard card's own `load_capacity` wins over the capacity set here; the panel type and position apply to every card of that load center.
+The main breaker is Leviton's 2nd Gen one (LM100-T to LM225-T). It shows as switched off when neither leg has voltage, and at the bottom of the panel it is upside down, as it is fitted there. A dashboard card's own `load_capacity` wins over the capacity set here, and its `rotate_180` over the way up.
 
 ## Sidebar page
 

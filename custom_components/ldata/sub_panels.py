@@ -29,14 +29,18 @@ without one, and gives its load capacity in amps, in the same options:
 
 The rating is the load capacity: a main panel's main breaker rating, or for
 a sub-panel the rating of the breaker that feeds it (by the meter, say). A
-main panel's position says where its main breaker is drawn; without one, the
-card draws it next to positions 1 and 2, which follow the panel's direction.
-A sub-panel's position is "none": no main breaker is drawn, and its rating
-only says how much of it is in use. Without a rating neither is shown, as
-for a main-lug panel. The panel's Cloud Connected entity passes both on, so
-the panel card shows how much of its capacity is in use, and draws a main
-panel's main breaker, on the sidebar page and on any dashboard card that
-doesn't set its own rating.
+main panel's position is "top", or "bottom" for a panel mounted upside down.
+The main breaker is always next to positions 1 and 2, so the card turns the
+whole panel to match. A sub-panel's position is "none", or "none_flipped" for
+one mounted upside down: no main breaker is drawn, and its rating only says
+how much of it is in use. A load center is a sub-panel until the user says
+otherwise, flipped if Leviton reports it turned 180° (default_position), and
+that default isn't stored, so the card goes on following Leviton until the
+user picks something else. Without a rating neither is shown, as for a
+main-lug panel. The panel's Cloud Connected entity
+passes both on, so the panel card shows how much of its capacity is in use,
+and draws a main panel's main breaker, on the sidebar page and on any
+dashboard card that doesn't set its own load_capacity.
 """
 from __future__ import annotations
 
@@ -51,10 +55,13 @@ from .const import DOMAIN, PANEL_SUBENTRY_TYPE
 
 SUB_PANELS = "sub_panels"
 MAIN_BREAKERS = "main_breakers"
-# Where a main panel's main breaker is drawn: next to positions 1 and 2
-# (MAIN_AUTO, which follows the panel's direction), or at the top or the
-# bottom of the panel. MAIN_NONE is a sub-panel, which has no main breaker.
-MAIN_AUTO, MAIN_TOP, MAIN_BOTTOM, MAIN_NONE = "auto", "top", "bottom", "none"
+# A main panel's main breaker is at the top, or at the bottom of a panel
+# mounted upside down; either way it is next to positions 1 and 2. MAIN_NONE
+# is a sub-panel, which has no main breaker, and MAIN_NONE_FLIPPED one
+# mounted upside down. A main breaker at the bottom, or a flipped sub-panel,
+# turns the whole panel.
+MAIN_TOP, MAIN_BOTTOM, MAIN_NONE, MAIN_NONE_FLIPPED = "top", "bottom", "none", "none_flipped"
+PANEL_TYPES = (MAIN_TOP, MAIN_BOTTOM, MAIN_NONE, MAIN_NONE_FLIPPED)
 # The form's choice for a load center that no other one feeds.
 NOT_FED = "none"
 
@@ -147,12 +154,24 @@ def main_breaker_ratings(options: Mapping[str, Any]) -> dict[str, float]:
 
 
 def main_breaker_positions(options: Mapping[str, Any]) -> dict[str, str]:
-    """Return {load center id: "top", "bottom", or "none" for a sub-panel} where the user placed the main breaker."""
+    """Return {load center id: its type} where the user chose one: "top" or "bottom", or "none" or "none_flipped" for a sub-panel."""
     return {
         panel_id: entry["position"]
         for panel_id, entry in _main_breaker_entries(options).items()
-        if entry.get("position") in (MAIN_TOP, MAIN_BOTTOM, MAIN_NONE)
+        if entry.get("position") in PANEL_TYPES
     }
+
+
+def default_position(panel: Mapping[str, Any]) -> str:
+    """Return a load center's type until the user says otherwise: a sub-panel, flipped if Leviton reports it turned 180°.
+
+    An LDATA hub reports no orientation, so its load center counts as upright.
+    """
+    try:
+        turned = float(panel.get("orientation") or 0) == 180
+    except (TypeError, ValueError):
+        turned = False
+    return MAIN_NONE_FLIPPED if turned else MAIN_NONE
 
 
 def feed_ratings(

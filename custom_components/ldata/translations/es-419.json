@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Tipo de centro de carga y capacidad",
-                        "description": "Leviton no reporta cuánta carga admite un centro de carga. Debajo del nombre de cada centro de carga, indique si es un centro de carga principal, con su propio interruptor principal, o un subpanel sin él, y escriba su capacidad de carga en amperios en el campo terminado en (A): para un centro de carga principal, la capacidad de su interruptor principal; para un subpanel, la del interruptor que lo alimenta, por ejemplo un interruptor principal junto al medidor. La tarjeta mostrará cuánto de ella se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor, y mostrará el interruptor principal de un centro de carga principal con su capacidad: junto a las posiciones 1 y 2 (que siguen la orientación del centro de carga), arriba o abajo. Deje la capacidad vacía para no mostrar ninguna de las dos cosas."
+                        "description": "Leviton no reporta la capacidad de los centros de carga, así que configúrela debajo del nombre de cada uno. Seleccione centro de carga principal o subpanel y escriba su capacidad (Amps): la capacidad del interruptor principal para un centro de carga principal, o la del interruptor que lo alimenta para un subpanel. La tarjeta la usa para mostrar el uso de la capacidad en la barra lateral y en las tarjetas de los paneles de control. Los centros de carga principales también muestran su interruptor principal y su capacidad arriba o abajo, según su orientación. Deje la capacidad vacía para ocultar ambas cosas."
                     },
                     "sub_panels": {
                         "name": "Subpaneles",
-                        "description": "Si un centro de carga se alimenta desde un interruptor de otro centro de carga, elija ese interruptor junto a su nombre. Ese interruptor mostrará entonces la carga en tiempo real del subpanel y permitirá ir a él. Si ese interruptor no es inteligente, escriba su capacidad en el campo terminado en (A) que está debajo, para que la tarjeta muestre cuánto de él usa el subpanel."
+                        "description": "Si un centro de carga se alimenta desde un interruptor de otro centro de carga, elija ese interruptor junto a su nombre. Ese interruptor mostrará entonces la carga en tiempo real del subpanel y permitirá ir a él. Si ese interruptor no es inteligente, escriba su capacidad en el campo terminado en (Amps) que está debajo, para que la tarjeta muestre cuánto de él usa el subpanel."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Principal, interruptor principal junto a las posiciones 1 y 2",
                 "top": "Principal, interruptor principal arriba",
                 "bottom": "Principal, interruptor principal abajo",
-                "none": "Subpanel, sin interruptor principal"
+                "none": "Subpanel, sin interruptor principal",
+                "none_flipped": "Subpanel, sin interruptor principal, invertido"
             }
         }
     },

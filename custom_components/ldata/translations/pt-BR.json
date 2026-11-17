@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Tipo de quadro e capacidade de carga",
-                        "description": "A Leviton não informa quanta carga um quadro de distribuição suporta. Abaixo do nome de cada quadro, informe se ele é um quadro geral, com disjuntor geral próprio, ou um quadro secundário sem disjuntor geral, e informe a capacidade de carga em ampères no campo terminado em (A): para um quadro geral, a corrente nominal do disjuntor geral; para um quadro secundário, a do disjuntor que o alimenta, por exemplo um disjuntor geral junto ao medidor. O cartão então mostra quanto dela está em uso, na página da barra lateral e nos cartões dos painéis que não tenham um valor próprio, e mostra o disjuntor geral de um quadro geral com a sua corrente nominal: ao lado das posições 1 e 2 (que seguem a orientação do quadro), em cima ou embaixo. Deixe a capacidade em branco para não mostrar nenhum dos dois."
+                        "description": "A Leviton não informa a capacidade dos quadros de distribuição, então configure-a abaixo do nome de cada quadro. Selecione quadro geral ou quadro secundário e informe a capacidade (Amps): a corrente nominal do disjuntor geral para um quadro geral, ou a do disjuntor que o alimenta para um quadro secundário. O cartão usa esse valor para mostrar o uso da capacidade na barra lateral e nos cartões dos painéis. Os quadros gerais também mostram seu disjuntor geral e a corrente nominal em cima ou embaixo, conforme a orientação. Deixe a capacidade em branco para ocultar os dois."
                     },
                     "sub_panels": {
                         "name": "Quadros secundários",
-                        "description": "Se um quadro de distribuição for alimentado por um disjuntor de outro quadro, escolha esse disjuntor ao lado do nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro secundário e dá acesso a ele. Se esse disjuntor não for inteligente, informe a capacidade dele no campo terminado em (A) logo abaixo, para que o cartão mostre quanto dele o quadro secundário usa."
+                        "description": "Se um quadro de distribuição for alimentado por um disjuntor de outro quadro, escolha esse disjuntor ao lado do nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro secundário e dá acesso a ele. Se esse disjuntor não for inteligente, informe a capacidade dele no campo terminado em (Amps) logo abaixo, para que o cartão mostre quanto dele o quadro secundário usa."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Quadro geral, disjuntor geral ao lado das posições 1 e 2",
                 "top": "Quadro geral, disjuntor geral em cima",
                 "bottom": "Quadro geral, disjuntor geral embaixo",
-                "none": "Quadro secundário, sem disjuntor geral"
+                "none": "Quadro secundário, sem disjuntor geral",
+                "none_flipped": "Quadro secundário, sem disjuntor geral, invertido"
             }
         }
     },

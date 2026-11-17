@@ -54,8 +54,11 @@
  *                              # sub-panel, and where its main breaker is drawn.
  *                              # (Called main_breaker in the first test builds,
  *                              # which is still read.)
- *   rotate_180: true           # optional override — by default the card reads
- *                              # the panel's reported mounting orientation.
+ *   rotate_180: true           # optional override — by default the panel is
+ *                              # drawn the way up its panel type in the
+ *                              # integration's options says (a main breaker at
+ *                              # the bottom, or a flipped sub-panel, turns it
+ *                              # 180°), or else as Leviton reports it mounted.
  *   sub_panels:                # optional — link a breaker that feeds a
  *                              # downstream sub-panel to that panel's device, so
  *                              # its label shows the sub-panel's live load and
@@ -848,8 +851,8 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       confirm: true,
       show_panel_info: true,
       appearance: "auto",
-      // rotate_180 intentionally has no default — unset means "use the
-      // panel's own reported orientation".
+      // rotate_180 intentionally has no default — unset means "the way up
+      // the integration's options or Leviton say" (see _upsideDown).
       ...config,
       sub_panels: Array.isArray(config.sub_panels) ? config.sub_panels : [],
     };
@@ -1390,10 +1393,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     let learned = rememberLayout(cloudId, cloud, PANEL_LAYOUT);
     const ca = layoutOf(cloudId, cloud);
 
-    const rotate =
-      cfg.rotate_180 !== undefined && cfg.rotate_180 !== null
-        ? !!cfg.rotate_180
-        : Number(ca.orientation) === 180;
+    const rotate = this._upsideDown(ca);
 
     const slots = [];
     const taken = new Set();
@@ -1511,7 +1511,6 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       cfg.show_power,
       cfg.show_panel_info,
       this._mainDrawn(ca),
-      this._mainLow(ca, rotate),
       Object.keys(d.panel.roles).sort(),
       d.cts.map((c) => [c.deviceId, c.name]),
       placed.map((p) => [
@@ -1543,7 +1542,6 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       structKey,
       panelDevice,
       mainBreaker: this._mainDrawn(ca),
-      mainLow: this._mainLow(ca, rotate),
     };
   }
 
@@ -1681,20 +1679,28 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     return positive(this._config.load_capacity) ?? positive(layout && layout.load_capacity);
   }
 
-  // The main breaker to draw: its rating (the capacity), or null for none. A
-  // sub-panel (position "none") has no main breaker of its own; its capacity
-  // is what feeds it, such as a main breaker by the meter, and still says how
-  // much of it is in use.
+  // The main breaker to draw: its rating (the capacity), or null for none.
+  // Only a main panel, one the integration's options put a main breaker at
+  // the top or the bottom of, has one. A load center is a sub-panel until
+  // said otherwise: its capacity is what feeds it, such as a main breaker by
+  // the meter, and still says how much of it is in use.
   _mainDrawn(layout) {
-    return layout && layout.main_breaker_position === "none" ? null : this._capacity(layout);
+    const place = layout && layout.main_breaker_position;
+    return place === "top" || place === "bottom" ? this._capacity(layout) : null;
   }
 
-  // Whether the main breaker is drawn at the bottom of the panel: where the
-  // integration's options put it, or else next to positions 1 and 2, which
-  // are at the bottom of a panel turned 180°.
-  _mainLow(layout, rotate) {
+  // Whether the panel is drawn turned 180°, with positions 1 and 2 at the
+  // bottom: as this card's rotate_180 says, or else as the panel type in the
+  // integration's options says (a main breaker at the bottom, or a flipped
+  // sub-panel), or else as Leviton reports the panel mounted. A main breaker
+  // is always next to positions 1 and 2, so it turns with them.
+  _upsideDown(layout) {
+    const turn = this._config.rotate_180;
+    if (turn !== undefined && turn !== null) return !!turn;
     const place = layout && layout.main_breaker_position;
-    return place === "bottom" ? true : place === "top" ? false : !!rotate;
+    if (place === "top" || place === "none") return false;
+    if (place === "bottom" || place === "none_flipped") return true;
+    return Number(layout && layout.orientation) === 180;
   }
 
   _headDynamics(st, d) {
@@ -1784,7 +1790,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     }
     // At the bottom of the panel the main breaker is fitted upside down, its
     // handle next to positions 1 and 2: that image, and its rating turned with it.
-    const low = !!(main && m.mainLow);
+    const low = !!(main && m.rotate);
     this._mainArt = low ? "main-inv" : "main";
     const [rx, ry] = low ? [G.main.w - G.main.rating[0], G.main.h - G.main.rating[1]] : G.main.rating;
     const mainHtml = main
@@ -1798,7 +1804,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
 
     this._content.innerHTML = `
       <div class="stage">
-        <div class="cover${main ? " has-main" : ""}${main && m.mainLow ? " main-low" : ""}" style="--rows:${rows}">
+        <div class="cover${main ? " has-main" : ""}${low ? " main-low" : ""}" style="--rows:${rows}">
           <i class="screw screw--tl"></i><i class="screw screw--tr"></i><i class="screw screw--bl"></i><i class="screw screw--br"></i>
           ${this._headHtml(m)}
           <div class="body">

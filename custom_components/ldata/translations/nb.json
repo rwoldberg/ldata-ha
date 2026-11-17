@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Tavletype og belastningskapasitet",
-                        "description": "Leviton rapporterer ikke hvor mye et sikringsskap tåler. Angi under navnet på hvert sikringsskap om det er en hovedfordeling med egen hovedsikring eller en underfordeling uten, og skriv inn belastningskapasiteten i ampere i feltet som slutter på (A): for en hovedfordeling merkestrømmen til hovedsikringen, for en underfordeling merkestrømmen til sikringen som forsyner den, for eksempel en hovedsikring ved strømmåleren. Kortet viser da hvor mye av den som brukes, både på siden i sidepanelet og på kort i dashbord som ikke har sin egen verdi, og viser hovedsikringen til en hovedfordeling med merkestrømmen ved plass 1 og 2 (som følger retningen sikringsskapet er montert i), øverst eller nederst. La kapasiteten stå tom for å vise ingen av delene."
+                        "description": "Leviton rapporterer ikke kapasiteten til sikringsskap, så angi den under navnet på hvert sikringsskap. Velg hovedfordeling eller underfordeling, og skriv deretter inn kapasiteten (Amps): merkestrømmen til hovedsikringen for en hovedfordeling, eller merkestrømmen til sikringen som forsyner den, for en underfordeling. Kortet bruker den til å vise hvor mye av kapasiteten som brukes, på siden i sidepanelet og på kort i dashbord. Hovedfordelinger viser også hovedsikringen og merkestrømmen øverst eller nederst, avhengig av monteringsretningen. La kapasiteten stå tom for å skjule begge deler."
                     },
                     "sub_panels": {
                         "name": "Underfordelinger",
-                        "description": "Hvis et sikringsskap forsynes fra en automatsikring i et annet sikringsskap, velger du den automatsikringen ved siden av navnet. Automatsikringen viser deretter underfordelingens gjeldende belastning og fører videre til underfordelingen. Hvis automatsikringen ikke er en smart automatsikring, angir du størrelsen i feltet som slutter på (A), under den, slik at kortet kan vise hvor mye av den underfordelingen bruker."
+                        "description": "Hvis et sikringsskap forsynes fra en automatsikring i et annet sikringsskap, velger du den automatsikringen ved siden av navnet. Automatsikringen viser deretter underfordelingens gjeldende belastning og fører videre til underfordelingen. Hvis automatsikringen ikke er en smart automatsikring, angir du størrelsen i feltet som slutter på (Amps), under den, slik at kortet kan vise hvor mye av den underfordelingen bruker."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Hovedfordeling, hovedsikring ved plass 1 og 2",
                 "top": "Hovedfordeling, hovedsikring øverst",
                 "bottom": "Hovedfordeling, hovedsikring nederst",
-                "none": "Underfordeling, ingen hovedsikring"
+                "none": "Underfordeling, ingen hovedsikring",
+                "none_flipped": "Underfordeling, ingen hovedsikring, opp ned"
             }
         }
     },

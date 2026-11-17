@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Type de panneau et capacité de charge",
-                        "description": "Leviton ne transmet pas la charge qu'un panneau électrique peut supporter. Sous le nom de chaque panneau, indiquez s'il s'agit d'un panneau principal, avec son propre disjoncteur principal, ou d'un panneau secondaire sans disjoncteur principal, et saisissez sa capacité de charge en ampères dans le champ se terminant par (A) : pour un panneau principal, le courant nominal de son disjoncteur principal ; pour un panneau secondaire, celui du disjoncteur qui l'alimente, par exemple un disjoncteur principal près du compteur. La carte affiche alors la part qui en est utilisée, sur la page de la barre latérale et sur les cartes des tableaux de bord qui n'ont pas leur propre valeur, et affiche le disjoncteur principal d'un panneau principal avec son courant nominal : à côté des emplacements 1 et 2 (qui suivent le sens du panneau), en haut ou en bas. Laissez la capacité vide pour n'afficher ni l'un ni l'autre."
+                        "description": "Leviton ne transmet pas la capacité des panneaux électriques : indiquez-la sous le nom de chaque panneau. Choisissez panneau principal ou panneau secondaire, puis saisissez sa capacité (Amps) : le courant nominal du disjoncteur principal pour un panneau principal, ou celui du disjoncteur qui l'alimente pour un panneau secondaire. La carte s'en sert pour afficher l'utilisation de la capacité dans la barre latérale et sur les cartes des tableaux de bord. Les panneaux principaux affichent aussi leur disjoncteur principal et son courant nominal en haut ou en bas, selon leur orientation. Laissez la capacité vide pour masquer les deux."
                     },
                     "sub_panels": {
                         "name": "Panneaux secondaires",
-                        "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder. Si ce disjoncteur n'est pas un disjoncteur intelligent, indiquez son calibre dans le champ se terminant par (A) en dessous, pour que la carte puisse montrer quelle part en utilise le panneau secondaire."
+                        "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder. Si ce disjoncteur n'est pas un disjoncteur intelligent, indiquez son calibre dans le champ se terminant par (Amps) en dessous, pour que la carte puisse montrer quelle part en utilise le panneau secondaire."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Panneau principal, disjoncteur principal à côté des emplacements 1 et 2",
                 "top": "Panneau principal, disjoncteur principal en haut",
                 "bottom": "Panneau principal, disjoncteur principal en bas",
-                "none": "Panneau secondaire, sans disjoncteur principal"
+                "none": "Panneau secondaire, sans disjoncteur principal",
+                "none_flipped": "Panneau secondaire, sans disjoncteur principal, inversé"
             }
         }
     },

@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Panel type and load capacity",
-                        "description": "Leviton doesn't report what a load center can carry. Under each load center's name, say whether it is a main panel, with its own main breaker, or a sub-panel without one, and enter its load capacity in amps in the field ending in (A): for a main panel, its main breaker's rating; for a sub-panel, the rating of the breaker that feeds it, such as a main breaker by the meter. The card then shows how much of it is in use, on the sidebar page and on dashboard cards that don't set their own, and draws a main panel's main breaker with its rating, next to positions 1 and 2 (which follow the panel's direction), at the top or at the bottom. Leave the capacity empty to show neither."
+                        "description": "Leviton doesn't report load center capacity, so configure it under each panel's name. Select main panel or sub-panel, then enter its capacity (Amps): the main breaker's rating for a main panel, or the feeding breaker's rating for a sub-panel. The card uses this to show capacity utilization on the sidebar and dashboard cards. Main panels also display their breaker and rating at the top or bottom, depending on orientation. Leave capacity blank to hide both."
                     },
                     "sub_panels": {
                         "name": "Sub-panels",
-                        "description": "If a load center is fed from a breaker in another one, choose that breaker next to its name. That breaker then shows the sub-panel's live load and leads to the sub-panel. If that breaker isn't a smart breaker, enter its size in the field ending in (A) below it, so the card can show how much of it the sub-panel uses."
+                        "description": "If a load center is fed from a breaker in another one, choose that breaker next to its name. That breaker then shows the sub-panel's live load and leads to the sub-panel. If that breaker isn't a smart breaker, enter its size in the field ending in (Amps) below it, so the card can show how much of it the sub-panel uses."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Main panel, main breaker next to positions 1 and 2",
                 "top": "Main panel, main breaker at the top",
                 "bottom": "Main panel, main breaker at the bottom",
-                "none": "Sub-panel, no main breaker"
+                "none": "Sub-panel, no main breaker",
+                "none_flipped": "Sub-panel, no main breaker, flipped"
             }
         }
     },

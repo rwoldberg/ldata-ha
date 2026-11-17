@@ -81,11 +81,11 @@
                 "sections": {
                     "main_breakers": {
                         "name": "Tipo de quadro e capacidade de carga",
-                        "description": "A Leviton não indica que carga um quadro elétrico suporta. Por baixo do nome de cada quadro, indique se é um quadro geral, com disjuntor geral próprio, ou um quadro parcial sem disjuntor geral, e indique a capacidade de carga em amperes no campo terminado em (A): para um quadro geral, a corrente nominal do disjuntor geral; para um quadro parcial, a do disjuntor que o alimenta, por exemplo um disjuntor geral junto ao contador. O cartão mostra então quanto dela está em uso, na página da barra lateral e nos cartões dos painéis que não tenham um valor próprio, e mostra o disjuntor geral de um quadro geral com a sua corrente nominal: ao lado das posições 1 e 2 (que seguem a orientação do quadro), em cima ou em baixo. Deixe a capacidade vazia para não mostrar nenhum dos dois."
+                        "description": "A Leviton não indica a capacidade dos quadros elétricos, por isso configure-a por baixo do nome de cada quadro. Selecione quadro geral ou quadro parcial e indique a capacidade (Amps): a corrente nominal do disjuntor geral para um quadro geral, ou a do disjuntor que o alimenta para um quadro parcial. O cartão usa este valor para mostrar a utilização da capacidade na barra lateral e nos cartões dos painéis. Os quadros gerais mostram também o seu disjuntor geral e a corrente nominal em cima ou em baixo, conforme a orientação. Deixe a capacidade vazia para ocultar ambos."
                     },
                     "sub_panels": {
                         "name": "Quadros parciais",
-                        "description": "Se um quadro elétrico for alimentado por um disjuntor de outro quadro, escolha esse disjuntor junto ao nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro parcial e dá acesso a ele. Se esse disjuntor não for inteligente, indique o calibre no campo terminado em (A) por baixo, para que o cartão mostre quanto dele o quadro parcial usa."
+                        "description": "Se um quadro elétrico for alimentado por um disjuntor de outro quadro, escolha esse disjuntor junto ao nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro parcial e dá acesso a ele. Se esse disjuntor não for inteligente, indique o calibre no campo terminado em (Amps) por baixo, para que o cartão mostre quanto dele o quadro parcial usa."
                     }
                 }
             }
@@ -110,10 +110,10 @@
         },
         "main_breaker_position": {
             "options": {
-                "auto": "Quadro geral, disjuntor geral ao lado das posições 1 e 2",
                 "top": "Quadro geral, disjuntor geral em cima",
                 "bottom": "Quadro geral, disjuntor geral em baixo",
-                "none": "Quadro parcial, sem disjuntor geral"
+                "none": "Quadro parcial, sem disjuntor geral",
+                "none_flipped": "Quadro parcial, sem disjuntor geral, invertido"
             }
         }
     },
