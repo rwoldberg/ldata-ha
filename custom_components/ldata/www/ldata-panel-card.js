@@ -80,7 +80,7 @@ const CARD_VERSION = "3.1.0";
 // tools/panel_card_art. ART_REV is the content hash of that folder (written
 // by build_assets.py); it is part of every image URL, so browsers fetch new
 // artwork after an upgrade instead of serving a cached copy.
-const ART_REV = "30073e47f0";
+const ART_REV = "700b37fb05";
 const ART_SERVED = new URL("/ldata_static/img/", location.href).href; // always served by the integration
 
 // Where this file was loaded from. `import.meta.url` would say, but it is a
@@ -133,7 +133,9 @@ const G = {
   gen1LedX: 0, // a Gen 1 breaker's LEDs, in a light strip centred on the seam
   rating: { d: 1.775, x: 0.19, size: 0.106 },
   hero: { w1: 1.14, w2: 2.14, h: 3.796, top: 0.52 }, // upright product shot
-  main: { w: 3.6, h: 2.7, scale: 1.25, rating: [1.372, 2.212] }, // main breaker in its opening
+  // Main breaker (Leviton's LM-T) in its opening, and its rating: printed
+  // bold and reading upward, where Leviton prints it.
+  main: { w: 3.5, h: 3.8, rating: [1.852, 1.637], size: 0.254 },
 };
 G.fieldW = 2 * G.tileW + G.strip + 2 * G.fieldX;
 
@@ -467,12 +469,12 @@ const ledHtml = (which, spot) => `<i class="led led--${which}" style="left:${pct
 
 // Printed amp rating. SVG, so it scales with the artwork instead of being
 // clamped by the browser's minimum font size.
-function ratingSvg(w, h, x, y, turn, text, size) {
+function ratingSvg(w, h, x, y, turn, text, size, bold = false) {
   return `<svg class="ink" viewBox="0 0 ${w * 100} ${h * 100}" preserveAspectRatio="none" aria-hidden="true"><text transform="translate(${(
     x * 100
   ).toFixed(1)} ${(y * 100).toFixed(1)}) rotate(${turn})" text-anchor="middle" dominant-baseline="central" font-size="${(
     size * 100
-  ).toFixed(1)}">${esc(text)}</text></svg>`;
+  ).toFixed(1)}"${bold ? ' font-weight="700"' : ""}>${esc(text)}</text></svg>`;
 }
 
 // ── Language ─────────────────────────────────────────────────────────────
@@ -1771,7 +1773,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     const mainHtml = main
       ? `<div class="main" data-h="main">
            <img class="main-sp" data-h="mainImg" alt="" draggable="false">
-           ${ratingSvg(G.main.w, G.main.h, G.main.rating[0], G.main.rating[1], 90, String(main), G.rating.size * G.main.scale)}
+           ${ratingSvg(G.main.w, G.main.h, G.main.rating[0], G.main.rating[1], -90, String(main), G.main.size, true)}
            <span class="main-cap" aria-hidden="true">${esc(this._t("card.meter.main"))}</span>
          </div>`
       : "";
@@ -3154,10 +3156,10 @@ button { font: inherit; }
     calc(var(--u) * (0.78 * var(--k) + 0.25) + var(--mainh-low, 0px));
   padding: 0 calc(var(--u) * var(--edge));
 }
-.has-main { --mainh: calc(var(--u) * 2.86); }
+.has-main { --mainh: calc(var(--u) * 3.96); }
 /* A panel turned 180° has positions 1 and 2 at the bottom, and its main
    breaker next to them. */
-.has-main.main-low { --mainh: 0px; --mainh-low: calc(var(--u) * 2.86); }
+.has-main.main-low { --mainh: 0px; --mainh-low: calc(var(--u) * 3.96); }
 /* The embossed surround, door opening and dead front rim: one nine-slice.
    Its middle is the flat dead front, so it also paints behind the breakers. */
 .well {
@@ -3266,7 +3268,7 @@ button { font: inherit; }
 
 /* Main breaker, seen through its own opening above the columns (below them
    on a panel turned 180°). */
-.main { position: relative; grid-column: 3 / 6; grid-row: 1; align-self: end; justify-self: center; width: calc(var(--u) * 3.6); height: calc(var(--u) * 2.7); margin-bottom: calc(var(--u) * 0.16); }
+.main { position: relative; grid-column: 3 / 6; grid-row: 1; align-self: end; justify-self: center; width: calc(var(--u) * 3.5); height: calc(var(--u) * 3.8); margin-bottom: calc(var(--u) * 0.16); }
 .main-low .main { grid-row: -2; align-self: start; margin-bottom: 0; margin-top: calc(var(--u) * 0.16); }
 .main-sp { position: absolute; inset: 0; display: block; width: 100%; height: 100%; user-select: none; }
 .main-cap {
@@ -3288,7 +3290,7 @@ button { font: inherit; }
 /* a word too long for that (see _fitMainCaption) runs down the breaker's side */
 .main-cap--tall {
   max-width: none;
-  max-height: calc(var(--u) * 2.6);
+  max-height: calc(var(--u) * 3.6);
   writing-mode: vertical-rl;
   text-overflow: clip;
 }

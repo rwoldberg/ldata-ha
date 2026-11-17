@@ -95,6 +95,33 @@ def test_card_and_model_agree_on_where_the_leds_are() -> None:
     assert re.search(r"\bgen1LedX: 0,", CARD)
 
 
+def test_card_and_model_agree_on_the_main_breaker() -> None:
+    # The main breaker image leaves its rating off and the card prints it, so
+    # both have to agree on the image's size and where the rating goes.
+    scene = (WWW.parents[2] / "tools" / "panel_card_art" / "ld_scene.py").read_text()
+
+    def number(name: str) -> float:
+        found = re.search(rf"^{name} = (-?[0-9.]+)", scene, re.MULTILINE)
+        assert found is not None, name
+        return float(found.group(1))
+
+    plate = re.search(r"^LMT_W, LMT_H = ([0-9.]+), ([0-9.]+)", scene, re.MULTILINE)
+    boss = re.search(r"^BOSS_W, BOSS_H = ([0-9.]+), ([0-9.]+)", scene, re.MULTILINE)
+    rating = re.search(r"^LMT_RATING = \((-?[0-9.]+), (-?[0-9.]+), ([0-9.]+)\)", scene, re.MULTILINE)
+    placed = re.search(r"\bmain: \{ w: ([0-9.]+), h: ([0-9.]+), rating: \[([0-9.]+), ([0-9.]+)\], size: ([0-9.]+) \}", CARD)
+    assert plate is not None and boss is not None and rating is not None and placed is not None
+    border = 2 * (number("LMT_GAP") + float(boss.group(1)) + number("MAIN_M"))
+    width, height = float(plate.group(1)) + border, float(plate.group(2)) + border
+    x, y, cap = (float(value) for value in rating.groups())
+    card = [float(value) for value in placed.groups()]
+
+    assert abs(card[0] - width) < 1e-3 and abs(card[1] - height) < 1e-3
+    assert abs(card[2] - (width / 2 + x)) < 1e-3 and abs(card[3] - (height / 2 - y)) < 1e-3
+    assert abs(card[4] - cap / 0.716) < 1e-3  # Arial's cap height is 0.716 of its size
+    # The stylesheet draws the image at that size too.
+    assert f"width: calc(var(--u) * {width:g}); height: calc(var(--u) * {height:g})" in CARD
+
+
 def test_art_rev_matches_the_shipped_images() -> None:
     # ART_REV is part of every image URL. If the images change and it doesn't,
     # browsers keep showing cached artwork after an upgrade.

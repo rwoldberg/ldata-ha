@@ -270,7 +270,7 @@ Leviton doesn't report a load center's main breaker either. Give its rating once
 3. The field with the load center's name says where the main breaker is drawn: **Next to positions 1 and 2** (the default: at the top, or at the bottom of a panel turned 180°), **Top** or **Bottom**.
 4. Save. The integration reloads, and the cards show it without a restart.
 
-A dashboard card's own `main_breaker` rating wins over the one set here; the position applies to every card of that load center.
+The main breaker is drawn as Leviton's 2nd Gen one (LM100-T to LM225-T) with your rating printed on it, and shows as switched off when neither leg has voltage. A dashboard card's own `main_breaker` rating wins over the one set here; the position applies to every card of that load center.
 
 ## Sidebar page
 
