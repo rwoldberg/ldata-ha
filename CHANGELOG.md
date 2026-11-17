@@ -4,6 +4,8 @@ All notable changes to the Leviton LDATA integration are documented here.
 
 ## 2.0.14 - Unreleased
 
+**Take a backup before updating.** Going back to an earlier version re-creates every entity as a new one without history, so the only way back is a backup. (#123)
+
 ### Added
 - **The load center can have its own page in the sidebar.** A new option, **Show the load center in the sidebar**, adds a sidebar item that opens a full page with the panel card, with no dashboard to set up. With more than one load center, each has its own tab. It is off by default and can be turned on at setup or in the integration's options; the item appears or disappears as soon as you save. With several LDATA entries, one item shows the load centers of every entry that has the option on. On a phone, a button in the page's header zooms the panel to 1.5× or 2×. (#118)
 - **Sub-panels are set once, in the integration's options.** With two or more load centers, a new **Sub-panels** section lets you choose the breaker that feeds each sub-panel. That breaker then shows the sub-panel's live load on every panel card, and clicking it opens the sub-panel: in a popup on a dashboard, on its own tab on the sidebar page, which links back with "Fed from". A smart breaker can be a feeder too; it keeps its own readings and its detail sheet leads to the sub-panel. Give the size of a feeder that isn't a smart breaker, and the feeder's label gets a load bar and the sub-panel's header shows how much of the feeder it uses (a main panel does the same against the card's `main_breaker`). The card's `sub_panels` YAML keeps working and adds to this. (#118)
