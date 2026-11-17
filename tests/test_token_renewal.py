@@ -121,9 +121,9 @@ async def test_refused_credentials_start_reauth_and_stop_retrying(error) -> None
     assert coordinator._service.auth_token == ""
     service = coordinator._service
     service.status_data["panels"] = [{"id": "P1"}]
-    service._refresh_panel_status_locked = MagicMock()
-    assert service.refresh_panel_status() is False
-    service._refresh_panel_status_locked.assert_not_called()
+    service._fetch_panel_status_locked = MagicMock()
+    assert service.fetch_panel_status() is None
+    service._fetch_panel_status_locked.assert_not_called()
     service.status_data["panels"] = []
 
     # No further logins, and pushes from the open socket don't bring the
@@ -182,7 +182,7 @@ async def test_poll_loops_report_auth_errors(monkeypatch) -> None:
 
     await coordinator._fallback_poll_loop(
         loop_name="Panel status poll", get_interval=lambda: 0, needs_poll=lambda: True,
-        refresh=_fetch,
+        fetch=_fetch, merge=lambda _fetched: False,
     )
 
     coordinator._async_auth_failed.assert_awaited_once_with("Panel status poll")
