@@ -8,6 +8,7 @@ All notable changes to the Leviton LDATA integration are documented here.
 - **Firmware update entities for smart breakers.** Each breaker gets a firmware `update` entity, like the panel's, that turns on when Leviton has firmware waiting for it. It follows the My Leviton app: a breaker on an LDATA hub reports the update Leviton offers it, and a breaker on an LWHEM reports one once the panel has downloaded newer firmware for it, naming each part that changes. They are disabled by default, so a firmware rollout doesn't send the firmware notification blueprint's users one notification per breaker; enable the ones you want on the breaker's device page. Installing still happens in the My Leviton app. (#119)
 
 ### Changed
+- **Entity unique ids use your Leviton user id instead of your email.** Home Assistant's guidelines rule out an email as a unique id, and signing in again with the email typed in other capitals turned every entity into a new one. Existing entities move over at the first start, keeping their entity ids, names, areas and history; going back to an earlier version afterwards creates them anew. (#123)
 - **The panel status refresh runs every 110 seconds instead of 120.** Leviton's server closes idle connections at 120 seconds, so about 1 refresh in 20 hit a dropped connection and logged an error. (#111)
 
 ### Fixed
