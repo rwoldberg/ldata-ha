@@ -31,6 +31,7 @@ The breakers are rendered with the maker's name on them, as the real ones are (s
 | `frame`, `cover` | The embossed door surround and the cover plate. Both are samples that the card stretches as nine-slices, which is how one set of images fits any panel size. |
 | `screw-a`, `screw-b` | Cover screws. |
 | `main-{on,off}` | The optional main breaker, a 2nd Gen LM-T seen through its opening in the dead front, switched on or off. Only its raised centre plate shows there, so only that is modelled. Its rating is left off, so one image serves every size; the card prints the rating in its place. |
+| `main-inv-{on,off}` | The same main breaker upside down, for the bottom of a panel turned 180°, where it is fitted with its handle next to positions 1 and 2. It is turned before it is lit, so the light still comes from above. |
 | `hero-{1,2}{s,a,g,d,t}[1]-{on,off,trip}` | The upright product shot shown in the breaker's detail sheet, for the same faces. |
 
 ## Changing the model

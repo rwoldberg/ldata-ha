@@ -80,7 +80,7 @@ const CARD_VERSION = "3.1.0";
 // tools/panel_card_art. ART_REV is the content hash of that folder (written
 // by build_assets.py); it is part of every image URL, so browsers fetch new
 // artwork after an upgrade instead of serving a cached copy.
-const ART_REV = "700b37fb05";
+const ART_REV = "afd77a7fda";
 const ART_SERVED = new URL("/ldata_static/img/", location.href).href; // always served by the integration
 
 // Where this file was loaded from. `import.meta.url` would say, but it is a
@@ -1778,10 +1778,15 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     for (const n of m.numbers) {
       numbers += `<div class="num" style="grid-row:${n.row + 2}" aria-hidden="true"><span>${n.left ?? ""}</span><span>${n.right ?? ""}</span></div>`;
     }
+    // At the bottom of the panel the main breaker is fitted upside down, its
+    // handle next to positions 1 and 2: that image, and its rating turned with it.
+    const low = !!(main && m.mainLow);
+    this._mainArt = low ? "main-inv" : "main";
+    const [rx, ry] = low ? [G.main.w - G.main.rating[0], G.main.h - G.main.rating[1]] : G.main.rating;
     const mainHtml = main
       ? `<div class="main" data-h="main">
            <img class="main-sp" data-h="mainImg" alt="" draggable="false">
-           ${ratingSvg(G.main.w, G.main.h, G.main.rating[0], G.main.rating[1], -90, String(main), G.main.size, true)}
+           ${ratingSvg(G.main.w, G.main.h, rx, ry, low ? 90 : -90, String(main), G.main.size, true)}
            <span class="main-cap" aria-hidden="true">${esc(this._t("card.meter.main"))}</span>
          </div>`
       : "";
@@ -2159,7 +2164,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       // it: with both legs dead, the main is open.
       const dead = h.voltsL1 !== null && h.voltsL2 !== null && h.voltsL1 <= 90 && h.voltsL2 <= 90;
       this._set(c, "main", dead ? "off" : "on", (v) => {
-        els.mainImg.src = art(`main-${v}`);
+        els.mainImg.src = art(`${this._mainArt}-${v}`);
         els.main.title = t(v === "on" ? "card.meter.main_breaker" : "card.meter.main_breaker_dead");
       });
     }

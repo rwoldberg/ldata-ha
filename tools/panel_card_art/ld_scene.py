@@ -1228,10 +1228,13 @@ def ring(cx, cy, r, w):
     return [arc_band(cx, cy, r - w / 2, 0.0, math.pi, w, 24), arc_band(cx, cy, r - w / 2, math.pi, 2 * math.pi, w, 24)]
 
 
-def build_main_lmt(m, state, rating=None):
+def build_main_lmt(m, state, rating=None, inverted=False):
     """The LM-T's centre plate with its handle in the `state` ("on" or "off") position.
 
-    Built with its face at z = 0, then lowered to LMT_Z as one piece.
+    Built with its face at z = 0, then lowered to LMT_Z as one piece, and
+    turned 180° when `inverted`: at the bottom of a panel turned upside down,
+    with its handle next to positions 1 and 2. It is turned before it is lit,
+    so the light still comes from above.
     """
     before = {ob.name for ob in bpy.context.scene.collection.objects}
     hw, hh = LMT_W / 2, LMT_H / 2
@@ -1354,11 +1357,13 @@ def build_main_lmt(m, state, rating=None):
         symbol = [[(sx - half, LMT_SYMBOL_Y - stroke / 2), (sx + half, LMT_SYMBOL_Y - stroke / 2), (sx + half, LMT_SYMBOL_Y + stroke / 2), (sx - half, LMT_SYMBOL_Y + stroke / 2)]]
     link(flat_mesh("lmt_symbol", symbol, LMT_FLOOR + 0.0012, ink))
 
-    # Everything above, cutters included, moves down together.
+    # Everything above, cutters included, moves down (and turns) together.
     root = empty("lmt", (0.0, 0.0, LMT_Z))
     for ob in list(bpy.context.scene.collection.objects):
         if ob.name not in before and ob.parent is None and ob is not root:
             ob.parent = root
+    if inverted:
+        root.rotation_euler = (0.0, 0.0, math.pi)
     return root
 
 
@@ -1388,14 +1393,14 @@ def build_boss(m, hw, hh):
 
 # ---- jobs ----------------------------------------------------------------------
 def job_main(job):
-    """Main breaker: an LM-T seen through its opening at the top of the dead front."""
+    """Main breaker: an LM-T seen through its opening in the dead front (upside down at the bottom of an inverted panel)."""
     reset_scene()
     m = mats("std")
     hw, hh = LMT_W / 2 + LMT_GAP, LMT_H / 2 + LMT_GAP
     # The opening is cut a hair wider than the boss's inner wall, which hides its edge.
     build_dead_front(m, [(-hw - 0.004, hw + 0.004, -hh - 0.004, hh + 0.004)], rounded=0.06)
     build_boss(m, hw, hh)
-    build_main_lmt(m, job.get("state", "on"), rating=job.get("rating"))
+    build_main_lmt(m, job.get("state", "on"), rating=job.get("rating"), inverted=job.get("inverted", False))
     lighting(**job.get("light", {}))
     camera(-MAIN_W / 2, MAIN_W / 2, -MAIN_H / 2, MAIN_H / 2, job.get("ppi", 200))
     render(job["out"], samples=job.get("samples", 128), transparent=False)

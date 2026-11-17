@@ -19,7 +19,7 @@ GEN1_FACES = {poles: [f"{face}1" for face in faces if face != "t"] for poles, fa
 
 def _expected() -> set[str]:
     """Every image name the card can ask for."""
-    names = {"cover", "frame", "screw-a", "screw-b", "main-on", "main-off"}
+    names = {"cover", "frame", "screw-a", "screw-b", "main-on", "main-off", "main-inv-on", "main-inv-off"}
     for side in "LR":
         names |= {f"fill-{side}", f"cap-{side}-top", f"cap-{side}-bot"}
         for poles, faces in FACES.items():
@@ -50,7 +50,8 @@ def test_card_builds_image_names_the_way_the_files_are_named() -> None:
         "art(`fill-${col}`)",
         "`hero-${s.poles}${s.face}-${s.handle||\"on\"}`",
         "`bk-${p.column===1?\"L\":\"R\"}${s.poles}${s.face}`",
-        "art(`main-${v}`)",
+        "art(`${this._mainArt}-${v}`)",
+        'this._mainArt=low?"main-inv":"main";',
         '["cover","frame","screw-a","screw-b"]',
         '"cap-L-top"',
         '"cap-R-bot"',
@@ -120,6 +121,9 @@ def test_card_and_model_agree_on_the_main_breaker() -> None:
     assert abs(card[4] - cap / 0.716) < 1e-3  # Arial's cap height is 0.716 of its size
     # The stylesheet draws the image at that size too.
     assert f"width: calc(var(--u) * {width:g}); height: calc(var(--u) * {height:g})" in CARD
+    # Upside down at the bottom of the panel, the rating turns with the image.
+    assert "const [rx, ry] = low ? [G.main.w - G.main.rating[0], G.main.h - G.main.rating[1]] : G.main.rating;" in CARD
+    assert "rx, ry, low ? 90 : -90," in CARD
 
 
 def test_art_rev_matches_the_shipped_images() -> None:

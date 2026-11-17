@@ -68,6 +68,8 @@ def jobs():
     out.append({"job": "screw", "angle": -62, "name": "screw-b"})
     for state in ("on", "off"):
         out.append({"job": "main", "state": state, "name": f"main-{state}"})
+        # Upside down, for the bottom of a panel turned 180°.
+        out.append({"job": "main", "state": state, "inverted": True, "name": f"main-inv-{state}"})
     for poles, kind, code, protect, remote in faces():
         for state in STATES:
             out.append({"job": "hero", "poles": poles, "kind": kind, "protect": protect, "remote": remote, "state": state, "ppi": 280, "samples": 160, "name": f"hero-{poles}{code}-{state}"})

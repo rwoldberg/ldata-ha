@@ -272,7 +272,7 @@ Leviton doesn't report what a load center can carry either. Say once whether eac
    - **Sub-panel, no main breaker**: nothing is drawn, and **Panel load** still shows how much of its capacity is in use. This suits a load center fed from a main breaker by the meter, as well as one fed from a breaker in another load center (see [Sub-panels](#sub-panels)).
 4. Save. The integration reloads, and the cards show it without a restart.
 
-The main breaker is drawn as Leviton's 2nd Gen one (LM100-T to LM225-T) with your rating printed on it, and shows as switched off when neither leg has voltage. A dashboard card's own `main_breaker` rating wins over the capacity set here; the panel type and position apply to every card of that load center.
+The main breaker is drawn as Leviton's 2nd Gen one (LM100-T to LM225-T) with your rating printed on it, and shows as switched off when neither leg has voltage. At the bottom of the panel it is drawn upside down, as it is fitted there, with its handle next to positions 1 and 2. A dashboard card's own `main_breaker` rating wins over the capacity set here; the panel type and position apply to every card of that load center.
 
 ## Sidebar page
 
