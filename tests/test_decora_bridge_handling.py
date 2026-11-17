@@ -42,6 +42,7 @@ async def test_identify_buttons_exclude_decora_bridges() -> None:
     _, bridge, switch = _bridge_and_switch()
     coordinator = MagicMock()
     coordinator.user = "test-user"
+    coordinator.unique_id_prefix = "test-user"
     coordinator.data = {"decora_devices": {**bridge, **switch}}
     config_entry = SimpleNamespace(entry_id="entry", subentries={})
     hass = SimpleNamespace(data={DOMAIN: {config_entry.entry_id: coordinator}})
@@ -58,6 +59,7 @@ async def test_identify_action_rejects_bridge_defense_in_depth() -> None:
     bridge_data = bridge["bridge_123"]
     coordinator = MagicMock()
     coordinator.user = "test-user"
+    coordinator.unique_id_prefix = "test-user"
     coordinator.data = {"decora_devices": bridge}
     coordinator.hass.async_add_executor_job = AsyncMock()
     entity = DecoraIdentifyButton(coordinator, bridge_data)
@@ -77,6 +79,7 @@ def test_bridges_without_mac_have_distinct_unique_ids() -> None:
     )
     coordinator = MagicMock()
     coordinator.user = "test-user"
+    coordinator.unique_id_prefix = "test-user"
     coordinator.data = {"decora_devices": bridges}
 
     unique_ids = {

@@ -120,8 +120,8 @@ class DecoraEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         # to keep multiple bridges collision-free.
         mac = self.entity_data.get("mac") or self._dev_id
         if suffix := self.unique_id_suffix:
-            return f"{self.coordinator.user}-{mac}_{suffix}"
-        return f"{self.coordinator.user}-{mac}"
+            return f"{self.coordinator.unique_id_prefix}-{mac}_{suffix}"
+        return f"{self.coordinator.unique_id_prefix}-{mac}"
 
     @property
     def name_suffix(self) -> str | None:

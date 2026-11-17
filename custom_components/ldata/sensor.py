@@ -342,13 +342,13 @@ async def async_setup_entry(
         # never matched. The options lists may still hold the raw-id form,
         # which is read alongside.
         _stable_id = breaker_data.get("stable_id") or breaker_id
-        _daily_import_uid    = f"{coordinator.user}-ldata_{_stable_id}_todaymw_import"
-        _lifetime_import_uid = f"{coordinator.user}-ldata_{_stable_id}__Import_kWh"
+        _daily_import_uid    = f"{coordinator.unique_id_prefix}-ldata_{_stable_id}_todaymw_import"
+        _lifetime_import_uid = f"{coordinator.unique_id_prefix}-ldata_{_stable_id}__Import_kWh"
         _import_uids = {
             _daily_import_uid,
             _lifetime_import_uid,
-            f"{coordinator.user}-ldata_{breaker_id}_todaymw_import",
-            f"{coordinator.user}-ldata_{breaker_id}__Import_kWh",
+            f"{coordinator.unique_id_prefix}-ldata_{breaker_id}_todaymw_import",
+            f"{coordinator.unique_id_prefix}-ldata_{breaker_id}__Import_kWh",
         }
         _has_daily_import    = ent_reg.async_get_entity_id("sensor", DOMAIN, _daily_import_uid)    is not None
         _has_lifetime_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _lifetime_import_uid) is not None
@@ -616,7 +616,7 @@ async def async_setup_entry(
             )
         else:
             _remove_registry_entry(
-                f"{coordinator.user}-ldata_{entity_data['id']}_wifi_rssi"
+                f"{coordinator.unique_id_prefix}-ldata_{entity_data['id']}_wifi_rssi"
             )
 
         entity_data_leg1 = {**entity_data, "poles": 1, "position": 1}

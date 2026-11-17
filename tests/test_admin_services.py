@@ -51,6 +51,7 @@ async def _registered_handlers() -> tuple[MagicMock, dict]:
     hass.services.has_service.return_value = False
     with (
         patch.object(ldata, "LDATAUpdateCoordinator", _FakeCoordinator),
+        patch.object(ldata, "_async_migrate_unique_id_prefix", AsyncMock()),
         patch.object(ldata, "_async_reconcile_subentries", AsyncMock()),
         patch.object(ldata, "_async_ensure_panel_devices"),
         patch.object(ldata, "_async_purge_orphaned_devices", AsyncMock()),

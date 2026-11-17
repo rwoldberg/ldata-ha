@@ -31,7 +31,7 @@ def _breaker(**over) -> dict:
 
 async def _setup(breaker: dict, registry: MagicMock, options: dict | None = None):
     coordinator = MagicMock()
-    coordinator.user = "test-user"
+    coordinator.unique_id_prefix = "test-user"
     coordinator.data = {"breakers": {RAW: breaker}, "panels": [], "cts": {}}
     coordinator._service.panel_has_hw_counters.return_value = False  # firmware 2.x
     config_entry = SimpleNamespace(entry_id="entry-1", data={}, options=options or {}, subentries={})

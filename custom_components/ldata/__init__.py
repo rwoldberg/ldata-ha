@@ -739,6 +739,134 @@ def _has_live_identifier(
     )
 
 
+# The options that hold import-sensor unique ids (see sensor.py).
+_UID_LIST_OPTIONS = ("confirmed_solar_import_uids", "suppressed_import_uids")
+
+
+def _has_prefix(unique_id, username: str) -> bool:
+    """Return whether a unique id starts with "<username>-", in any letter case."""
+    prefix = username + "-"
+    return isinstance(unique_id, str) and unique_id[: len(prefix)].casefold() == prefix.casefold()
+
+
+def _plan_unique_id_migration(
+    registered: list[tuple[str, str, str]],
+    username: str,
+    userid: str,
+    holder_of,
+) -> list[tuple[str, str]] | None:
+    """Plan moving one entry's unique ids from the email prefix to the user id prefix.
+
+    registered holds (entity_id, domain, unique_id) for each of the entry's
+    entities; holder_of(domain, unique_id) returns the entity_id of the
+    registry entry that has that unique id, or None. Returns the
+    (entity_id, new unique id) moves.
+
+    The entry's username is matched in any letter case: a reauth stores the
+    email as typed, so an entry can have entities under two casings of it,
+    the current one live and the older ones orphaned. When several map to
+    the same new unique id, the one under the current casing moves and the
+    others stay as they are. A new unique id this entry already uses (moved
+    earlier, or created since) is left alone. One that another entry uses
+    (two entries of the same account covering the same devices) means this
+    entry can't move without taking those entities from it: returns None,
+    and nothing moves.
+    """
+    own = {entity_id for entity_id, _domain, _unique_id in registered}
+    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for entity_id, domain, unique_id in registered:
+        if _has_prefix(unique_id, username):
+            new_unique_id = f"{userid}-{unique_id[len(username) + 1:]}"
+            groups.setdefault((domain, new_unique_id), []).append((entity_id, unique_id))
+
+    moves: list[tuple[str, str]] = []
+    for (domain, new_unique_id), group in groups.items():
+        holder = holder_of(domain, new_unique_id)
+        if holder is not None:
+            if holder not in own:
+                return None
+            continue
+        if len(group) > 1:
+            group = [item for item in group if item[1].startswith(username + "-")]
+            if len(group) != 1:
+                continue
+        moves.append((group[0][0], new_unique_id))
+    return moves
+
+
+def _migrated_uid_list(unique_ids, username: str, userid: str) -> list:
+    """Return an options list of unique ids with the email prefix replaced by the user id."""
+    migrated: list = []
+    for unique_id in unique_ids:
+        if _has_prefix(unique_id, username):
+            unique_id = f"{userid}-{unique_id[len(username) + 1:]}"
+        if unique_id not in migrated:
+            migrated.append(unique_id)
+    return migrated
+
+
+async def _async_migrate_unique_id_prefix(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
+) -> None:
+    """Key this entry's entities on the Leviton user id instead of the account email.
+
+    Every unique id started with the email the account was set up with.
+    Home Assistant's guidelines rule out emails as unique ids: they put the
+    address into the entity registry, the entry's options and error
+    messages, and a reauth that stores the email in another letter case
+    made every entity a new one. The user id names the same account and
+    doesn't change.
+
+    Moves this entry's registry entries and the unique ids kept in its
+    options, before the platforms set up, then sets the coordinator's
+    prefix the platforms use. Runs on every setup and moves only what is
+    still under the email, so it converges like the other reconciliations
+    here. If another entry already uses the new unique ids (see
+    _plan_unique_id_migration), this entry keeps the email prefix.
+    """
+    username = entry.data.get("email", entry.data.get(CONF_USERNAME)) or ""
+    userid = str(entry.data.get("userid") or "")
+    coordinator.unique_id_prefix = username
+    if not username or not userid:
+        return
+
+    ent_reg = er.async_get(hass)
+    registered = [
+        (ent.entity_id, ent.domain, ent.unique_id)
+        for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+    ]
+    moves = _plan_unique_id_migration(
+        registered,
+        username,
+        userid,
+        lambda domain, unique_id: ent_reg.async_get_entity_id(domain, DOMAIN, unique_id),
+    )
+    if moves is None:
+        _LOGGER.warning(
+            "Another LDATA entry for the same Leviton account already has entities "
+            "for this entry's devices; this entry's entities stay keyed by the "
+            "account email"
+        )
+        return
+
+    for entity_id, new_unique_id in moves:
+        ent_reg.async_update_entity(entity_id, new_unique_id=new_unique_id)
+
+    options = dict(entry.options)
+    for key in _UID_LIST_OPTIONS:
+        if key in options:
+            options[key] = _migrated_uid_list(options[key], username, userid)
+    if options != dict(entry.options):
+        hass.config_entries.async_update_entry(entry, options=options)
+
+    if moves:
+        _LOGGER.info(
+            "Moved the unique ids of %d entities from the account email to the Leviton user id",
+            len(moves),
+        )
+    coordinator.unique_id_prefix = userid
+
+
 async def _async_reconcile_subentries(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
 ) -> None:
@@ -1225,6 +1353,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    # Before the platforms register any entity: key them on the Leviton user
+    # id rather than the account email (see docstring).
+    await _async_migrate_unique_id_prefix(hass, entry, coordinator)
 
     # Ensure each panel has its own config subentry, and migrate any
     # pre-subentry devices/entities into theirs, before platforms set up —
