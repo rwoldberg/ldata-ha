@@ -18,7 +18,7 @@ MrToast99
 
 ## Install
 
-Use HACS and add as a custom repo. Once the integration is installed go to your integrations and follow the configuration options to specify the below:
+Install through the Home Assistant **Marketplace** (Home Assistant 2026.11 or newer), through **HACS** (2026.10 or older), or by hand. See [Installation](#installation) below. Once the integration is installed go to your integrations and follow the configuration options to specify the below:
 
 - Username (my.leviton.com Username)
 - Password (my.leviton.com Password)
@@ -26,21 +26,42 @@ Use HACS and add as a custom repo. Once the integration is installed go to your 
 
 ## Installation
 
-Recommended installation is via the [Home Assistant Community Store (HACS)](https://hacs.xyz/). [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+Home Assistant 2026.11 replaced HACS with a built-in **Marketplace**, so the steps depend on your Home Assistant version.
 
-### 1. Install via HACS custom repository
+### 1. Install the integration
 
-If you do not wish to use HACS, then please download the latest version from the [releases page](https://github.com/rwoldberg/ldata-ha/releases) and proceed to Step 2.
+#### Home Assistant 2026.11 or newer: Marketplace
+
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=rwoldberg&repository=ldata-ha&category=integration)
+
+Select the button above, or add the repository by hand:
+
+1. Go to **Settings** > **Marketplace** (administrators only).
+2. Select **Add from link** in the upper-right corner.
+3. Under **GitHub link**, enter `rwoldberg/ldata-ha` (or `https://github.com/rwoldberg/ldata-ha`) and select **Add**. If it asks for a **Type**, choose **Integration** and select **Add** again.
+4. Open the repository's page, accept the community-content risk notice if asked, and select **Install**.
+5. Restart Home Assistant.
+
+Adding a custom repository needs a GitHub connection: the Marketplace asks you to connect with GitHub's device sign-in the first time. It only reads public information.
+
+If you used HACS before updating to 2026.11, you don't need to do anything: Home Assistant moves HACS and everything installed with it, including this integration, to the Marketplace when it starts after the update.
+
+#### Home Assistant 2026.10 or older: HACS
+
+HACS can't be installed on Home Assistant 2026.11 or newer. On older versions, use [HACS](https://hacs.xyz/):
 
 1. Navigate to the HACS add-on
 2. Select 'Custom Repositories'
-2. Add 'https://github.com/rwoldberg/ldata-ha' as the repository and 'Integration' as the Categroy
-3. Restart Home Assistant
-
+3. Add 'https://github.com/rwoldberg/ldata-ha' as the repository and 'Integration' as the Category
+4. Restart Home Assistant
 
 <img width="450" alt="Select Custom Repositories " src="https://user-images.githubusercontent.com/2048887/220187592-3c88bb8f-fd4f-412f-aebe-6c8202bb552c.png">
 
 <img width="450" alt="Add ldata-ha" src="https://user-images.githubusercontent.com/2048887/220187501-0f339218-4b07-4ee1-9e75-81c1f3f55e3f.png">
+
+#### Manual install
+
+Download the latest version from the [releases page](https://github.com/rwoldberg/ldata-ha/releases), copy its `custom_components/ldata` folder into your Home Assistant `custom_components` folder, and restart Home Assistant.
 
 ### 2. Configure via Home Assistant
 
