@@ -3,6 +3,7 @@
         "abort": {
             "already_configured": "帳號已經設定完成",
             "reauth_successful": "重新認證成功",
+            "wrong_account": "這是另一個 Leviton 帳號。請使用設定此整合時所用的帳號登入。如需使用其他帳號，請重新新增此整合。",
             "unknown": "未預期錯誤"
         },
         "error": {

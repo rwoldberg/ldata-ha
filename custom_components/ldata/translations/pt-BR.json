@@ -3,6 +3,7 @@
         "abort": {
             "already_configured": "A conta já está configurada",
             "reauth_successful": "A reautenticação foi bem-sucedida",
+            "wrong_account": "Esta é outra conta Leviton. Entre com a conta usada para configurar a integração. Para usar outra conta, adicione a integração novamente.",
             "unknown": "Erro inesperado"
         },
         "error": {

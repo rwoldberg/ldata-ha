@@ -3,6 +3,7 @@
         "abort": {
             "already_configured": "Contul a fost configurat deja",
             "reauth_successful": "Reautentificarea s-a realizat cu succes",
+            "wrong_account": "Acesta este un alt cont Leviton. Conectează-te cu contul cu care a fost configurată integrarea. Pentru a folosi alt cont, adaugă din nou integrarea.",
             "unknown": "Eroare neașteptată"
         },
         "error": {

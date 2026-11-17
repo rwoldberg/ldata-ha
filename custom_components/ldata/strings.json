@@ -38,6 +38,7 @@
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
       "reauth_successful": "Re-authentication successful",
+      "wrong_account": "This is a different Leviton account. Sign in with the account the integration was set up with. To use another account, add the integration again.",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     }
   },

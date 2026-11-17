@@ -3,6 +3,7 @@
         "abort": {
             "already_configured": "Účet je již nastaven",
             "reauth_successful": "Opětovné ověření bylo úspěšné",
+            "wrong_account": "Toto je jiný účet Leviton. Přihlaste se účtem, se kterým byla integrace nastavena. Chcete-li použít jiný účet, přidejte integraci znovu.",
             "unknown": "Neočekávaná chyba"
         },
         "error": {

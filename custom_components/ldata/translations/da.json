@@ -3,6 +3,7 @@
         "abort": {
             "already_configured": "Kontoen er allerede konfigureret",
             "reauth_successful": "Genautentificering lykkedes",
+            "wrong_account": "Dette er en anden Leviton-konto. Log ind med den konto, integrationen blev sat op med. Tilføj integrationen igen for at bruge en anden konto.",
             "unknown": "Uventet fejl"
         },
         "error": {

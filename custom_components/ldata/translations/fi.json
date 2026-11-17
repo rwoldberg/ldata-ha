@@ -3,6 +3,7 @@
         "abort": {
             "already_configured": "Tili on jo määritetty",
             "reauth_successful": "Uudelleentodennus onnistui",
+            "wrong_account": "Tämä on eri Leviton-tili. Kirjaudu sisään tilillä, jolla integraatio määritettiin. Jos haluat käyttää toista tiliä, lisää integraatio uudelleen.",
             "unknown": "Odottamaton virhe"
         },
         "error": {
