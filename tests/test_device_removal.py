@@ -620,8 +620,9 @@ def test_status_reports_failed_panel_fetch(responses) -> None:
     assert data[INCOMPLETE] == [PANELS]
 
 
-def test_status_reports_skipped_whems_panel() -> None:
-    # A WHEMS panel missing its voltage/version fields is skipped this poll.
+def test_status_keeps_whems_panel_without_voltage_or_version() -> None:
+    # A WHEMS panel listed without its voltage/version fields (disconnected)
+    # is kept, so the listing is complete.
     service = _status_service(
         {"/iotWhems": _response(payload=[{"id": "WHEMS-1", "name": "Panel"}])},
         enable_decora=False,
@@ -629,7 +630,8 @@ def test_status_reports_skipped_whems_panel() -> None:
 
     data = _status(service)
 
-    assert data[INCOMPLETE] == [PANELS]
+    assert data[INCOMPLETE] == []
+    assert [panel["id"] for panel in data["panels"]] == ["WHEMS-1"]
 
 
 def test_failed_whems_sub_resource_marks_panels_incomplete() -> None:

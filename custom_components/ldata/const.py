@@ -45,6 +45,29 @@ HA_INFORM_RATE_DEFAULT = 60.0
 HA_INFORM_RATE_MIN = 2.0
 HA_INFORM_RATE_MAX = 600.0
 
+# Breaker REST poll interval (seconds) — v1 firmware panels only, for the
+# energyConsumption/energyImport counters the WebSocket never sends. Each poll
+# is a bandwidth toggle (three PATCHes) and a GET per panel. It used to follow
+# the HA inform rate, so lowering that to its 2 s minimum meant four requests
+# to Leviton every two seconds per panel. 60 s is the inform rate's default,
+# so installs on the defaults poll as often as before, and the counters keep
+# their one-minute resolution. A longer inform rate stretches it: results only
+# reach Home Assistant at the next push anyway.
+BREAKER_POLL_INTERVAL = 60.0
+
+# A full status refresh (at setup, and when something asks for a refresh while
+# the WebSocket is down, as every Decora command does) first waits up to
+# STATUS_LOCK_WAIT seconds for a running REST poll to finish (the CT poll alone
+# waits 15 s after its bandwidth toggle), then has STATUS_TIME_BUDGET seconds
+# for all its requests and waits. The coordinator waits for it STATUS_TIMEOUT
+# seconds: both of those plus a margin for the login rate limit, which can
+# hold a login back up to 10 s. A refresh therefore always ends before the
+# coordinator stops waiting for it, instead of running on in its executor
+# thread after a timeout.
+STATUS_LOCK_WAIT = 60.0
+STATUS_TIME_BUDGET = 120.0
+STATUS_TIMEOUT = STATUS_LOCK_WAIT + STATUS_TIME_BUDGET + 15.0
+
 # When Leviton refuses the stored token after setup (it expired, or a password
 # change revoked it), the coordinator logs in again with the stored
 # credentials. Further refusals wait AUTH_RENEWAL_BACKOFF seconds before the
@@ -103,7 +126,6 @@ GAP_HANDLING_LABELS = {
     GAP_HANDLING_EXTRAPOLATE: "Extrapolate — Assume last known power continued",
     GAP_HANDLING_AVERAGE: "Average — Use mean of last and recovery power",
 }
-GAP_HANDLING_OPTIONS = list(GAP_HANDLING_LABELS)
 
 GAP_THRESHOLD = "gap_threshold"      # Gap threshold in minutes
 GAP_THRESHOLD_DEFAULT = 5.0          # 5 minutes — well above normal update intervals

@@ -71,7 +71,6 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     def __init__(self, coordinator, data) -> None:
         """Init LDATABinarySensor."""
         super().__init__(data=data, coordinator=coordinator)
-        self._attr_unique_id = f"{data['id']}_status"
         self.breaker_data = data
         # `data` is the same breaker dict entry the coordinator already holds
         # at construction time (see async_setup_entry) — use it directly
@@ -80,7 +79,6 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         # coordinator's cache between setup and entity construction.
         self._state = is_breaker_on(data)
         # Subscribe to updates.
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -152,7 +150,6 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         
         self._update_state() # Set initial state
         # Subscribe to updates.
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -272,7 +269,6 @@ class _PanelAlarmSensor(LDATAEntity, BinarySensorEntity):
         self.panel_data = data
         self._state = data.get(self._data_key, False)
         self._threshold = data.get(self._threshold_key)
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -350,7 +346,6 @@ class _BreakerAlarmSensor(LDATAEntity, BinarySensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get(self._data_key, False)
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):

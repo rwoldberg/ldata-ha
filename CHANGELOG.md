@@ -19,6 +19,9 @@ All notable changes to the Leviton LDATA integration are documented here.
 - **The panel card shows the panel's own readings above the door**: load, voltage and current per leg, line frequency, today's energy and your CT clamps, with pilot lights for the cloud connection, Wi-Fi signal and an available firmware update. While the panel is offline, or Leviton can't be reached, the cover says so, and each breaker is shown where it last was. An LDATA hub that is synchronizing no longer counts as offline. (#118)
 - **New panel card options**: `confirm` (ask before switching, default on), `show_panel_info` (the readings above the door), `appearance` (follow the theme, or always bright or dimmed) and `main_breaker` (show a main breaker with its rating). The card can also be set up from the dashboard editor instead of YAML. (#118)
 - **The panel status refresh runs every 110 seconds instead of 120.** Leviton's server closes idle connections at 120 seconds, so about 1 refresh in 20 hit a dropped connection and logged an error. (#111)
+- **The reset energy services are admin-only.** **Reset energy sensor baseline** and **Reset panel energy** can no longer be called by non-admin users. (#121)
+- **Home Assistant 2026.8 or newer is required.** The integration already needed it to add breakers and CTs; HACS now offers updates only to versions that can run them. (#121, see #120)
+- **On panels with v1 firmware, breaker energy is polled every 60 seconds**, or at the update rate if that is longer, instead of at the update rate. At its 2-second minimum that sent three PATCH requests and a GET every 2 seconds per panel. (#121)
 - **Decora entities no longer have `local_ip` and `signal_strength` attributes.** Each signal change wrote a new history row for every entity of the device. Use the device's Signal Strength sensor instead; `room` stays. (#122)
 
 ### Fixed
@@ -38,6 +41,13 @@ All notable changes to the Leviton LDATA integration are documented here.
 - **The panel card updates after you upgrade the integration.** Browsers kept running a cached copy of the card from the first version you installed until you forced a refresh. The card's dashboard resource is now pointed at the current card at every startup. (#118)
 - **Registering the panel card can no longer remove your other dashboard resources.** At startup the integration could read the dashboard resource list before Home Assistant had loaded it, which added a duplicate card entry on each restart or, if nothing else loaded the list in time, saved over your other custom card resources. It now loads the list first and removes duplicate card entries left by earlier versions. (#118)
 - **LDATA panels now receive live updates over the WebSocket.** Panels were subscribed in a way that delivered nothing for LDATA hubs, so panel-level readings only refreshed on the periodic poll. They now update live, and Cloud Connected, frequency and Wi-Fi signal follow the same rules as the periodic refresh. (#114)
+- **A breaker trip is no longer undone by a background poll** on panels with v1 firmware. A poll that took up to a minute wrote back the data it started with, undoing what the WebSocket had reported meanwhile. (#121)
+- **Decora commands no longer knock panels off the cloud while the WebSocket is down.** The refresh each command asks for toggled every panel's bandwidth, which takes a hub offline for 10 to 20 seconds, and could still be running after Home Assistant gave up on it. (#121)
+- **A command that fails shows an error.** Switching a breaker or its LED, or controlling a Decora device, logged a failure and carried on, so automations and dashboards took it for done. (#121)
+- **A panel that is offline when Home Assistant starts is no longer missing until a reload.** It appears, with Cloud Connected off and its readings unknown, and fills in when the panel comes back. (#121)
+- **A device without a name no longer stops the integration from loading.** A breaker, panel, CT or Decora device with no name, or a breaker with no pole count, gets a default. (#121)
+- **Spurious import sensors are removed on panels with 2.2 firmware.** The cleanup looked them up by an id that firmware no longer uses. (#121)
+- **Fewer database writes.** Many sensors wrote their state twice on every update. (#121)
 
 ## 2.0.13 - 2026-10-15
 
