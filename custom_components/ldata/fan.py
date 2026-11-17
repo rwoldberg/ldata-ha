@@ -105,71 +105,40 @@ class DecoraFan(DecoraEntity, FanEntity):
         **kwargs: Any,
     ) -> None:
         """Turn the fan on."""
-        device = self._get_device_data()
-        if not device:
-            return
-
-        residence_id = device.get("residenceId")
         payload = {"power": POWER_ON}
         if percentage is not None:
             payload["brightness"] = percentage
 
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            payload,
-        )
-        if result:
-            self._state = True
-            if percentage is not None:
-                self._brightness = percentage
-            self.async_write_ha_state()
-            await asyncio.sleep(1)
-            await self.coordinator.async_request_refresh()
+        await self._async_send_command(payload, "turn on")
+        self._state = True
+        if percentage is not None:
+            self._brightness = percentage
+        self.async_write_ha_state()
+        await asyncio.sleep(1)
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the fan off."""
-        device = self._get_device_data()
-        if not device:
-            return
-
-        residence_id = device.get("residenceId")
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"power": POWER_OFF},
-        )
-        if result:
-            self._state = False
-            self.async_write_ha_state()
-            await asyncio.sleep(1)
-            await self.coordinator.async_request_refresh()
+        await self._async_send_command({"power": POWER_OFF}, "turn off")
+        self._state = False
+        self.async_write_ha_state()
+        await asyncio.sleep(1)
+        await self.coordinator.async_request_refresh()
 
     async def async_set_percentage(self, percentage: int) -> None:
         """Set the speed percentage of the fan."""
-        device = self._get_device_data()
-        if not device:
-            return
-
-        residence_id = device.get("residenceId")
         if percentage == 0:
             await self.async_turn_off()
             return
 
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"power": POWER_ON, "brightness": percentage},
+        await self._async_send_command(
+            {"power": POWER_ON, "brightness": percentage}, "set the speed of"
         )
-        if result:
-            self._state = True
-            self._brightness = percentage
-            self.async_write_ha_state()
-            await asyncio.sleep(1)
-            await self.coordinator.async_request_refresh()
+        self._state = True
+        self._brightness = percentage
+        self.async_write_ha_state()
+        await asyncio.sleep(1)
+        await self.coordinator.async_request_refresh()
 
     @property
     def name_suffix(self) -> str | None:

@@ -63,6 +63,7 @@ def patched_setup():
         patch.object(ldata, "_async_ensure_panel_devices"),
         patch.object(ldata, "_async_purge_orphaned_devices", AsyncMock()),
         patch.object(ldata, "_async_purge_stale_breaker_duplicates", AsyncMock()),
+        patch.object(ldata, "_async_migrate_unique_id_prefix", AsyncMock()),
     ):
         yield
 

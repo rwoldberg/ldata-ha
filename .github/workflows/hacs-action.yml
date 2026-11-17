@@ -6,6 +6,10 @@ on:
   schedule:
     - cron: "0 0 * * *"
 
+# Validation only reads the repository.
+permissions:
+  contents: read
+
 jobs:
   hacs:
     name: HACS Action

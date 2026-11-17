@@ -1,9 +1,24 @@
 """Shared scaffolding for LDATA entities (breaker/panel and CT variants)."""
 
+from homeassistant.core import callback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
+
+
+def subentry_ids_by_unique_id(config_entry, subentry_type: str) -> dict[str, str]:
+    """Map each subentry of one type to its subentry id, by its unique_id.
+
+    The unique_id is a panel id for panel subentries and a residentialRoomId
+    for Decora room subentries. Empty on an HA core old enough not to have
+    config subentries.
+    """
+    return {
+        se.unique_id: se.subentry_id
+        for se in getattr(config_entry, "subentries", {}).values()
+        if se.subentry_type == subentry_type and se.unique_id
+    }
 
 
 def add_entities_grouped_by_panel(config_entry, async_add_entities, entities) -> None:
@@ -27,11 +42,7 @@ def add_entities_grouped_by_panel(config_entry, async_add_entities, entities) ->
     """
     if not entities:
         return
-    subentry_by_panel = {
-        se.unique_id: se.subentry_id
-        for se in getattr(config_entry, "subentries", {}).values()
-        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
-    }
+    subentry_by_panel = subentry_ids_by_unique_id(config_entry, PANEL_SUBENTRY_TYPE)
     groups: dict[str | None, list] = {}
     for entity in entities:
         panel_id = entity.entity_data.get("panel_id") or entity.entity_data.get("id")
@@ -43,6 +54,28 @@ def add_entities_grouped_by_panel(config_entry, async_add_entities, entities) ->
             async_add_entities(group)
 
 
+# The remoteState values the My Leviton app shows as the power being on.
+# Besides RemoteON these are a remote error, an over-voltage report and its
+# all-clear, a switch-off that failed, and a switch-on still in progress. The
+# rest (RemoteOFF, RemoteOVERVOLTAGEON, RemoteFAILEDON, RemotePENDINGOFF) are
+# off.
+POWERED_REMOTE_STATES = frozenset(
+    {
+        "RemoteON",
+        "RemoteERROR",
+        "RemoteOVERVOLTAGE",
+        "RemoteOVERVOLTAGEOFF",
+        "RemoteFAILEDOFF",
+        "RemotePENDINGON",
+        "UNKNOWN",
+    }
+)
+
+# Model of Leviton's Metering Accessory: it meters a standard breaker and has
+# nothing to switch.
+METERING_ACCESSORY_MODEL = "LSBMA"
+
+
 def is_breaker_on(data: dict) -> bool:
     """Return whether a breaker's raw state fields indicate it's manually on.
 
@@ -50,7 +83,12 @@ def is_breaker_on(data: dict) -> bool:
     (switch.py), which both derive their on/off state from the same
     state/remoteState field pair.
     """
-    return data.get("state") == "ManualON" and data.get("remoteState") == "RemoteON"
+    return data.get("state") == "ManualON" and data.get("remoteState") in POWERED_REMOTE_STATES
+
+
+def is_metering_accessory(data: dict) -> bool:
+    """Return whether a breaker record is a Metering Accessory."""
+    return str(data.get("model") or "").upper() == METERING_ACCESSORY_MODEL
 
 
 def find_panel(coordinator: LDATAUpdateCoordinator, panel_id: str) -> dict | None:
@@ -128,6 +166,22 @@ class LDATABaseEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         await super().async_added_to_hass()
         self._handle_coordinator_update()
 
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Refresh from the coordinator's data and write the state.
+
+        CoordinatorEntity registers this as the entity's one coordinator
+        listener. Entities keep their own state from the data in
+        _state_update(); registering that as a second listener, as they
+        did, wrote every such entity's state twice per update.
+        """
+        self._state_update()
+
+    @callback
+    def _state_update(self) -> None:
+        """Refresh this entity from the coordinator's data and write its state."""
+        self.async_write_ha_state()
+
     @property
     def device_id(self):
         """Returns the device id of the entity."""
@@ -142,8 +196,8 @@ class LDATABaseEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
     def unique_id(self):
         """Return the unique ID of the entity."""
         if suffix := self.unique_id_suffix:
-            return f"{self.coordinator.user}-{self._device_id}_{suffix}"
-        return f"{self.coordinator.user}-{self._device_id}"
+            return f"{self.coordinator.unique_id_prefix}-{self._device_id}_{suffix}"
+        return f"{self.coordinator.unique_id_prefix}-{self._device_id}"
 
     @property
     def name_suffix(self) -> str | None:

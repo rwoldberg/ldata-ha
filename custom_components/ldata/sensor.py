@@ -339,8 +339,21 @@ async def async_setup_entry(
 
         _imp  = float(breaker_data.get("import", 0) or 0)
         _cons = float(breaker_data.get("consumption", 0) or 0)
-        _daily_import_uid    = f"{coordinator.user}-ldata_{breaker_id}_todaymw_import"
-        _lifetime_import_uid = f"{coordinator.user}-ldata_{breaker_id}__Import_kWh"
+        # The import sensors' unique ids are built from the breaker's stable
+        # id (LDATABaseEntity._build_device_id). These were built from the
+        # raw id, which differs from it since Leviton's firmware 2.2.0 id
+        # change, so on those panels the registry lookups and removals below
+        # never matched. The options lists may still hold the raw-id form,
+        # which is read alongside.
+        _stable_id = breaker_data.get("stable_id") or breaker_id
+        _daily_import_uid    = f"{coordinator.unique_id_prefix}-ldata_{_stable_id}_todaymw_import"
+        _lifetime_import_uid = f"{coordinator.unique_id_prefix}-ldata_{_stable_id}__Import_kWh"
+        _import_uids = {
+            _daily_import_uid,
+            _lifetime_import_uid,
+            f"{coordinator.unique_id_prefix}-ldata_{breaker_id}_todaymw_import",
+            f"{coordinator.unique_id_prefix}-ldata_{breaker_id}__Import_kWh",
+        }
         _has_daily_import    = ent_reg.async_get_entity_id("sensor", DOMAIN, _daily_import_uid)    is not None
         _has_lifetime_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _lifetime_import_uid) is not None
 
@@ -401,10 +414,7 @@ async def async_setup_entry(
         _suppressed_uids: set = set(
             config_entry.options.get("suppressed_import_uids", [])
         )
-        _already_suppressed = (
-            _daily_import_uid in _suppressed_uids
-            or _lifetime_import_uid in _suppressed_uids
-        )
+        _already_suppressed = bool(_import_uids & _suppressed_uids)
 
         # ── Persisted solar confirmation ───────────────────────────────────────
         # confirmed_solar_import_uids: breakers positively identified as solar/
@@ -415,10 +425,7 @@ async def async_setup_entry(
         _confirmed_solar_uids: set = set(
             config_entry.options.get("confirmed_solar_import_uids", [])
         )
-        _is_confirmed_solar = (
-            _daily_import_uid in _confirmed_solar_uids
-            or _lifetime_import_uid in _confirmed_solar_uids
-        )
+        _is_confirmed_solar = bool(_import_uids & _confirmed_solar_uids)
 
         # Persist solar classification the first time we detect it.
         if _v2_solar_signal and not _is_confirmed_solar:
@@ -452,8 +459,8 @@ async def async_setup_entry(
         if _v2_load_artifact:
             # Remove any spurious registry entries so these entities become
             # orphaned (enabling deletion) and are not recreated.
-            _remove_registry_entry(_daily_import_uid)
-            _remove_registry_entry(_lifetime_import_uid)
+            for _uid in _import_uids:
+                _remove_registry_entry(_uid)
             _has_daily_import    = False
             _has_lifetime_import = False
             _is_confirmed_solar  = False
@@ -465,9 +472,8 @@ async def async_setup_entry(
                 _suppressed_uids.add(_lifetime_import_uid)
                 options_patch["suppressed_import_uids"] = list(_suppressed_uids)
             # Also evict from confirmed_solar if somehow present (defensive).
-            if _daily_import_uid in _confirmed_solar_uids or _lifetime_import_uid in _confirmed_solar_uids:
-                _confirmed_solar_uids.discard(_daily_import_uid)
-                _confirmed_solar_uids.discard(_lifetime_import_uid)
+            if _import_uids & _confirmed_solar_uids:
+                _confirmed_solar_uids -= _import_uids
                 options_patch["confirmed_solar_import_uids"] = list(_confirmed_solar_uids)
             if options_patch:
                 hass.config_entries.async_update_entry(
@@ -614,7 +620,7 @@ async def async_setup_entry(
             )
         else:
             _remove_registry_entry(
-                f"{coordinator.user}-ldata_{entity_data['id']}_wifi_rssi"
+                f"{coordinator.unique_id_prefix}-ldata_{entity_data['id']}_wifi_rssi"
             )
 
         entity_data_leg1 = {**entity_data, "poles": 1, "position": 1}
@@ -879,11 +885,6 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
         await super().async_added_to_hass()
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
-
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes for state restoration."""
@@ -1132,11 +1133,9 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         
         if panel_cts:
             data_to_sum = panel_cts
-            source_name = "CT"
         else:
             breakers = self.coordinator.data.get("breakers", {})
             data_to_sum = {b_id: b_data for b_id, b_data in breakers.items() if b_data.get("panel_id") == self.panel_id}
-            source_name = "breaker"
 
         if not data_to_sum:
             return
@@ -1436,11 +1435,6 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
                 self._energy_key = attrs["energy_key"]
 
         await super().async_added_to_hass()
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
 
     @property
     def name_suffix(self) -> str | None:
@@ -1752,7 +1746,6 @@ class LDATATotalUsageSensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
         self.leg_to_total = which_leg
         super().__init__(data=data, coordinator=coordinator)
         self._state = self.total_values()
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     def _panel_leg_totals(self) -> dict:
         """Sum power/current across all breakers on this panel, once per coordinator update.
@@ -1879,7 +1872,6 @@ class LDATAOutputSensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
             self._state = float(val) if val is not None else None
         except (ValueError, TypeError):
             self._state = None
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -1983,6 +1975,28 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                 return not self.coordinator._service.panel_has_hw_counters(panel_id)
         return False  # default: hw counter path (safe for v1)
 
+    def _source_offline(self, new_data: dict) -> bool:
+        """Return True while the breaker or its panel is reported offline.
+
+        The coordinator keeps re-publishing the last data it has while a hub
+        is down. To the guards below such a repeat looks like a fresh reading,
+        which would restart the plausibility clock every update: after a long
+        outage the first real reading would then be judged against only a
+        minute of elapsed time and rejected as implausible. An offline source
+        sends no readings, so they are skipped and the clock keeps measuring
+        from the last reading that actually came from the hub.
+
+        Only an explicit ``connected: False`` counts; a missing flag means
+        online.
+        """
+        if new_data.get("connected") is False:
+            return True
+        panel_id = self.breaker_data.get("panel_id")
+        for panel in (self.coordinator.data or {}).get("panels") or []:
+            if panel.get("id") == panel_id:
+                return panel.get("connected") is False
+        return False
+
     def _is_implausible_increase(self, new_value: float, new_data: dict) -> bool:
         """Return True if the counter rose more than this breaker could have drawn.
 
@@ -2059,11 +2073,6 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self.async_write_ha_state()
 
     @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
-
-    @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
@@ -2076,6 +2085,10 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
                         return
 
                     # ── v1 hardware counter path ──────────────────────────────
+                    # An offline hub re-publishes stale data, not readings.
+                    if self._source_offline(new_data):
+                        return
+
                     raw = new_data.get(self.entity_description.key)
                     if raw is None:
                         return  # Field missing — keep last state
@@ -2217,7 +2230,6 @@ class LDATAPanelOutputSensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
             self._state = float(value) if value is not None else None
         except (TypeError, ValueError):
             self._state = 0.0
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2271,7 +2283,6 @@ class LDATACTOutputSensor(PanelOnlineMixin, LDATACTEntity, SensorEntity):
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
             self._state = 0.0
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2384,14 +2395,15 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass to restore state on startup."""
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-        await super().async_added_to_hass()
-        # Restore the last known state from the database.
+        # Restore the last known state from the database before super() runs
+        # the first update, as the daily sensors do, so that update compares
+        # against the restored total.
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
+        await super().async_added_to_hass()
 
     def _use_pxt_mode(self) -> bool:
         """Return True if this CT's panel has no hw counters — use power×time integration."""
@@ -2634,7 +2646,10 @@ class LDATABreakerOperationalStateSensor(PanelOnlineMixin, LDATAEntity, SensorEn
     """Breaker operational state diagnostic sensor.
 
     Reports the operationalState field from the Leviton API.
-    Normally "Normal"; other values indicate a fault condition.
+    Normally "Normal"; other values indicate a fault condition. The second
+    pole of a 2-pole breaker reports its own (operationalState2), kept in the
+    second_pole_state attribute. A fault on the second pole alone is the
+    breaker's state too, as Leviton's app shows it.
     """
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -2644,7 +2659,7 @@ class LDATABreakerOperationalStateSensor(PanelOnlineMixin, LDATAEntity, SensorEn
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("operationalState", "Normal")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
+        self._second = data.get("operationalState2") or None
 
     @callback
     def _state_update(self):
@@ -2653,13 +2668,33 @@ class LDATABreakerOperationalStateSensor(PanelOnlineMixin, LDATAEntity, SensorEn
             if breakers := self.coordinator.data.get("breakers"):
                 if new_data := breakers.get(self.breaker_data["id"]):
                     self._state = new_data.get("operationalState", "Normal")
+                    self._second = new_data.get("operationalState2") or None
         except (KeyError, TypeError):
             pass
         self.async_write_ha_state()
 
+    @staticmethod
+    def _fine(state: Any) -> bool:
+        """Return whether a pole's operational state is no fault.
+
+        Leviton reports UNDEFINED for a pole that has nothing to say.
+        """
+        return not state or str(state).casefold() in ("normal", "undefined")
+
     @property
     def native_value(self) -> StateType:
+        """Return the first pole's state, or the second's when only it is faulted."""
+        if self._fine(self._state) and not self._fine(self._second):
+            return self._second
         return self._state
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the breaker's leg and its second pole's operational state.
+
+        The second pole's state is None on a 1-pole breaker.
+        """
+        return {**super().extra_state_attributes, "second_pole_state": self._second}
 
     @property
     def name_suffix(self) -> str | None:
@@ -2671,7 +2706,7 @@ class LDATABreakerOperationalStateSensor(PanelOnlineMixin, LDATAEntity, SensorEn
 
     @property
     def icon(self) -> str:
-        if self._state and self._state != "Normal":
+        if not (self._fine(self._state) and self._fine(self._second)):
             return "mdi:alert-circle"
         return "mdi:check-circle-outline"
 
@@ -2693,7 +2728,6 @@ class LDATABreakerBleRSSISensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("bleRSSI")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2741,7 +2775,6 @@ class LDATABreakerPositionSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("position")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2788,7 +2821,6 @@ class LDATAPanelWifiRSSISensor(PanelOnlineMixin, LDATAEntity, SensorEntity):
         self.panel_data = data
         self._panel_id = data["data"]["id"]
         self._state = data["data"].get("rssi")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2919,4 +2951,3 @@ class DecoraGFCIStatusSensor(DecoraEntity, SensorEntity):
     @property
     def unique_id_suffix(self) -> str | None:
         return "fault_status"
-        return "mdi:wifi-strength-off-outline"

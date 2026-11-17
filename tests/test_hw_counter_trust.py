@@ -353,3 +353,81 @@ def test_a_healthy_lifetime_counter_is_never_reported(clock) -> None:
         clock.value += 60
         _publish(entity, 500.0 + step * 0.05)
     assert service._hw_counter_evidence.get(PANEL, 0) == 0
+
+
+# ── Lifetime sensor: offline hubs ──────────────────────────────────────
+
+
+def _set_panel_online(entity, online: bool) -> None:
+    entity.coordinator.data["panels"] = [{"id": PANEL, "connected": online}]
+
+
+def _outage(clock, entity, hours: float, *, value: float) -> None:
+    """The panel is offline and the coordinator re-publishes ``value`` every minute."""
+    _set_panel_online(entity, False)
+    for _ in range(int(hours * 60)):
+        clock.value += 60
+        _publish(entity, value)
+
+
+def test_a_stale_republish_while_offline_does_not_restart_the_plausibility_clock(clock) -> None:
+    """A 6 h outage, then the energy drawn meanwhile (3 kW x 6 h = 18 kWh)."""
+    entity = _lifetime(_service(), _breaker())
+    _publish(entity, 1000.0)
+    _outage(clock, entity, 6, value=1000.0)
+
+    _set_panel_online(entity, True)
+    _publish(entity, 1018.0)
+    _publish(entity, 1018.0)  # the spike check wants a second matching reading
+
+    assert entity._state == pytest.approx(1018.0)
+    assert entity._implausible_rejections == 0
+
+
+def test_an_implausible_rise_after_an_outage_is_still_rejected(clock) -> None:
+    entity = _lifetime(_service(), _breaker())
+    _publish(entity, 1000.0)
+    _outage(clock, entity, 6, value=1000.0)
+
+    _set_panel_online(entity, True)
+    for _ in range(3):
+        _publish(entity, 1500.0)  # 500 kWh in 6 h on a 30 A two-pole breaker
+
+    assert entity._state == 1000.0
+    assert entity._implausible_rejections == 3
+
+
+def test_offline_updates_are_skipped_even_when_the_value_changes(clock) -> None:
+    entity = _lifetime(_service(), _breaker())
+    _publish(entity, 1000.0)
+    _set_panel_online(entity, False)
+    clock.value += 60
+    _publish(entity, 1001.0)
+    _publish(entity, 1001.0)
+
+    assert entity._state == 1000.0
+    assert entity._last_accepted_ts == START
+
+
+def test_a_breaker_reporting_itself_offline_is_skipped(clock) -> None:
+    entity = _lifetime(_service(), _breaker())
+    _publish(entity, 1000.0)
+    for _ in range(360):
+        clock.value += 60
+        entity.coordinator.data["breakers"][BREAKER_ID]["connected"] = False
+        _publish(entity, 1000.0)
+    assert entity._last_accepted_ts == START
+
+    entity.coordinator.data["breakers"][BREAKER_ID]["connected"] = True
+    _publish(entity, 1018.0)
+    _publish(entity, 1018.0)
+    assert entity._state == pytest.approx(1018.0)
+
+
+def test_a_missing_connected_flag_counts_as_online(clock) -> None:
+    entity = _lifetime(_service(), _breaker())
+    assert "panels" not in entity.coordinator.data
+    _publish(entity, 1000.0)
+    clock.value += 300
+    _publish(entity, 1000.4)
+    assert entity._state == pytest.approx(1000.4)
