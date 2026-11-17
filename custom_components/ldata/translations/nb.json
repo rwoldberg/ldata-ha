@@ -79,6 +79,10 @@
                     "log_fields": "For å finne feltnavnene aktiverer du «Logg alle tolkede data» og ser i loggene til Home Assistant. Skriv dem inn ovenfor, atskilt med komma."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Hovedsikringer",
+                        "description": "Leviton rapporterer ikke hovedsikringen i et sikringsskap. Angi merkestrømmen ved siden av navnet på sikringsskapet, slik at kortet kan vise hovedsikringen og hvor mye av den som brukes, både på siden i sidepanelet og på kort i dashbord som ikke har sin egen verdi. La feltet stå tomt for et sikringsskap uten hovedsikring."
+                    },
                     "sub_panels": {
                         "name": "Underfordelinger",
                         "description": "Hvis et sikringsskap forsynes fra en automatsikring i et annet sikringsskap, velger du den automatsikringen ved siden av navnet. Automatsikringen viser deretter underfordelingens gjeldende belastning og fører videre til underfordelingen. Hvis automatsikringen ikke er en smart automatsikring, angir du størrelsen i feltet som slutter på (A), under den, slik at kortet kan vise hvor mye av den underfordelingen bruker."
@@ -344,7 +348,7 @@
             "appearance_light": "Lyst",
             "appearance_dark": "Dempet",
             "main_breaker": "Hovedsikringens merkestrøm (valgfritt)",
-            "main_breaker_help": "Leviton rapporterer ikke hovedsikringen. La feltet stå tomt for et sikringsskap uten hovedsikring."
+            "main_breaker_help": "Leviton rapporterer ikke hovedsikringen. La feltet stå tomt for å bruke merkestrømmen fra integrasjonens innstillinger, eller for et sikringsskap uten hovedsikring."
         }
     }
 }

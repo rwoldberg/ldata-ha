@@ -79,6 +79,10 @@
                     "log_fields": "Aby poznać nazwy pól, włącz opcję „Zapisuj w logach wszystkie przetworzone dane” i sprawdź logi Home Assistant. Wpisz je powyżej, oddzielając przecinkami."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Wyłączniki główne",
+                        "description": "Leviton nie udostępnia danych wyłącznika głównego rozdzielnicy. Wpisz jego prąd znamionowy obok nazwy rozdzielnicy, aby karta mogła pokazać wyłącznik główny i jaka jego część jest wykorzystywana, na stronie w pasku bocznym i na kartach w dashboardach, które nie mają własnej wartości. Pozostaw puste w przypadku rozdzielnicy bez wyłącznika głównego."
+                    },
                     "sub_panels": {
                         "name": "Podrozdzielnice",
                         "description": "Jeśli rozdzielnica jest zasilana z wyłącznika w innej rozdzielnicy, wybierz ten wyłącznik obok jej nazwy. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy i będzie można z niego do niej przejść. Jeśli ten wyłącznik nie jest inteligentny, wpisz jego prąd znamionowy w polu zakończonym (A) pod nim, aby karta mogła pokazać, jaką jego część wykorzystuje podrozdzielnica."
@@ -344,7 +348,7 @@
             "appearance_light": "Jasne",
             "appearance_dark": "Przygaszone",
             "main_breaker": "Prąd znamionowy wyłącznika głównego (opcjonalnie)",
-            "main_breaker_help": "Leviton nie udostępnia danych wyłącznika głównego. Pozostaw puste w przypadku rozdzielnicy bez wyłącznika głównego."
+            "main_breaker_help": "Leviton nie udostępnia danych wyłącznika głównego. Pozostaw puste, aby użyć prądu znamionowego ustawionego w opcjach integracji, lub w przypadku rozdzielnicy bez wyłącznika głównego."
         }
     }
 }

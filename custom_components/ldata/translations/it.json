@@ -79,6 +79,10 @@
                     "log_fields": "Per trovare i nomi dei campi, abilita \"Registra tutti i dati analizzati\" e controlla i registri di Home Assistant. Inseriscili qui sopra separati da virgole."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Interruttori generali",
+                        "description": "Leviton non comunica l'interruttore generale di un quadro elettrico. Inserisci la sua corrente nominale accanto al nome del quadro, così la scheda può mostrare l'interruttore generale e quanto ne viene usato, nella pagina della barra laterale e nelle schede delle plance che non hanno un valore proprio. Lascia vuoto per un quadro senza interruttore generale."
+                    },
                     "sub_panels": {
                         "name": "Sottoquadri",
                         "description": "Se un quadro elettrico è alimentato da un interruttore di un altro quadro, scegli quell'interruttore accanto al suo nome. L'interruttore mostrerà quindi il carico in tempo reale del sottoquadro e permetterà di aprirlo. Se quell'interruttore non è smart, inserisci la sua taglia nel campo che termina con (A) sotto di esso, così la scheda può mostrare quanto ne usa il sottoquadro."
@@ -344,7 +348,7 @@
             "appearance_light": "Luminosa",
             "appearance_dark": "Soffusa",
             "main_breaker": "Corrente nominale dell'interruttore generale (facoltativa)",
-            "main_breaker_help": "Leviton non comunica alcun dato sull'interruttore generale. Lascia vuoto per un quadro senza interruttore generale."
+            "main_breaker_help": "Leviton non comunica alcun dato sull'interruttore generale. Lascia vuoto per usare la corrente nominale impostata nelle opzioni dell'integrazione, o per un quadro senza interruttore generale."
         }
     }
 }

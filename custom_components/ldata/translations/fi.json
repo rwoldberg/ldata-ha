@@ -79,6 +79,10 @@
                     "log_fields": "Saat kenttien nimet selville ottamalla käyttöön asetuksen ”Kirjaa lokiin kaikki jäsennetty data” ja katsomalla Home Assistantin lokeja. Syötä nimet yllä olevaan kenttään pilkuilla erotettuina."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Pääkatkaisijat",
+                        "description": "Leviton ei ilmoita sähkökeskuksen pääkatkaisijaa. Anna sen nimellisvirta sähkökeskuksen nimen kohdalla, jotta kortti voi näyttää pääkatkaisijan ja kuinka suuri osa siitä on käytössä, sekä sivupalkin sivulla että kojelautojen korteissa, joilla ei ole omaa arvoa. Jätä tyhjäksi, jos sähkökeskuksessa ei ole pääkatkaisijaa."
+                    },
                     "sub_panels": {
                         "name": "Alakeskukset",
                         "description": "Jos sähkökeskusta syötetään toisen sähkökeskuksen johdonsuojasta, valitse kyseinen johdonsuoja keskuksen nimen kohdalta. Johdonsuoja näyttää sen jälkeen alakeskuksen reaaliaikaisen kuorman, ja siitä pääsee alakeskukseen. Jos johdonsuoja ei ole älyjohdonsuoja, anna sen koko alla olevaan kenttään, joka päättyy (A), jotta kortti voi näyttää, kuinka suuren osan siitä alakeskus käyttää."
@@ -344,7 +348,7 @@
             "appearance_light": "Kirkas",
             "appearance_dark": "Himmennetty",
             "main_breaker": "Pääkatkaisijan nimellisvirta (valinnainen)",
-            "main_breaker_help": "Leviton ei ilmoita pääkatkaisijaa. Jätä tyhjäksi, jos sähkökeskuksessa ei ole pääkatkaisijaa."
+            "main_breaker_help": "Leviton ei ilmoita pääkatkaisijaa. Jätä tyhjäksi, jos haluat käyttää integraation asetuksissa annettua nimellisvirtaa tai jos sähkökeskuksessa ei ole pääkatkaisijaa."
         }
     }
 }

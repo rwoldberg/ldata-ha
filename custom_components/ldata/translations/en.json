@@ -79,6 +79,10 @@
                     "log_fields": "To find field names, enable 'Log All Parsed Data' and check Home Assistant logs. Enter above as comma separated."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Main breakers",
+                        "description": "Leviton doesn't report a load center's main breaker. Enter its rating next to the load center's name, so the card can draw the main breaker and show how much of it is in use, on the sidebar page and on dashboard cards that don't set their own. Leave it empty for a main-lug panel."
+                    },
                     "sub_panels": {
                         "name": "Sub-panels",
                         "description": "If a load center is fed from a breaker in another one, choose that breaker next to its name. That breaker then shows the sub-panel's live load and leads to the sub-panel. If that breaker isn't a smart breaker, enter its size in the field ending in (A) below it, so the card can show how much of it the sub-panel uses."
@@ -344,7 +348,7 @@
             "appearance_light": "Bright",
             "appearance_dark": "Dimmed",
             "main_breaker": "Main breaker rating (optional)",
-            "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty for a main-lug panel."
+            "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty to use the rating set in the integration's options, or for a main-lug panel."
         }
     }
 }

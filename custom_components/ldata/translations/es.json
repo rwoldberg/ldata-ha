@@ -79,6 +79,10 @@
                     "log_fields": "Para encontrar los nombres de los campos, habilita «Registrar todos los datos analizados» y consulta los registros de Home Assistant. Introdúcelos arriba separados por comas."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Interruptores generales",
+                        "description": "Leviton no informa del interruptor general de un cuadro eléctrico. Escribe su calibre junto al nombre del cuadro, para que la tarjeta muestre el interruptor general y cuánto de él se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor. Déjalo vacío si el cuadro no tiene interruptor general."
+                    },
                     "sub_panels": {
                         "name": "Subcuadros",
                         "description": "Si un cuadro eléctrico se alimenta desde un magnetotérmico de otro cuadro, elige ese magnetotérmico junto a su nombre. Ese magnetotérmico mostrará entonces la carga en tiempo real del subcuadro y permitirá ir a él. Si ese magnetotérmico no es inteligente, escribe su calibre en el campo terminado en (A) de debajo, para que la tarjeta muestre cuánto de él usa el subcuadro."
@@ -344,7 +348,7 @@
             "appearance_light": "Intensa",
             "appearance_dark": "Tenue",
             "main_breaker": "Calibre del interruptor general (opcional)",
-            "main_breaker_help": "Leviton no informa del interruptor general. Déjalo vacío si el cuadro no tiene interruptor general."
+            "main_breaker_help": "Leviton no informa del interruptor general. Déjalo vacío para usar el calibre configurado en las opciones de la integración, o si el cuadro no tiene interruptor general."
         }
     }
 }

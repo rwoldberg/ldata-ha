@@ -79,6 +79,10 @@
                     "log_fields": "För att hitta fältnamnen aktiverar du ”Logga all tolkad data” och tittar i Home Assistants loggar. Ange dem ovan, avgränsade med kommatecken."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Huvudbrytare",
+                        "description": "Leviton rapporterar inte en elcentrals huvudbrytare. Ange dess märkström bredvid elcentralens namn, så att kortet kan visa huvudbrytaren och hur mycket av den som används, på sidan i sidofältet och på kort i instrumentpaneler som inte har ett eget värde. Lämna tomt för en elcentral utan huvudbrytare."
+                    },
                     "sub_panels": {
                         "name": "Undercentraler",
                         "description": "Om en elcentral matas från en dvärgbrytare i en annan elcentral väljer du den dvärgbrytaren bredvid centralens namn. Dvärgbrytaren visar sedan undercentralens aktuella belastning och leder vidare till undercentralen. Om dvärgbrytaren inte är en smart brytare anger du dess storlek i fältet som slutar på (A) under den, så att kortet kan visa hur mycket av den undercentralen använder."
@@ -344,7 +348,7 @@
             "appearance_light": "Ljus",
             "appearance_dark": "Dämpad",
             "main_breaker": "Huvudbrytarens märkström (valfritt)",
-            "main_breaker_help": "Leviton rapporterar inte huvudbrytaren. Lämna tomt för en elcentral utan huvudbrytare."
+            "main_breaker_help": "Leviton rapporterar inte huvudbrytaren. Lämna tomt för att använda märkströmmen från integrationens alternativ, eller för en elcentral utan huvudbrytare."
         }
     }
 }

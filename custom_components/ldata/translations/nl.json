@@ -79,6 +79,10 @@
                     "log_fields": "Om veldnamen te vinden, schakel je ‘Alle geparste data loggen’ in en bekijk je de logboeken van Home Assistant. Vul ze hierboven in, gescheiden door komma’s."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Hoofdschakelaars",
+                        "description": "Leviton geeft de hoofdschakelaar van een groepenkast niet door. Vul de nominale stroom in naast de naam van de groepenkast, zodat de kaart de hoofdschakelaar kan tonen en hoeveel ervan in gebruik is, op de pagina in de zijbalk en op dashboardkaarten zonder eigen waarde. Laat leeg voor een groepenkast zonder hoofdschakelaar."
+                    },
                     "sub_panels": {
                         "name": "Onderverdelers",
                         "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe. Is die automaat geen slimme automaat, vul dan de grootte in het veld eronder in dat eindigt op (A), zodat de kaart kan tonen hoeveel ervan de onderverdeler gebruikt."
@@ -344,7 +348,7 @@
             "appearance_light": "Helder",
             "appearance_dark": "Gedimd",
             "main_breaker": "Nominale stroom hoofdschakelaar (optioneel)",
-            "main_breaker_help": "Leviton geeft de hoofdschakelaar niet door. Laat leeg voor een groepenkast zonder hoofdschakelaar."
+            "main_breaker_help": "Leviton geeft de hoofdschakelaar niet door. Laat leeg om de nominale stroom uit de opties van de integratie te gebruiken, of voor een groepenkast zonder hoofdschakelaar."
         }
     }
 }

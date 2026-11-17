@@ -43,11 +43,13 @@ from .const import (
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 from .sub_panels import (
+    MAIN_BREAKERS,
     NOT_FED,
     SUB_PANELS,
     amps,
     feed_ratings,
     looped,
+    main_breaker_ratings,
     panel_subentries,
     shared,
     sub_panel_feeds,
@@ -586,6 +588,66 @@ class _SubPanelSection:
         return {sub_id: size for sub_id, size in sizes.items() if sub_id in feeds}
 
 
+class _MainBreakerSection:
+    """The options form's "Main breakers" section.
+
+    One field for each load center Leviton reports: the rating of its main
+    breaker in amps, which Leviton doesn't report. It stays empty for a
+    main-lug panel. Offered from one load center up, unlike the sub-panel
+    section. Each field is named after its load center, as there.
+
+    A load center the options rate but Leviton no longer reports keeps its
+    rating and gets no field. As with the sub-panel section, the options flow
+    keeps the section it showed for reading the answer.
+    """
+
+    def __init__(self, coordinator: Any, options: Mapping[str, Any]) -> None:
+        data = getattr(coordinator, "data", None) or {}
+        panels = sorted(
+            (panel for panel in data.get("panels", []) if panel.get("id")),
+            key=lambda panel: (str(panel.get("name") or "").casefold(), str(panel["id"])),
+        )
+        self.stored = main_breaker_ratings(options)
+        self.fields: dict[str, str] = {}  # field -> the load center it is about
+        for panel in panels:
+            label = str(panel.get("name") or panel["id"])
+            name, tries = label, 1
+            while name in self.fields:
+                tries += 1
+                name = f"{label} ({panel['id']})" if tries == 2 else f"{label} ({panel['id']} {tries})"
+            self.fields[name] = panel["id"]
+
+    def schema(self, chosen: Mapping[str, Any] | None) -> dict[Any, Any]:
+        """Return the section for the form, or nothing without a load center to rate."""
+        if not self.fields:
+            return {}
+        fields = {}
+        for field, panel_id in self.fields.items():
+            # Suggested rather than default, so that it can be emptied.
+            rating = chosen.get(field) if chosen is not None else self.stored.get(panel_id)
+            fields[vol.Optional(field, description={"suggested_value": rating})] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=1200, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="A"
+                )
+            )
+        rated = any(panel_id in self.stored for panel_id in self.fields.values())
+        return {
+            vol.Optional(MAIN_BREAKERS): section(
+                vol.Schema(fields), {"collapsed": not (rated or chosen)}
+            )
+        }
+
+    def read(self, chosen: Mapping[str, Any]) -> dict[str, float]:
+        """Return every rating after the form: what was entered, and what it did not show."""
+        shown = set(self.fields.values())
+        sizes = {panel_id: size for panel_id, size in self.stored.items() if panel_id not in shown}
+        for field, panel_id in self.fields.items():
+            size = amps(chosen.get(field))
+            if size is not None:
+                sizes[panel_id] = size
+        return sizes
+
+
 class OptionsFlow(config_entries.OptionsFlow):
     """Handle the options flow for Leviton LDATA."""
 
@@ -593,6 +655,8 @@ class OptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow."""
         # The sub-panel section as the form showed it (see _SubPanelSection).
         self._sub_panels: _SubPanelSection | None = None
+        # The main breaker section as the form showed it (see _MainBreakerSection).
+        self._main_breakers: _MainBreakerSection | None = None
 
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Return the options form."""
@@ -600,8 +664,12 @@ class OptionsFlow(config_entries.OptionsFlow):
         if user_input is None or self._sub_panels is None:
             self._sub_panels = _SubPanelSection(coordinator, self.config_entry, self.config_entry.options)
         sub_panels = self._sub_panels
+        if user_input is None or self._main_breakers is None:
+            self._main_breakers = _MainBreakerSection(coordinator, self.config_entry.options)
+        main_breakers = self._main_breakers
         errors: dict[str, str] = {}
         chosen_feeds = None
+        chosen_mains = None
         if user_input is not None:
             user_input = dict(user_input)
             # Home Assistant's frontend leaves an emptied optional text field
@@ -628,6 +696,11 @@ class OptionsFlow(config_entries.OptionsFlow):
                         | ({"rating": sizes[sub_id]} if sub_id in sizes else {})
                         for sub_id, (panel_id, position) in feeds.items()
                     }
+            # The same for the main breakers' section, which is on the form
+            # while Leviton reports a load center.
+            chosen_mains = user_input.pop(MAIN_BREAKERS, None)
+            if main_breakers.fields and chosen_mains is not None:
+                user_input[MAIN_BREAKERS] = main_breakers.read(chosen_mains)
             # The entry's options also hold keys this form does not show: the
             # sensor platform's import-sensor classifications
             # (confirmed_solar_import_uids, suppressed_import_uids), and the gap
@@ -681,6 +754,7 @@ class OptionsFlow(config_entries.OptionsFlow):
                 default=current_options.get(SHOW_SIDEBAR_PANEL, current_data.get(SHOW_SIDEBAR_PANEL, SHOW_SIDEBAR_PANEL_DEFAULT)),
             ): bool,
         }
+        options_schema.update(main_breakers.schema(chosen_mains))
         options_schema.update(sub_panels.schema(chosen_feeds))
 
         # Only show gap handling when at least one panel lacks hw counters

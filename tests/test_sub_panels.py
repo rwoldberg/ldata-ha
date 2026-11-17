@@ -12,11 +12,13 @@ from custom_components.ldata.binary_sensor import LdataCloudConnectedSensor
 from custom_components.ldata.const import DOMAIN, SHOW_SIDEBAR_PANEL
 from custom_components.ldata.sidebar import async_update_sidebar_panel
 from custom_components.ldata.sub_panels import (
+    MAIN_BREAKERS,
     SUB_PANELS,
     feed_ratings,
     feeder_rating,
     feeds_of,
     looped,
+    main_breaker_ratings,
     shared,
     sub_panel_feeds,
 )
@@ -194,6 +196,30 @@ async def test_links_carry_the_size_of_the_feeding_breaker() -> None:
             {"position": 38, "device_id": _device_id(hass, "p2"), "rating": 100.0},
         ]
         assert garage["fed_from"] == {"device_id": _device_id(hass, "p1"), "position": 29, "rating": 50.0}
+
+
+def test_main_breaker_ratings_are_read_from_the_options() -> None:
+    raw = {"p1": 200, "p2": "100", "p3": 0, "p4": "x", "p5": True, "p6": -5, "p7": None}
+    assert main_breaker_ratings({MAIN_BREAKERS: raw}) == {"p1": 200.0, "p2": 100.0}
+    assert main_breaker_ratings({}) == {}
+    assert main_breaker_ratings({MAIN_BREAKERS: ["p1"]}) == {}
+
+
+@pytest.mark.asyncio
+async def test_cloud_connected_carries_the_main_breaker_rating() -> None:
+    async with _home_assistant() as hass:
+        entry = _entry(
+            hass,
+            options={MAIN_BREAKERS: {"p1": 200}},
+            panels=[("p1", "Main Panel"), ("p2", "Garage")],
+        )
+
+        main = _cloud_sensor(hass, entry, "p1").extra_state_attributes
+        garage = _cloud_sensor(hass, entry, "p2").extra_state_attributes
+
+        assert main["main_breaker"] == 200.0
+        # One without a rating (a main-lug panel) has none.
+        assert "main_breaker" not in garage
 
 
 @pytest.mark.asyncio

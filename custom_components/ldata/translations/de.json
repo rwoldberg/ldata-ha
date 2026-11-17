@@ -79,6 +79,10 @@
                     "log_fields": "Um Feldnamen zu finden, aktiviere „Alle geparsten Daten protokollieren“ und sieh in den Protokollen von Home Assistant nach. Trage die Felder oben durch Kommas getrennt ein."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Hauptsicherungen",
+                        "description": "Leviton meldet die Hauptsicherung eines Sicherungskastens nicht. Gib ihren Nennstrom neben dem Namen des Sicherungskastens ein, damit die Karte die Hauptsicherung zeigen kann und wie viel davon genutzt wird, auf der Seite in der Seitenleiste und auf Dashboard-Karten ohne eigenen Wert. Leer lassen bei einem Sicherungskasten ohne Hauptsicherung."
+                    },
                     "sub_panels": {
                         "name": "Unterverteilungen",
                         "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr. Ist diese Sicherung keine smarte Sicherung, gib ihre Größe im Feld mit (A) darunter ein, damit die Karte zeigen kann, wie viel davon die Unterverteilung nutzt."
@@ -344,7 +348,7 @@
             "appearance_light": "Hell",
             "appearance_dark": "Gedimmt",
             "main_breaker": "Nennstrom der Hauptsicherung (optional)",
-            "main_breaker_help": "Leviton meldet die Hauptsicherung nicht. Leer lassen bei einem Sicherungskasten ohne Hauptsicherung."
+            "main_breaker_help": "Leviton meldet die Hauptsicherung nicht. Leer lassen, um den Nennstrom aus den Optionen der Integration zu verwenden, oder bei einem Sicherungskasten ohne Hauptsicherung."
         }
     }
 }

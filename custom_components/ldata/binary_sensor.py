@@ -17,7 +17,14 @@ from .const import DECORA_MODELS_GFCI, DOMAIN, ENABLE_DECORA, ENABLE_DECORA_DEFA
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
 from .ldata_base_entity import add_entities_grouped_by_panel, find_panel, is_breaker_on
 from .ldata_entity import LDATAEntity
-from .sub_panels import feed_ratings, feeder_rating, feeds_of, panel_device, sub_panel_feeds
+from .sub_panels import (
+    feed_ratings,
+    feeder_rating,
+    feeds_of,
+    main_breaker_ratings,
+    panel_device,
+    sub_panel_feeds,
+)
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -203,7 +210,22 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         attributes["panel_size"] = self.panel_data.get("panel_size")
         attributes["dumb_breakers"] = self.panel_data.get("dumb_breakers", [])
         attributes["sub_panels"], attributes["fed_from"] = self._feeds()
+        if (main_breaker := self._main_breaker()) is not None:
+            attributes["main_breaker"] = main_breaker
         return attributes
+
+    def _main_breaker(self) -> float | None:
+        """Return the rating of this panel's main breaker, if the user gave one.
+
+        Leviton doesn't report it; it is set in the integration's options (see
+        sub_panels.py). The panel card reads it here, so the sidebar page and
+        every dashboard card without a main_breaker of its own draw the main
+        breaker and show how much of it the load center uses.
+        """
+        entry = getattr(self.coordinator, "config_entry", None)
+        if entry is None:
+            return None
+        return main_breaker_ratings(entry.options).get(self.panel_data.get("id"))
 
     def _feeds(self) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
         """Return this panel's breakers that feed another load center, and what feeds it.

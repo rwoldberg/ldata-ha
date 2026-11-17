@@ -203,9 +203,10 @@ def test_translations_cover_the_integration() -> None:
     assert SHOW_SIDEBAR_PANEL in ENGLISH["options"]["step"]["init"]["data"]
     assert set(ENGLISH["selector"][GAP_HANDLING]["options"]) == set(GAP_HANDLING_LABELS)
     # The options form's section, its "none" choice and the error it can raise.
-    from custom_components.ldata.sub_panels import NOT_FED, SUB_PANELS
+    from custom_components.ldata.sub_panels import MAIN_BREAKERS, NOT_FED, SUB_PANELS
 
     assert {"name", "description"} == set(ENGLISH["options"]["step"]["init"]["sections"][SUB_PANELS])
+    assert {"name", "description"} == set(ENGLISH["options"]["step"]["init"]["sections"][MAIN_BREAKERS])
     assert set(ENGLISH["selector"]["sub_panel_feed"]["options"]) == {NOT_FED}
     assert set(ENGLISH["options"]["error"]) == {"sub_panel_loop", "sub_panel_same_breaker"}
 

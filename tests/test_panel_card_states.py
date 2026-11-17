@@ -157,3 +157,18 @@ def test_sub_panel_popup_shows_it_with_this_cards_settings() -> None:
     # What belongs to this card's own panel stays here.
     for option in ("rotate_180", "main_breaker", "sub_panels"):
         assert option not in config.group(1), option
+
+
+def test_main_breaker_comes_from_the_card_or_else_the_integration() -> None:
+    # Kept with the panel's layout, so it is still drawn during an outage.
+    layout = re.search(r"const PANEL_LAYOUT = \[(.*?)\];", CARD)
+    assert layout is not None and '"main_breaker"' in layout.group(1)
+    helper = re.search(r"\n  _mainBreaker\(layout\) \{\n(.*?)\n  \}\n", CARD, re.DOTALL)
+    assert helper is not None
+    body = helper.group(1)
+    # The card's own setting wins over the integration's.
+    assert body.index("this._config.main_breaker") < body.index("layout.main_breaker")
+    # The drawing, the share in use and the rebuild key all go through it.
+    assert "const main = m.mainBreaker;" in CARD
+    assert "this._mainBreaker(layout)].filter" in CARD
+    assert "cfg.main_breaker" not in CARD

@@ -79,6 +79,10 @@
                     "log_fields": "Du finder feltnavnene ved at aktivere ”Log alle fortolkede data” og kigge i Home Assistants logfiler. Indtast dem ovenfor adskilt af kommaer."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Hovedafbrydere",
+                        "description": "Leviton rapporterer ikke en eltavles hovedafbryder. Angiv dens mærkestrøm ud for eltavlens navn, så kortet kan vise hovedafbryderen og hvor meget af den der bruges, både på siden i sidepanelet og på kort i dashboards, der ikke har deres egen værdi. Lad feltet stå tomt for en eltavle uden hovedafbryder."
+                    },
                     "sub_panels": {
                         "name": "Undertavler",
                         "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen. Hvis automatsikringen ikke er en smart automatsikring, skal du angive dens størrelse i feltet, der ender på (A), under den, så kortet kan vise, hvor meget af den undertavlen bruger."
@@ -344,7 +348,7 @@
             "appearance_light": "Lys",
             "appearance_dark": "Dæmpet",
             "main_breaker": "Hovedafbryderens mærkestrøm (valgfri)",
-            "main_breaker_help": "Leviton rapporterer ikke hovedafbryderen. Lad feltet stå tomt for en eltavle uden hovedafbryder."
+            "main_breaker_help": "Leviton rapporterer ikke hovedafbryderen. Lad feltet stå tomt for at bruge mærkestrømmen fra integrationens indstillinger eller for en eltavle uden hovedafbryder."
         }
     }
 }

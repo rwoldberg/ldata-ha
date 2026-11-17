@@ -79,6 +79,10 @@
                     "log_fields": "Pour trouver les noms des champs, activez « Journaliser toutes les données analysées » et consultez les journaux de Home Assistant. Saisissez-les ci-dessus, séparés par des virgules."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Disjoncteurs principaux",
+                        "description": "Leviton ne transmet pas le disjoncteur principal d'un panneau électrique. Indiquez son courant nominal en face du nom du panneau, pour que la carte puisse afficher le disjoncteur principal et la part qui en est utilisée, sur la page de la barre latérale et sur les cartes des tableaux de bord qui n'ont pas leur propre valeur. Laissez vide pour un panneau sans disjoncteur principal (à cosses principales)."
+                    },
                     "sub_panels": {
                         "name": "Panneaux secondaires",
                         "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder. Si ce disjoncteur n'est pas un disjoncteur intelligent, indiquez son calibre dans le champ se terminant par (A) en dessous, pour que la carte puisse montrer quelle part en utilise le panneau secondaire."
@@ -344,7 +348,7 @@
             "appearance_light": "Lumineux",
             "appearance_dark": "Tamisé",
             "main_breaker": "Courant nominal du disjoncteur principal (facultatif)",
-            "main_breaker_help": "Leviton ne transmet aucune donnée sur le disjoncteur principal. Laissez vide pour un panneau sans disjoncteur principal (à cosses principales)."
+            "main_breaker_help": "Leviton ne transmet aucune donnée sur le disjoncteur principal. Laissez vide pour utiliser le courant nominal défini dans les options de l'intégration, ou pour un panneau sans disjoncteur principal (à cosses principales)."
         }
     }
 }

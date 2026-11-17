@@ -20,6 +20,15 @@ most. The link is used in two places:
   the sidebar page alike.
 - The sidebar page puts a sub-panel right after the load center that feeds
   it (sidebar.py).
+
+Leviton doesn't report a load center's main breaker either. The user can
+give its rating, in amps, in the same options:
+
+    options["main_breakers"] = {"<panel id>": 200}
+
+A main-lug panel has none. The panel's Cloud Connected entity passes it on,
+so the panel card draws the main breaker and shows how much of it is in use
+on the sidebar page and on any dashboard card that doesn't set its own.
 """
 from __future__ import annotations
 
@@ -33,6 +42,7 @@ from homeassistant.helpers import device_registry as dr
 from .const import DOMAIN, PANEL_SUBENTRY_TYPE
 
 SUB_PANELS = "sub_panels"
+MAIN_BREAKERS = "main_breakers"
 # The form's choice for a load center that no other one feeds.
 NOT_FED = "none"
 
@@ -99,6 +109,18 @@ def amps(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return size if math.isfinite(size) and size > 0 else None
+
+
+def main_breaker_ratings(options: Mapping[str, Any]) -> dict[str, float]:
+    """Return {load center id: amps} for the main breakers the user gave a rating."""
+    raw = options.get(MAIN_BREAKERS)
+    if not isinstance(raw, Mapping):
+        return {}
+    return {
+        str(panel_id): size
+        for panel_id, value in raw.items()
+        if (size := amps(value)) is not None
+    }
 
 
 def feed_ratings(

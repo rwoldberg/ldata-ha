@@ -79,6 +79,10 @@
                     "log_fields": "Para encontrar os nomes dos campos, habilite “Registrar todos os dados analisados” e consulte os logs do Home Assistant. Insira-os acima, separados por vírgulas."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Disjuntores gerais",
+                        "description": "A Leviton não informa o disjuntor geral de um quadro de distribuição. Informe a corrente nominal dele ao lado do nome do quadro, para que o cartão mostre o disjuntor geral e quanto dele está em uso, na página da barra lateral e nos cartões dos painéis que não tenham um valor próprio. Deixe em branco se o quadro não tiver disjuntor geral."
+                    },
                     "sub_panels": {
                         "name": "Quadros secundários",
                         "description": "Se um quadro de distribuição for alimentado por um disjuntor de outro quadro, escolha esse disjuntor ao lado do nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro secundário e dá acesso a ele. Se esse disjuntor não for inteligente, informe a capacidade dele no campo terminado em (A) logo abaixo, para que o cartão mostre quanto dele o quadro secundário usa."
@@ -344,7 +348,7 @@
             "appearance_light": "Intensa",
             "appearance_dark": "Atenuada",
             "main_breaker": "Corrente nominal do disjuntor geral (opcional)",
-            "main_breaker_help": "A Leviton não informa o disjuntor geral. Deixe em branco se o quadro não tiver disjuntor geral."
+            "main_breaker_help": "A Leviton não informa o disjuntor geral. Deixe em branco para usar a corrente nominal definida nas opções da integração, ou se o quadro não tiver disjuntor geral."
         }
     }
 }

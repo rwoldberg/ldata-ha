@@ -79,6 +79,10 @@
                     "log_fields": "Para encontrar los nombres de los campos, habilite “Registrar todos los datos analizados” y revise los registros de Home Assistant. Ingréselos arriba separados por comas."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Interruptores principales",
+                        "description": "Leviton no reporta el interruptor principal de un centro de carga. Escriba su capacidad junto al nombre del centro de carga, para que la tarjeta muestre el interruptor principal y cuánto de él se usa, en la página de la barra lateral y en las tarjetas de los paneles de control que no tengan su propio valor. Déjelo vacío si el centro de carga es de zapatas principales (sin interruptor principal)."
+                    },
                     "sub_panels": {
                         "name": "Subpaneles",
                         "description": "Si un centro de carga se alimenta desde un interruptor de otro centro de carga, elija ese interruptor junto a su nombre. Ese interruptor mostrará entonces la carga en tiempo real del subpanel y permitirá ir a él. Si ese interruptor no es inteligente, escriba su capacidad en el campo terminado en (A) que está debajo, para que la tarjeta muestre cuánto de él usa el subpanel."
@@ -344,7 +348,7 @@
             "appearance_light": "Intensa",
             "appearance_dark": "Tenue",
             "main_breaker": "Capacidad del interruptor principal (opcional)",
-            "main_breaker_help": "Leviton no reporta el interruptor principal. Déjelo vacío si el centro de carga es de zapatas principales (sin interruptor principal)."
+            "main_breaker_help": "Leviton no reporta el interruptor principal. Déjelo vacío para usar la capacidad configurada en las opciones de la integración, o si el centro de carga es de zapatas principales (sin interruptor principal)."
         }
     }
 }

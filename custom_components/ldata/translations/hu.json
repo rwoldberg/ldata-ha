@@ -79,6 +79,10 @@
                     "log_fields": "A mezőnevek megtalálásához kapcsolja be a „Minden feldolgozott adat naplózása” opciót, és nézze meg a Home Assistant naplóját. A neveket fent, vesszővel elválasztva adja meg."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Főmegszakítók",
+                        "description": "A Leviton nem közli az elosztótábla főmegszakítóját. Adja meg a névleges áramát az elosztótábla neve mellett, hogy a kártya megjeleníthesse a főmegszakítót, és megmutathassa, mennyi van használatban belőle, az oldalsáv oldalán és azokon az irányítópult-kártyákon, amelyeknek nincs saját értéke. Főmegszakító nélküli elosztótáblánál hagyja üresen."
+                    },
                     "sub_panels": {
                         "name": "Alelosztók",
                         "description": "Ha egy elosztótáblát egy másik elosztótábla megszakítója táplál, válassza ki azt a megszakítót a neve mellett. Ezután az a megszakító mutatja az alelosztó élő terhelését, és onnan megnyitható az alelosztó. Ha ez a megszakító nem okos megszakító, adja meg a névleges áramát az alatta lévő, (A) végű mezőben, hogy a kártya megmutathassa, mennyit használ belőle az alelosztó."
@@ -344,7 +348,7 @@
             "appearance_light": "Világos",
             "appearance_dark": "Tompított",
             "main_breaker": "Főmegszakító névleges árama (opcionális)",
-            "main_breaker_help": "A Leviton nem közli a főmegszakító adatait. Főmegszakító nélküli elosztótáblánál hagyja üresen."
+            "main_breaker_help": "A Leviton nem közli a főmegszakító adatait. Hagyja üresen az integráció beállításaiban megadott névleges áram használatához, vagy főmegszakító nélküli elosztótáblánál."
         }
     }
 }

@@ -79,6 +79,10 @@
                     "log_fields": "Pentru a afla numele câmpurilor, activează „Jurnalizează toate datele interpretate” și verifică jurnalele Home Assistant. Introdu-le mai sus, separate prin virgulă."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Disjunctoare generale",
+                        "description": "Leviton nu raportează disjunctorul general al unui tablou electric. Introdu curentul său nominal în dreptul numelui tabloului, ca fișa să poată afișa disjunctorul general și cât din el este folosit, pe pagina din bara laterală și pe fișele din tablourile de bord care nu au o valoare proprie. Lasă necompletat pentru un tablou fără disjunctor general."
+                    },
                     "sub_panels": {
                         "name": "Tablouri secundare",
                         "description": "Dacă un tablou electric este alimentat dintr-un disjunctor al altui tablou, alege acel disjunctor în dreptul numelui său. Disjunctorul va afișa apoi sarcina în timp real a tabloului secundar și va permite deschiderea acestuia. Dacă acel disjunctor nu este inteligent, introdu curentul său nominal în câmpul terminat în (A) de dedesubt, ca fișa să poată arăta cât din el folosește tabloul secundar."
@@ -344,7 +348,7 @@
             "appearance_light": "Puternică",
             "appearance_dark": "Redusă",
             "main_breaker": "Curentul nominal al disjunctorului general (opțional)",
-            "main_breaker_help": "Leviton nu raportează disjunctorul general. Lasă necompletat pentru un tablou fără disjunctor general."
+            "main_breaker_help": "Leviton nu raportează disjunctorul general. Lasă necompletat pentru a folosi curentul nominal setat în opțiunile integrării sau pentru un tablou fără disjunctor general."
         }
     }
 }

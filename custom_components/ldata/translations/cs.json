@@ -79,6 +79,10 @@
                     "log_fields": "Názvy polí zjistíte, když zapnete volbu „Logovat všechna zpracovaná data“ a podíváte se do logů systému Home Assistant. Zadejte je výše oddělené čárkami."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Hlavní jističe",
+                        "description": "Leviton údaje o hlavním jističi rozvaděče neposkytuje. Zadejte jeho jmenovitý proud u názvu rozvaděče, aby karta mohla hlavní jistič zobrazit a ukázat, jakou část z něj rozvaděč využívá, na stránce v postranním panelu i na kartách v ovládacích panelech, které nemají vlastní hodnotu. U rozvaděče bez hlavního jističe ponechte prázdné."
+                    },
                     "sub_panels": {
                         "name": "Podružné rozvaděče",
                         "description": "Pokud je rozvaděč napájen z jističe v jiném rozvaděči, vyberte tento jistič u jeho názvu. U tohoto jističe se pak zobrazuje aktuální zatížení podružného rozvaděče a lze z něj na podružný rozvaděč přejít. Pokud tento jistič není chytrý jistič, zadejte jeho jmenovitý proud do pole končícího (A) pod ním, aby karta mohla ukázat, jakou část z něj podružný rozvaděč využívá."
@@ -344,7 +348,7 @@
             "appearance_light": "Jasné",
             "appearance_dark": "Tlumené",
             "main_breaker": "Jmenovitý proud hlavního jističe (volitelný)",
-            "main_breaker_help": "Leviton údaje o hlavním jističi neposkytuje. U rozvaděče bez hlavního jističe ponechte prázdné."
+            "main_breaker_help": "Leviton údaje o hlavním jističi neposkytuje. Ponechte prázdné, chcete-li použít hodnotu nastavenou v možnostech integrace, nebo u rozvaděče bez hlavního jističe."
         }
     }
 }

@@ -46,7 +46,9 @@
  *   show_panel_info: true      # optional, the panel's own readings above the door
  *   appearance: auto           # optional, auto | light | dark (dimmed lighting)
  *   main_breaker: 200          # optional, show a main breaker with this rating
- *                              # (the header then shows how much of it is in use)
+ *                              # (the header then shows how much of it is in use);
+ *                              # without it, the rating set for this load center
+ *                              # in the integration's options, if any
  *   rotate_180: true           # optional override — by default the card reads
  *                              # the panel's reported mounting orientation.
  *   sub_panels:                # optional — link a breaker that feeds a
@@ -235,7 +237,7 @@ function fallbackRole(match, entityIds, role, test) {
 // outage can still draw the panel. Nothing is kept that the states don't
 // already carry.
 const BREAKER_LAYOUT = ["position", "poles", "model", "hardware", "rating", "canRemoteOn", "leg"];
-const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from"];
+const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from", "main_breaker"];
 const LAYOUT_STORE = "ldata.layout.v1."; // + the panel's device id
 const layouts = new Map(); // entity id -> what its state last carried, and the handle seen then
 const layoutSeen = new Map(); // entity id -> the state object that was read
@@ -688,7 +690,7 @@ const EN = {
     "appearance_light": "Bright",
     "appearance_dark": "Dimmed",
     "main_breaker": "Main breaker rating (optional)",
-    "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty for a main-lug panel."
+    "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty to use the rating set in the integration's options, or for a main-lug panel."
   }
 };
 /* i18n:end */
@@ -1500,7 +1502,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       cfg.toggle,
       cfg.show_power,
       cfg.show_panel_info,
-      cfg.main_breaker || null,
+      this._mainBreaker(ca),
       Object.keys(d.panel.roles).sort(),
       d.cts.map((c) => [c.deviceId, c.name]),
       placed.map((p) => [
@@ -1531,6 +1533,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       head: this._headDynamics(st, d),
       structKey,
       panelDevice,
+      mainBreaker: this._mainBreaker(ca),
     };
   }
 
@@ -1657,11 +1660,23 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     saveLayouts(this._config.device_id, [d.panel.roles.cloud, ...d.breakers.map((b) => b.roles.status)]);
   }
 
+  // The main breaker's rating, which Leviton doesn't report: this card's own
+  // main_breaker, or else the one set for this load center in the
+  // integration's options, which its Cloud Connected entity carries.
+  _mainBreaker(layout) {
+    const positive = (v) => {
+      const n = numOrNull(v);
+      return n !== null && n > 0 ? n : null;
+    };
+    return positive(this._config.main_breaker) ?? positive(layout && layout.main_breaker);
+  }
+
   _headDynamics(st, d) {
     const r = d.panel.roles;
     const val = (eid) => (eid && st[eid] ? numOrNull(st[eid].state) : null);
     const cloud = r.cloud ? st[r.cloud] : null;
-    const fedFrom = layoutOf(r.cloud, cloud).fed_from;
+    const layout = layoutOf(r.cloud, cloud);
+    const fedFrom = layout.fed_from;
     const fw = r.firmware ? st[r.firmware] : null;
     return {
       watts: val(r.watts),
@@ -1677,9 +1692,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       cloud: cloud ? cloud.state : null,
       fwAvailable: !!fw && fw.state === "on",
       // What this load center may draw: the breaker feeding it, if it is a
-      // sub-panel (from the integration), or the main breaker on the card,
-      // whichever is smaller.
-      capacity: Math.min(...[numOrNull(fedFrom && fedFrom.rating), numOrNull(this._config.main_breaker)].filter((v) => v > 0), Infinity),
+      // sub-panel (from the integration), or its main breaker, whichever is
+      // smaller.
+      capacity: Math.min(...[numOrNull(fedFrom && fedFrom.rating), this._mainBreaker(layout)].filter((v) => v > 0), Infinity),
       busiest: [val(r.ampsL1), val(r.ampsL2)].filter((v) => v !== null).reduce((a, v) => Math.max(a === null ? v : a, v), null),
       overVoltage: !!(r.overVoltage && st[r.overVoltage] && st[r.overVoltage].state === "on"),
       underVoltage: !!(r.underVoltage && st[r.underVoltage] && st[r.underVoltage].state === "on"),
@@ -1721,7 +1736,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   _build(m) {
     const cfg = this._config;
     const rows = m.rows;
-    const main = numOrNull(cfg.main_breaker);
+    const main = m.mainBreaker;
 
     // One grid holds everything from the labels inward, so a label and its
     // breaker share a row and follow each other in the page order. Grid row
