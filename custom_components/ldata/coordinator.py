@@ -9,7 +9,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, Upda
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
 from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
-from .ldata_service import LDATAService, LDATAAuthError
+from .ldata_service import LDATAService, LDATAAuthError, _safe_error
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -194,7 +194,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning(f"[v{self._service.version}] {loop_name} auth error: {ex}")
                 await asyncio.sleep(60)
             except Exception as ex:
-                _LOGGER.warning(f"[v{self._service.version}] {loop_name} error: {ex}")
+                _LOGGER.warning(f"[v{self._service.version}] {loop_name} error: {_safe_error(ex)}")
                 await asyncio.sleep(30)
 
         _LOGGER.debug(f"[v{self._service.version}] {loop_name} loop stopped")
@@ -325,7 +325,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self.async_set_updated_data(data)
 
         except Exception as e:
-            _LOGGER.error(f"[v{self._service.version}] Error in debounced update: {e}")
+            _LOGGER.error(f"[v{self._service.version}] Error in debounced update: {_safe_error(e)}")
 
         finally:
             # ALWAYS re-arm the timer so updates never stall, unless the
@@ -372,39 +372,60 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 fields_to_log = [f.strip() for f in fields_to_log_str.split(',') if f.strip()]
                 log_output = {}
                 if data:
-                    for ct_id, ct_data in data.get('cts', {}).items():
+                    for ct_data in data.get('cts', {}).values():
                         for field in fields_to_log:
                             if field in ct_data:
-                                log_output[f"CT_{ct_id}_{field}"] = ct_data[field]
+                                log_output[f"CT_{ct_data.get('channel', '?')}_{field}"] = ct_data[field]
                     
                     for b_id, b_data in data.get('breakers', {}).items():
                         for field in fields_to_log:
                             if field in b_data:
-                                log_output[f"Breaker_{b_data.get('name', b_id)}_{field}"] = b_data[field]
-                    
+                                log_output[f"Breaker_{b_data.get('name', '?')}_{field}"] = b_data[field]
+
                     for panel in data.get('panels', []):
                         for field in fields_to_log:
                             if field in panel:
-                                log_output[f"Panel_{panel.get('name', panel.get('id', '?'))}_{field}"] = panel[field]
-                
+                                log_output[f"Panel_{panel.get('name', '?')}_{field}"] = panel[field]
+
                 if log_output:
-                    _LOGGER.warning("Leviton %s Selected Data: %s", source, log_output)
+                    # The chosen fields get the same redaction as the full dump.
+                    _LOGGER.warning("Leviton %s Selected Data: %s", source, self._redact_data(log_output))
 
     _REDACT_KEYS = frozenset({
         "IP", "Token", "residenceId", "mac", "residentialRoomId",
         "id", "userId", "accountId", "auth_token", "refresh_token",
         "password", "serialNumber", "ttl", "created",
+        # Device identifiers and the LAN address the parsed data also holds.
+        "stable_id", "panel_id", "serial", "localIP",
     })
+    # Collections in the parsed data keyed by breaker, CT, device or room id.
+    _ID_KEYED = frozenset({"breakers", "cts", "decora_devices", "rooms"})
 
-    def _redact_data(self, data):
-        """Redact sensitive fields from data for logging."""
+    def _redact_data(self, data, parent=None):
+        """Redact sensitive fields from data for logging.
+
+        Ids appear as keys too: the breaker, CT, Decora device and room
+        collections are keyed by id, and each panel's total power is kept
+        under "<panel id>totalPower". Those keys are replaced by numbers.
+        A field named in the specific-field logging option, e.g.
+        "Breaker_Dryer_serialNumber", is redacted by its field name.
+        """
         if isinstance(data, dict):
             redacted = {}
-            for key, value in data.items():
-                if key in self._REDACT_KEYS:
+            totals = 0
+            for index, (key, value) in enumerate(data.items(), start=1):
+                field = key
+                if parent in self._ID_KEYED:
+                    key = f"#{index}"
+                elif isinstance(key, str) and key.endswith("totalPower") and key != "totalPower":
+                    totals += 1
+                    key = f"#{totals} totalPower"
+                elif isinstance(key, str) and key.startswith(("Breaker_", "Panel_", "CT_")):
+                    field = key.rsplit("_", 1)[-1]
+                if field in self._REDACT_KEYS:
                     redacted[key] = "***REDACTED***"
                 else:
-                    redacted[key] = self._redact_data(value)
+                    redacted[key] = self._redact_data(value, field)
             return redacted
         elif isinstance(data, list):
             return [self._redact_data(item) for item in data]
@@ -447,17 +468,17 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         except requests.exceptions.RequestException as ex:
             # This is a network/DNS/timeout error from ldata_service.
-            # This is NOT an auth failure, just a temporary error.
-            _LOGGER.warning("Connection error communicating with LDATA: %s", ex)
-            raise UpdateFailed(f"Connection error: {ex}") from ex
+            # This is NOT an auth failure, just a temporary error. The
+            # UpdateFailed text is logged by Home Assistant too, so it gets
+            # the same URL-free description.
+            _LOGGER.warning("Connection error communicating with LDATA: %s", _safe_error(ex))
+            raise UpdateFailed(f"Connection error: {_safe_error(ex)}") from ex
 
         except Exception as ex:
             # This catches all other errors (e.g., "Could not get Account ID")
-            _LOGGER.warning(
-                "Unexpected error communicating with LDATA for %s: %s", self.user, ex
-            )
+            _LOGGER.warning("Unexpected error communicating with LDATA: %s", _safe_error(ex))
             # This will result in the "Failed setup, will retry" message
-            raise UpdateFailed(f"Error communicating with LDATA: {ex}") from ex
+            raise UpdateFailed(f"Error communicating with LDATA: {_safe_error(ex)}") from ex
 
     def _persist_refreshed_tokens(self) -> None:
         """Persist a token refreshed during status() into the config entry.
