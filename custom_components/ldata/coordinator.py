@@ -148,7 +148,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 # The login service could not be reached or failed; try again later.
                 self._auth_retry_at = time.monotonic() + self._auth_backoff
                 _LOGGER.warning(
-                    f"[v{self._service.version}] Logging in again failed ({type(ex).__name__}); "
+                    f"[v{self._service.version}] Logging in again failed ({_safe_error(ex)}); "
                     f"next attempt in {self._auth_backoff:.0f}s"
                 )
                 self._auth_backoff = min(self._auth_backoff * 2, AUTH_RENEWAL_BACKOFF_MAX)

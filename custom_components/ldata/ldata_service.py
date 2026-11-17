@@ -2892,7 +2892,7 @@ class LDATAService:
             except LDATAAuthError:
                 raise
             except Exception as e:
-                _LOGGER.warning(f"[v{self.version}] Error refreshing data for panel {panel_id}: {e}")
+                _LOGGER.warning(f"[v{self.version}] Error refreshing data for panel {panel_id}: {_safe_error(e)}")
 
         return results
 
@@ -4028,7 +4028,7 @@ class LDATAService:
                                             try:
                                                 auth_rejected_callback()
                                             except Exception as e:  # pylint: disable=broad-except
-                                                _LOGGER.error(f"[v{self.version}] Auth rejected callback error: {type(e).__name__}")
+                                                _LOGGER.error(f"[v{self.version}] Auth rejected callback error: {_safe_error(e)}")
                                         break
                                 elif msg.type in (
                                     aiohttp.WSMsgType.CLOSE,
