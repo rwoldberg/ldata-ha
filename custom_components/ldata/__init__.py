@@ -20,11 +20,13 @@ from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
+from homeassistant.helpers.service import async_register_admin_service
 import homeassistant.helpers.config_validation as cv
 
 from .card import CARD_URL, FRONTEND_URL_PATH, PANEL_CARD_FILENAME, async_serve_card
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER, PANEL_SUBENTRY_TYPE
 from .coordinator import LDATAUpdateCoordinator
+from .ldata_base_entity import subentry_ids_by_unique_id
 from .sidebar import async_follow_entries, async_update_sidebar_panel
 from .ldata_service import (
     LDATAAuthError,
@@ -888,16 +890,8 @@ async def _async_reconcile_subentries(
     if not coordinator.data:
         return
 
-    existing_panel = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
-    }
-    existing_room = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == DECORA_ROOM_SUBENTRY_TYPE and se.unique_id
-    }
+    existing_panel = subentry_ids_by_unique_id(entry, PANEL_SUBENTRY_TYPE)
+    existing_room = subentry_ids_by_unique_id(entry, DECORA_ROOM_SUBENTRY_TYPE)
 
     for panel in coordinator.data.get("panels", []):
         panel_id = panel.get("id")
@@ -1144,11 +1138,7 @@ def _async_ensure_panel_devices(
         return
 
     dev_reg = dr.async_get(hass)
-    subentry_by_panel = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
-    }
+    subentry_by_panel = subentry_ids_by_unique_id(entry, PANEL_SUBENTRY_TYPE)
     for panel in coordinator.data.get("panels", []):
         panel_id = panel.get("id")
         if not panel_id:
@@ -1489,7 +1479,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 summary = _reset_energy_entity(target_entity, entity_id)
                 _LOGGER.warning("reset_energy_baseline: %s", summary)
 
-        hass.services.async_register(
+        # Admin only, like the other ways to change these sensors' history:
+        # a reset rewrites energy totals the Energy dashboard records.
+        async_register_admin_service(
+            hass,
             DOMAIN,
             SERVICE_RESET_ENERGY,
             handle_reset_energy,
@@ -1501,7 +1494,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             """Handle the reset_panel_energy service call."""
             await _async_reset_panel_energy(hass, call.data[ATTR_DEVICE_ID])
 
-        hass.services.async_register(
+        async_register_admin_service(
+            hass,
             DOMAIN,
             SERVICE_RESET_PANEL,
             handle_reset_panel_energy,

@@ -15,19 +15,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Get version from manifest
-        id: version
-        run: |
-          version=$(jq -r '.version' custom_components/ldata/manifest.json)
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
       - name: Create zip asset
         run: |
           cd custom_components/ldata
           zip -r ../../ldata.zip .
-          cd ../..
 
+      # Pinned to a commit: this step can write to the repository's releases.
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: ldata.zip

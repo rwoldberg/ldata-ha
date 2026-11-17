@@ -335,8 +335,21 @@ async def async_setup_entry(
 
         _imp  = float(breaker_data.get("import", 0) or 0)
         _cons = float(breaker_data.get("consumption", 0) or 0)
-        _daily_import_uid    = f"{coordinator.unique_id_prefix}-ldata_{breaker_id}_todaymw_import"
-        _lifetime_import_uid = f"{coordinator.unique_id_prefix}-ldata_{breaker_id}__Import_kWh"
+        # The import sensors' unique ids are built from the breaker's stable
+        # id (LDATABaseEntity._build_device_id). These were built from the
+        # raw id, which differs from it since Leviton's firmware 2.2.0 id
+        # change, so on those panels the registry lookups and removals below
+        # never matched. The options lists may still hold the raw-id form,
+        # which is read alongside.
+        _stable_id = breaker_data.get("stable_id") or breaker_id
+        _daily_import_uid    = f"{coordinator.unique_id_prefix}-ldata_{_stable_id}_todaymw_import"
+        _lifetime_import_uid = f"{coordinator.unique_id_prefix}-ldata_{_stable_id}__Import_kWh"
+        _import_uids = {
+            _daily_import_uid,
+            _lifetime_import_uid,
+            f"{coordinator.unique_id_prefix}-ldata_{breaker_id}_todaymw_import",
+            f"{coordinator.unique_id_prefix}-ldata_{breaker_id}__Import_kWh",
+        }
         _has_daily_import    = ent_reg.async_get_entity_id("sensor", DOMAIN, _daily_import_uid)    is not None
         _has_lifetime_import = ent_reg.async_get_entity_id("sensor", DOMAIN, _lifetime_import_uid) is not None
 
@@ -397,10 +410,7 @@ async def async_setup_entry(
         _suppressed_uids: set = set(
             config_entry.options.get("suppressed_import_uids", [])
         )
-        _already_suppressed = (
-            _daily_import_uid in _suppressed_uids
-            or _lifetime_import_uid in _suppressed_uids
-        )
+        _already_suppressed = bool(_import_uids & _suppressed_uids)
 
         # ── Persisted solar confirmation ───────────────────────────────────────
         # confirmed_solar_import_uids: breakers positively identified as solar/
@@ -411,10 +421,7 @@ async def async_setup_entry(
         _confirmed_solar_uids: set = set(
             config_entry.options.get("confirmed_solar_import_uids", [])
         )
-        _is_confirmed_solar = (
-            _daily_import_uid in _confirmed_solar_uids
-            or _lifetime_import_uid in _confirmed_solar_uids
-        )
+        _is_confirmed_solar = bool(_import_uids & _confirmed_solar_uids)
 
         # Persist solar classification the first time we detect it.
         if _v2_solar_signal and not _is_confirmed_solar:
@@ -448,8 +455,8 @@ async def async_setup_entry(
         if _v2_load_artifact:
             # Remove any spurious registry entries so these entities become
             # orphaned (enabling deletion) and are not recreated.
-            _remove_registry_entry(_daily_import_uid)
-            _remove_registry_entry(_lifetime_import_uid)
+            for _uid in _import_uids:
+                _remove_registry_entry(_uid)
             _has_daily_import    = False
             _has_lifetime_import = False
             _is_confirmed_solar  = False
@@ -461,9 +468,8 @@ async def async_setup_entry(
                 _suppressed_uids.add(_lifetime_import_uid)
                 options_patch["suppressed_import_uids"] = list(_suppressed_uids)
             # Also evict from confirmed_solar if somehow present (defensive).
-            if _daily_import_uid in _confirmed_solar_uids or _lifetime_import_uid in _confirmed_solar_uids:
-                _confirmed_solar_uids.discard(_daily_import_uid)
-                _confirmed_solar_uids.discard(_lifetime_import_uid)
+            if _import_uids & _confirmed_solar_uids:
+                _confirmed_solar_uids -= _import_uids
                 options_patch["confirmed_solar_import_uids"] = list(_confirmed_solar_uids)
             if options_patch:
                 hass.config_entries.async_update_entry(
@@ -875,11 +881,6 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
         await super().async_added_to_hass()
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
-
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes for state restoration."""
@@ -1128,11 +1129,9 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         
         if panel_cts:
             data_to_sum = panel_cts
-            source_name = "CT"
         else:
             breakers = self.coordinator.data.get("breakers", {})
             data_to_sum = {b_id: b_data for b_id, b_data in breakers.items() if b_data.get("panel_id") == self.panel_id}
-            source_name = "breaker"
 
         if not data_to_sum:
             return
@@ -1432,11 +1431,6 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
                 self._energy_key = attrs["energy_key"]
 
         await super().async_added_to_hass()
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
 
     @property
     def name_suffix(self) -> str | None:
@@ -1748,7 +1742,6 @@ class LDATATotalUsageSensor(LDATAEntity, SensorEntity):
         self.leg_to_total = which_leg
         super().__init__(data=data, coordinator=coordinator)
         self._state = self.total_values()
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     def _panel_leg_totals(self) -> dict:
         """Sum power/current across all breakers on this panel, once per coordinator update.
@@ -1875,7 +1868,6 @@ class LDATAOutputSensor(LDATAEntity, SensorEntity):
             self._state = float(val) if val is not None else None
         except (ValueError, TypeError):
             self._state = None
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2077,11 +2069,6 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self.async_write_ha_state()
 
     @callback
-    def _handle_coordinator_update(self) -> None:
-        """Route coordinator updates through our custom state-update logic."""
-        self._state_update()
-
-    @callback
     def _state_update(self):
         """Call when the coordinator has an update."""
         try:
@@ -2239,7 +2226,6 @@ class LDATAPanelOutputSensor(LDATAEntity, SensorEntity):
             self._state = float(value) if value is not None else None
         except (TypeError, ValueError):
             self._state = 0.0
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2293,7 +2279,6 @@ class LDATACTOutputSensor(LDATACTEntity, SensorEntity):
             self._state = float(self.ct_data[self.entity_description.key])
         except ValueError:
             self._state = 0.0
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2406,14 +2391,15 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
 
     async def async_added_to_hass(self) -> None:
         """Handle entity which is added to hass to restore state on startup."""
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
-        await super().async_added_to_hass()
-        # Restore the last known state from the database.
+        # Restore the last known state from the database before super() runs
+        # the first update, as the daily sensors do, so that update compares
+        # against the restored total.
         if last_state := await self.async_get_last_state():
             try:
                 self._state = float(last_state.state)
             except (ValueError, TypeError):
                 pass # Ignore if the stored state is invalid
+        await super().async_added_to_hass()
 
     def _use_pxt_mode(self) -> bool:
         """Return True if this CT's panel has no hw counters — use power×time integration."""
@@ -2670,7 +2656,6 @@ class LDATABreakerOperationalStateSensor(LDATAEntity, SensorEntity):
         self.breaker_data = data
         self._state = data.get("operationalState", "Normal")
         self._second = data.get("operationalState2") or None
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2739,7 +2724,6 @@ class LDATABreakerBleRSSISensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("bleRSSI")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2787,7 +2771,6 @@ class LDATABreakerPositionSensor(LDATAEntity, SensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get("position")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2834,7 +2817,6 @@ class LDATAPanelWifiRSSISensor(LDATAEntity, SensorEntity):
         self.panel_data = data
         self._panel_id = data["data"]["id"]
         self._state = data["data"].get("rssi")
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -2965,4 +2947,3 @@ class DecoraGFCIStatusSensor(DecoraEntity, SensorEntity):
     @property
     def unique_id_suffix(self) -> str | None:
         return "fault_status"
-        return "mdi:wifi-strength-off-outline"

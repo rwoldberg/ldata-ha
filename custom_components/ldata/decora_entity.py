@@ -2,10 +2,13 @@
 
 import logging
 
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER
 from .coordinator import LDATAUpdateCoordinator
+from .ldata_base_entity import subentry_ids_by_unique_id
+from .ldata_service import LDATAAuthError
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -22,11 +25,7 @@ def add_entities_grouped_by_decora_room(config_entry, async_add_entities, entiti
     """
     if not entities:
         return
-    subentry_by_room = {
-        se.unique_id: se.subentry_id
-        for se in getattr(config_entry, "subentries", {}).values()
-        if se.subentry_type == DECORA_ROOM_SUBENTRY_TYPE and se.unique_id
-    }
+    subentry_by_room = subentry_ids_by_unique_id(config_entry, DECORA_ROOM_SUBENTRY_TYPE)
     groups: dict[str | None, list] = {}
     for entity in entities:
         room_id = entity.entity_data.get("residentialRoomId")
@@ -70,6 +69,30 @@ class DecoraEntity(CoordinatorEntity[LDATAUpdateCoordinator]):
         if self.coordinator.data and "decora_devices" in self.coordinator.data:
             return self.coordinator.data["decora_devices"].get(self._dev_id)
         return None
+
+    async def _async_send_command(self, data: dict, action: str) -> None:
+        """Send a command (an iotSwitch update) to this device.
+
+        Raises HomeAssistantError when it is not carried out, so the service
+        call fails visibly in the UI and in automations instead of returning
+        as if the device had done it. action completes "Could not ... <name>".
+        """
+        device = self._get_device_data()
+        if not device:
+            raise HomeAssistantError(f"Could not {action} {self.name}: the device is not available")
+        try:
+            done = await self.coordinator.hass.async_add_executor_job(
+                self.coordinator.service.set_iot_switch,
+                device.get("residenceId"),
+                self._dev_id,
+                data,
+            )
+        except LDATAAuthError as ex:
+            raise HomeAssistantError(
+                f"Could not {action} {self.name}: Leviton refused the request"
+            ) from ex
+        if not done:
+            raise HomeAssistantError(f"Could not {action} {self.name}: Leviton did not accept the command")
 
     @property
     def available(self) -> bool:

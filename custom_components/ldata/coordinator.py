@@ -9,11 +9,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.exceptions import ConfigEntryAuthFailed
 
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, AUTH_RENEWAL_BACKOFF, AUTH_RENEWAL_BACKOFF_MAX, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
-from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
-from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL
-from .ldata_service import LDATAService, LDATAAuthError, _safe_error
-
+from .const import DOMAIN, LOGGER_NAME, HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT, HA_INFORM_RATE_MIN, AUTH_RENEWAL_BACKOFF, AUTH_RENEWAL_BACKOFF_MAX, BREAKER_POLL_INTERVAL, CT_POLL_INTERVAL, PANEL_STATUS_POLL_INTERVAL, STATUS_TIMEOUT
+from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired, _safe_error
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 # Grace period (seconds) before REST poll loops start actively polling.
@@ -155,7 +152,7 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 # The login service could not be reached or failed; try again later.
                 self._auth_retry_at = time.monotonic() + self._auth_backoff
                 _LOGGER.warning(
-                    f"[v{self._service.version}] Logging in again failed ({type(ex).__name__}); "
+                    f"[v{self._service.version}] Logging in again failed ({_safe_error(ex)}); "
                     f"next attempt in {self._auth_backoff:.0f}s"
                 )
                 self._auth_backoff = min(self._auth_backoff * 2, AUTH_RENEWAL_BACKOFF_MAX)
@@ -254,12 +251,24 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             self.config_entry.options.get(HA_INFORM_RATE, HA_INFORM_RATE_DEFAULT)
         )
 
-    async def _fallback_poll_loop(self, *, loop_name, get_interval, needs_poll, refresh):
-        """Shared sleep/refresh/exception scaffolding for the REST and CT fallback poll loops.
+    def _breaker_poll_interval(self) -> float:
+        """Return the breaker REST poll interval: its own, or the inform rate if longer.
 
-        Both loops sleep for `get_interval()`, bail out on shutdown, skip the
-        cycle if `needs_poll()` is False, otherwise run `refresh` in the
-        executor and push a debounced update if it returned fresh data.
+        See BREAKER_POLL_INTERVAL. A shorter inform rate no longer makes the
+        poll toggle the panels' bandwidth more often.
+        """
+        return max(BREAKER_POLL_INTERVAL, self._inform_rate())
+
+    async def _fallback_poll_loop(self, *, loop_name, get_interval, needs_poll, fetch, merge):
+        """Shared sleep/refresh/exception scaffolding for the REST poll loops.
+
+        Each loop sleeps for `get_interval()`, bails out on shutdown, skips the
+        cycle if `needs_poll()` is False, otherwise runs `fetch` in the
+        executor and `merge` on the event loop, and pushes a debounced update
+        if the merge applied anything. The merge runs here, not in the
+        executor, so it applies the result to the status_data the WebSocket
+        has kept updating while the fetch ran, instead of writing back a copy
+        taken before it.
         """
         while not self._service._shutdown_requested:
             try:
@@ -271,9 +280,9 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
                 if not needs_poll():
                     continue
 
-                refreshed = await self._hass.async_add_executor_job(refresh)
+                fetched = await self._hass.async_add_executor_job(fetch)
 
-                if refreshed:
+                if merge(fetched):
                     self._handle_websocket_update()
 
             except asyncio.CancelledError:
@@ -325,9 +334,10 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
 
         await self._fallback_poll_loop(
             loop_name="REST poll",
-            get_interval=self._inform_rate,
+            get_interval=self._breaker_poll_interval,
             needs_poll=lambda: self._service.needs_breaker_poll,
-            refresh=self._service.refresh_breaker_data,
+            fetch=self._service.fetch_breaker_poll,
+            merge=self._service.merge_rest_poll,
         )
 
     async def _ct_poll_loop(self):
@@ -356,7 +366,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             loop_name="CT poll",
             get_interval=lambda: CT_POLL_INTERVAL,
             needs_poll=lambda: self._service.needs_rest_poll,
-            refresh=self._service.refresh_ct_data,
+            fetch=self._service.fetch_ct_poll,
+            merge=self._service.merge_rest_poll,
         )
 
     async def _panel_status_poll_loop(self):
@@ -368,7 +379,8 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
             loop_name="Panel status poll",
             get_interval=lambda: PANEL_STATUS_POLL_INTERVAL,
             needs_poll=lambda: True,
-            refresh=self._service.refresh_panel_status,
+            fetch=self._service.fetch_panel_status,
+            merge=self._service.merge_panel_status,
         )
 
     def _handle_websocket_update(self):
@@ -538,12 +550,19 @@ class LDATAUpdateCoordinator(DataUpdateCoordinator):
         
         # Initial fetch or WebSocket not yet connected
         _LOGGER.debug("Fetching initial LDATA data")
-        
+
+        # Only the first refresh toggles the panels' bandwidth for fresh
+        # values. A later one runs because the WebSocket is down and something
+        # asked for a refresh (every Decora command does) and only reads.
+        toggle_bandwidth = self.data is None
+
         try:
-            async with asyncio.timeout(30):
+            # status() ends within STATUS_TIMEOUT (see const.py), so this
+            # never gives up on a refresh that then runs on in its thread.
+            async with asyncio.timeout(STATUS_TIMEOUT):
                 # This will now either return data or raise an Exception
                 returnData = await self._hass.async_add_executor_job(
-                    self._service.status  # Fetch new status
+                    self._service.status, toggle_bandwidth
                 )
 
             # Log data if enabled
