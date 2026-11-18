@@ -3313,18 +3313,26 @@ button { font: inherit; }
 /* ── Circuit directory: printed on the cover beside the door ───── */
 .lbl {
   all: unset;
+  /* Its text size, line height, the gap under the name (in em), the
+     readings' size against the name's, and its bottom padding. They also
+     place a 2-pole label's readings (see .lbl--tall .lbl-sub). */
+  --lbl-font: clamp(10px, calc(var(--u) * 0.365), 14.5px);
+  --lbl-line: 1.16;
+  --lbl-gap: 0.06;
+  --lbl-sub: 0.84;
+  --lbl-pad: calc(var(--u) * 0.04);
   position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.06em;
+  gap: calc(var(--lbl-gap) * 1em);
   min-width: 0;
-  padding: 0 calc(var(--u) * 0.2) calc(var(--u) * 0.04);
+  padding: 0 calc(var(--u) * 0.2) var(--lbl-pad);
   cursor: pointer;
   color: var(--ink);
-  font-size: clamp(10px, calc(var(--u) * 0.365), 14.5px);
-  line-height: 1.16;
+  font-size: var(--lbl-font);
+  line-height: var(--lbl-line);
   -webkit-tap-highlight-color: transparent;
 }
 .lbl--left { grid-column: 1; align-items: flex-end; text-align: right; }
@@ -3341,11 +3349,20 @@ button { font: inherit; }
 .lbl-sub {
   max-width: 100%;
   color: var(--ink-2);
-  font-size: 0.84em;
+  font-size: calc(var(--lbl-sub) * 1em);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* A 2-pole label's name stays centred in its double space, and its readings
+   sit just above its bar, as high as a single pole's: half of what one space
+   leaves around a name and its readings, plus the padding. */
+.lbl--tall .lbl-sub {
+  position: absolute;
+  left: calc(var(--u) * 0.2);
+  right: calc(var(--u) * 0.2);
+  bottom: calc((var(--u) + var(--lbl-pad) - var(--lbl-font) * (var(--lbl-line) * (1 + var(--lbl-sub)) + var(--lbl-gap))) / 2);
 }
 .lbl-sub[data-tone="muted"] { color: var(--ink-3); }
 .lbl-sub[data-tone="bad"] { color: var(--ink-bad); font-weight: 700; }
