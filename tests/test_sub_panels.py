@@ -249,8 +249,9 @@ async def test_cloud_connected_carries_the_main_breaker_settings() -> None:
         assert main["panel_type"] == "main_hidden"
         # The capacity isn't called a main breaker: a sub-panel has none.
         assert "main_breaker" not in main and "main_breaker_position" not in main
-        # One without settings (a main-lug panel) has neither.
-        assert "load_capacity" not in garage and "panel_type" not in garage
+        # One without settings has no capacity, and is a sub-panel.
+        assert "load_capacity" not in garage
+        assert garage["panel_type"] == "sub"
 
 
 @pytest.mark.asyncio

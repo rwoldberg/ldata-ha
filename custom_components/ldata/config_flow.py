@@ -397,6 +397,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlow(config_entry)
 
 
+def _field_name(label: str, panel_id: str, taken: set[str]) -> str:
+    """Return a load center's field name, unique together with its "(Amps)" field's.
+
+    Next to a load center called "Garage", one called "Garage (Amps)" gets its
+    id added, as does the second of two with the same name. Both names are
+    added to taken.
+    """
+    name, tries = label, 1
+    while name in taken or f"{name} (Amps)" in taken:
+        tries += 1
+        name = f"{label} ({panel_id})" if tries == 2 else f"{label} ({panel_id} {tries})"
+    taken.update((name, f"{name} (Amps)"))
+    return name
+
+
 class _SubPanelSection:
     """The options form's "Sub-panels" section.
 
@@ -446,20 +461,12 @@ class _SubPanelSection:
         if not asked and not self._unreported:
             return
 
-        # A field's name is taken together with its size field's: next to a
-        # load center called "Garage", one called "Garage (Amps)" gets its id
-        # added, as does the second of two with the same name.
         taken: set[str] = set()
         names: dict[str, str] = {}
 
         def field_for(panel_id: str, label: str) -> str:
-            name, tries = label, 1
-            while name in taken or f"{name} (Amps)" in taken:
-                tries += 1
-                name = f"{label} ({panel_id})" if tries == 2 else f"{label} ({panel_id} {tries})"
-            taken.update((name, f"{name} (Amps)"))
-            names[panel_id] = name
-            return name
+            names[panel_id] = _field_name(label, panel_id, taken)
+            return names[panel_id]
 
         for panel in asked:
             name = field_for(panel["id"], str(panel.get("name") or panel["id"]))
@@ -601,11 +608,10 @@ class _MainBreakerSection:
     with its main breaker drawn, or hidden, or a sub-panel without one. Each
     one is a sub-panel until the user says otherwise, so that is stored only
     next to a capacity. Which way up it is drawn is Leviton's to report, not
-    a choice here. The
-    one ending in (Amps) is its load capacity: a main panel's main breaker
-    rating, or the rating of what feeds a sub-panel (a main breaker by the
-    meter, say). It is left empty for a main-lug panel. Leviton reports
-    neither. Offered from one load center up, unlike the sub-panel section.
+    a choice here. The one ending in (Amps) is its load capacity: a main
+    panel's main breaker rating, or the rating of what feeds a sub-panel (a
+    main breaker by the meter, say). Leviton reports neither. Offered from
+    one load center up, unlike the sub-panel section.
 
     A load center the options cover but Leviton no longer reports keeps its
     settings and gets no fields. As with the sub-panel section, the options
@@ -620,20 +626,11 @@ class _MainBreakerSection:
         )
         self.stored_ratings = main_breaker_ratings(options)
         self.stored_types = panel_types(options)
-        self.fields: dict[str, str] = {}  # where it is drawn -> the load center
-        self.rating_fields: dict[str, str] = {}  # its rating -> the load center
-        # A field's name is taken together with its rating field's, as in the
-        # sub-panel section.
+        self.fields: dict[str, str] = {}  # its type field -> the load center
         taken: set[str] = set()
         for panel in panels:
-            label = str(panel.get("name") or panel["id"])
-            name, tries = label, 1
-            while name in taken or f"{name} (Amps)" in taken:
-                tries += 1
-                name = f"{label} ({panel['id']})" if tries == 2 else f"{label} ({panel['id']} {tries})"
-            taken.update((name, f"{name} (Amps)"))
+            name = _field_name(str(panel.get("name") or panel["id"]), panel["id"], taken)
             self.fields[name] = panel["id"]
-            self.rating_fields[f"{name} (Amps)"] = panel["id"]
 
     def schema(self, chosen: Mapping[str, Any] | None) -> dict[Any, Any]:
         """Return the section for the form, or nothing without a load center to set."""

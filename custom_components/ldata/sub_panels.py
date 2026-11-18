@@ -37,10 +37,10 @@ is a main panel's, as the first test builds stored it (panel_types). Which
 way up the panel is drawn isn't a setting: Leviton reports it, and the main
 breaker goes next to positions 1 and 2, at the bottom of a panel mounted
 upside down. Without a rating neither the main breaker nor the share in use
-is shown, as for a main-lug panel. The panel's Cloud Connected entity passes
-both on, so the panel card shows how much of its capacity is in use, and
-draws a main panel's main breaker, on the sidebar page and on any dashboard
-card that doesn't set its own load_capacity.
+is shown. The panel's Cloud Connected entity passes both on, so the panel
+card shows how much of its capacity is in use, and draws a main panel's main
+breaker, on the sidebar page and on any dashboard card that doesn't set its
+own load_capacity.
 """
 from __future__ import annotations
 

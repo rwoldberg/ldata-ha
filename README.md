@@ -273,7 +273,7 @@ Leviton doesn't report what a load center can carry either. Give each load cente
 3. In the field ending in **(Amps)**, enter its capacity: the main breaker's rating for a main panel, or the feeding breaker's rating for a sub-panel. Leave it empty to show neither.
 4. Save. The integration reloads, and the cards show it without a restart.
 
-The main breaker is Leviton's 2nd Gen one (LM100-T to LM225-T). It shows as switched off when neither leg has voltage, and at the bottom of the panel it is upside down, as it is fitted there. A dashboard card's own `load_capacity` wins over the capacity set here, and its `rotate_180` over the orientation Leviton reports.
+The main breaker is Leviton's 2nd Gen one (LM100-T to LM225-T). It shows as switched off when neither leg has voltage, and at the bottom of the panel it is upside down, as it is fitted there. A dashboard card's own `load_capacity` wins over the capacity set here, and its `rotate_180` over the orientation Leviton reports. The integration reads that orientation when it starts, so after changing it in the My Leviton app, reload the integration or restart Home Assistant.
 
 ## Sidebar page
 
@@ -411,7 +411,7 @@ Addon is auto reloading on submit.
   - Adds a sidebar item that opens a full-page, interactive view of your load center(s). See [Sidebar page](#sidebar-page).
 
 - Panel type and load capacity
-  - Whether each load center is a main panel, and where its main breaker is drawn, or a sub-panel without one, and its load capacity in amps, which Leviton doesn't report. Leave the capacity empty for a main-lug panel. See [Panel type and load capacity](#panel-type-and-load-capacity).
+  - Whether each load center is a main panel, with its main breaker drawn or hidden, or a sub-panel without one, and its load capacity in amps, which Leviton doesn't report. See [Panel type and load capacity](#panel-type-and-load-capacity).
 
 - Sub-panels (shown with two or more load centers)
   - For a load center that is fed from a breaker in another one, the breaker that feeds it. See [Sub-panels](#sub-panels).
