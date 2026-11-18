@@ -79,9 +79,13 @@
                     "log_fields": "Názvy polí zjistíte, když zapnete volbu „Logovat všechna zpracovaná data“ a podíváte se do logů systému Home Assistant. Zadejte je výše oddělené čárkami."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Typ rozvaděče a zatížitelnost",
+                        "description": "Leviton neuvádí zatížitelnost rozvaděče, proto ji nastavte pod názvem každého rozvaděče. Vyberte hlavní nebo podružný rozvaděč a zadejte jeho zatížitelnost (Amps): u hlavního rozvaděče jmenovitý proud hlavního jističe, u podružného jmenovitý proud jističe, který ho napájí. Karta podle ní ukazuje využití kapacity na stránce v postranním panelu i na kartách v ovládacích panelech. Hlavní rozvaděče navíc zobrazují svůj hlavní jistič s jeho jmenovitým proudem nahoře nebo dole, podle orientace. Pokud zatížitelnost nevyplníte, nezobrazí se ani jedno."
+                    },
                     "sub_panels": {
                         "name": "Podružné rozvaděče",
-                        "description": "Pokud je rozvaděč napájen z jističe v jiném rozvaděči, vyberte tento jistič u jeho názvu. U tohoto jističe se pak zobrazuje aktuální zatížení podružného rozvaděče a lze z něj na podružný rozvaděč přejít. Pokud tento jistič není chytrý jistič, zadejte jeho jmenovitý proud do pole končícího (A) pod ním, aby karta mohla ukázat, jakou část z něj podružný rozvaděč využívá."
+                        "description": "Pokud je rozvaděč napájen z jističe v jiném rozvaděči, vyberte tento jistič u jeho názvu. U tohoto jističe se pak zobrazuje aktuální zatížení podružného rozvaděče a lze z něj na podružný rozvaděč přejít. Pokud tento jistič není chytrý jistič, zadejte jeho jmenovitý proud do pole končícího (Amps) pod ním, aby karta mohla ukázat, jakou část z něj podružný rozvaděč využívá."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Není podružný rozvaděč"
+                "none": "Nenapájí ho jiný rozvaděč"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Hlavní rozvaděč (hlavní jistič)",
+                "main_hidden": "Hlavní rozvaděč (skrýt hlavní jistič)",
+                "sub": "Podružný rozvaděč (bez hlavního jističe)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Podle motivu",
             "appearance_light": "Jasné",
             "appearance_dark": "Tlumené",
-            "main_breaker": "Jmenovitý proud hlavního jističe (volitelný)",
-            "main_breaker_help": "Leviton údaje o hlavním jističi neposkytuje. U rozvaděče bez hlavního jističe ponechte prázdné."
+            "load_capacity": "Zatížitelnost (volitelná)",
+            "load_capacity_help": "Jakou zátěž tento rozvaděč unese, v ampérech: jmenovitý proud jeho hlavního jističe, nebo jističe, který ho napájí. Ponechte prázdné, chcete-li použít zatížitelnost nastavenou v možnostech integrace."
         }
     }
 }

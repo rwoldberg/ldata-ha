@@ -79,9 +79,13 @@
                     "log_fields": "Du finder feltnavnene ved at aktivere ”Log alle fortolkede data” og kigge i Home Assistants logfiler. Indtast dem ovenfor adskilt af kommaer."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Tavletype og belastningskapacitet",
+                        "description": "Leviton rapporterer ikke eltavlens kapacitet, så angiv den under hver eltavles navn. Vælg hovedtavle eller undertavle, og skriv derefter dens kapacitet (Amps): hovedafbryderens mærkestrøm for en hovedtavle eller mærkestrømmen på den afbryder, der forsyner den, for en undertavle. Kortet bruger den til at vise udnyttelsen af kapaciteten på siden i sidepanelet og på kort i dashboards. Hovedtavler viser også deres hovedafbryder og mærkestrøm øverst eller nederst, afhængigt af retningen. Lad kapaciteten stå tom for at skjule begge dele."
+                    },
                     "sub_panels": {
                         "name": "Undertavler",
-                        "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen. Hvis automatsikringen ikke er en smart automatsikring, skal du angive dens størrelse i feltet, der ender på (A), under den, så kortet kan vise, hvor meget af den undertavlen bruger."
+                        "description": "Hvis en eltavle forsynes fra en automatsikring i en anden eltavle, skal du vælge den automatsikring ud for tavlens navn. Automatsikringen viser derefter undertavlens aktuelle belastning og fører videre til undertavlen. Hvis automatsikringen ikke er en smart automatsikring, skal du angive dens størrelse i feltet, der ender på (Amps), under den, så kortet kan vise, hvor meget af den undertavlen bruger."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Ikke en undertavle"
+                "none": "Forsynes ikke fra en anden eltavle"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Hovedtavle (hovedafbryder)",
+                "main_hidden": "Hovedtavle (skjul hovedafbryder)",
+                "sub": "Undertavle (ingen hovedafbryder)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Følg tema",
             "appearance_light": "Lys",
             "appearance_dark": "Dæmpet",
-            "main_breaker": "Hovedafbryderens mærkestrøm (valgfri)",
-            "main_breaker_help": "Leviton rapporterer ikke hovedafbryderen. Lad feltet stå tomt for en eltavle uden hovedafbryder."
+            "load_capacity": "Belastningskapacitet (valgfri)",
+            "load_capacity_help": "Hvor meget denne eltavle kan bære, i ampere: hovedafbryderens mærkestrøm eller mærkestrømmen på det, der forsyner den. Lad feltet stå tomt for at bruge kapaciteten fra integrationens indstillinger."
         }
     }
 }

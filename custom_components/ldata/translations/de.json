@@ -79,9 +79,13 @@
                     "log_fields": "Um Feldnamen zu finden, aktiviere „Alle geparsten Daten protokollieren“ und sieh in den Protokollen von Home Assistant nach. Trage die Felder oben durch Kommas getrennt ein."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Verteilungsart und Belastbarkeit",
+                        "description": "Leviton meldet nicht, wie viel ein Sicherungskasten tragen kann, also gib es unter dem Namen jedes Sicherungskastens an. Wähle Hauptverteilung oder Unterverteilung und trag dann die Belastbarkeit (Amps) ein: bei einer Hauptverteilung den Nennstrom der Hauptsicherung, bei einer Unterverteilung den Nennstrom der Sicherung, die sie versorgt. Die Karte zeigt damit die Auslastung auf der Seite in der Seitenleiste und auf Dashboard-Karten. Hauptverteilungen zeigen außerdem ihre Hauptsicherung mit Nennstrom oben oder unten, je nach Einbaurichtung. Lass die Belastbarkeit leer, um beides auszublenden."
+                    },
                     "sub_panels": {
                         "name": "Unterverteilungen",
-                        "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr. Ist diese Sicherung keine smarte Sicherung, gib ihre Größe im Feld mit (A) darunter ein, damit die Karte zeigen kann, wie viel davon die Unterverteilung nutzt."
+                        "description": "Wird ein Sicherungskasten von einer Sicherung in einem anderen versorgt, wähle diese Sicherung neben seinem Namen aus. Die Sicherung zeigt dann die Live-Last der Unterverteilung an und führt zu ihr. Ist diese Sicherung keine smarte Sicherung, gib ihre Größe im Feld mit (Amps) darunter ein, damit die Karte zeigen kann, wie viel davon die Unterverteilung nutzt."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Keine Unterverteilung"
+                "none": "Nicht von einem anderen Sicherungskasten versorgt"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Hauptverteilung (Hauptsicherung)",
+                "main_hidden": "Hauptverteilung (Hauptsicherung ausblenden)",
+                "sub": "Unterverteilung (keine Hauptsicherung)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Dem Design folgen",
             "appearance_light": "Hell",
             "appearance_dark": "Gedimmt",
-            "main_breaker": "Nennstrom der Hauptsicherung (optional)",
-            "main_breaker_help": "Leviton meldet die Hauptsicherung nicht. Leer lassen bei einem Sicherungskasten ohne Hauptsicherung."
+            "load_capacity": "Belastbarkeit (optional)",
+            "load_capacity_help": "Wie viel dieser Sicherungskasten tragen kann, in Ampere: der Nennstrom seiner Hauptsicherung oder der Sicherung, die ihn versorgt. Leer lassen, um die Belastbarkeit aus den Optionen der Integration zu verwenden."
         }
     }
 }

@@ -43,12 +43,19 @@ from .const import (
 )
 from .ldata_service import LDATAService, LDATAAuthError, TwoFactorRequired
 from .sub_panels import (
+    MAIN_BREAKERS,
     NOT_FED,
+    PANEL_MAIN,
+    PANEL_MAIN_HIDDEN,
+    PANEL_SUB,
+    PANEL_TYPES,
     SUB_PANELS,
     amps,
     feed_ratings,
     looped,
+    main_breaker_ratings,
     panel_subentries,
+    panel_types,
     shared,
     sub_panel_feeds,
 )
@@ -390,6 +397,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlow(config_entry)
 
 
+def _field_name(label: str, panel_id: str, taken: set[str]) -> str:
+    """Return a load center's field name, unique together with its "(Amps)" field's.
+
+    Next to a load center called "Garage", one called "Garage (Amps)" gets its
+    id added, as does the second of two with the same name. Both names are
+    added to taken.
+    """
+    name, tries = label, 1
+    while name in taken or f"{name} (Amps)" in taken:
+        tries += 1
+        name = f"{label} ({panel_id})" if tries == 2 else f"{label} ({panel_id} {tries})"
+    taken.update((name, f"{name} (Amps)"))
+    return name
+
+
 class _SubPanelSection:
     """The options form's "Sub-panels" section.
 
@@ -401,7 +423,7 @@ class _SubPanelSection:
 
     A load center the options give a feed for but that Leviton no longer
     reports (a hub that was replaced, or one left out of this fetch) gets a
-    field too, offering only that feed and "Not a sub-panel". Its feed holds
+    field too, offering only that feed and "Not fed from another load center". Its feed holds
     a breaker that no other load center can then be given, so there has to be
     a way to take it off.
 
@@ -439,25 +461,17 @@ class _SubPanelSection:
         if not asked and not self._unreported:
             return
 
-        # A field's name is taken together with its size field's: next to a
-        # load center called "Garage", one called "Garage (A)" gets its id
-        # added, as does the second of two with the same name.
         taken: set[str] = set()
         names: dict[str, str] = {}
 
         def field_for(panel_id: str, label: str) -> str:
-            name, tries = label, 1
-            while name in taken or f"{name} (A)" in taken:
-                tries += 1
-                name = f"{label} ({panel_id})" if tries == 2 else f"{label} ({panel_id} {tries})"
-            taken.update((name, f"{name} (A)"))
-            names[panel_id] = name
-            return name
+            names[panel_id] = _field_name(label, panel_id, taken)
+            return names[panel_id]
 
         for panel in asked:
             name = field_for(panel["id"], str(panel.get("name") or panel["id"]))
             self.fields[name] = panel["id"]
-            self.rating_fields[f"{name} (A)"] = panel["id"]
+            self.rating_fields[f"{name} (Amps)"] = panel["id"]
         for sub_id in self._unreported:
             self.fields[field_for(sub_id, str(titles.get(sub_id) or sub_id))] = sub_id
 
@@ -484,7 +498,7 @@ class _SubPanelSection:
                 for position, breaker in listed
             ]
 
-        none = selector.SelectOptionDict(value=NOT_FED, label="Not a sub-panel")
+        none = selector.SelectOptionDict(value=NOT_FED, label="Not fed from another load center")
         listed_choices = {option["value"]: option for choices in breakers.values() for option in choices}
         for sub_id in self.fields.values():
             offered = [none]
@@ -495,7 +509,7 @@ class _SubPanelSection:
             # A stored link to a breaker, or a load center, that Leviton no
             # longer lists stays on offer, or saving the form for another
             # reason would drop it. For a load center Leviton doesn't report,
-            # it is the only choice besides "Not a sub-panel".
+            # it is the only choice besides "Not fed from another load center".
             feed = self.stored.get(sub_id)
             if feed and self._value(*feed) not in {option["value"] for option in offered}:
                 offered.append(
@@ -539,7 +553,7 @@ class _SubPanelSection:
                     translation_key="sub_panel_feed",
                 )
             )
-            rating_field = f"{field} (A)"
+            rating_field = f"{field} (Amps)"
             if rating_field not in self.rating_fields:
                 # A load center Leviton doesn't report: its feed can only be
                 # kept or taken off, and its size is kept with it.
@@ -586,6 +600,101 @@ class _SubPanelSection:
         return {sub_id: size for sub_id, size in sizes.items() if sub_id in feeds}
 
 
+class _MainBreakerSection:
+    """The options form's "Panel type and load capacity" section.
+
+    Two fields for each load center Leviton reports, as in the sub-panel
+    section. The one named after the load center is its type: a main panel
+    with its main breaker drawn, or hidden, or a sub-panel without one. Each
+    one is a sub-panel until the user says otherwise, so that is stored only
+    next to a capacity. Which way up it is drawn is Leviton's to report, not
+    a choice here. The one ending in (Amps) is its load capacity: a main
+    panel's main breaker rating, or the rating of what feeds a sub-panel (a
+    main breaker by the meter, say). Leviton reports neither. Offered from
+    one load center up, unlike the sub-panel section.
+
+    A load center the options cover but Leviton no longer reports keeps its
+    settings and gets no fields. As with the sub-panel section, the options
+    flow keeps the section it showed for reading the answer.
+    """
+
+    def __init__(self, coordinator: Any, options: Mapping[str, Any]) -> None:
+        data = getattr(coordinator, "data", None) or {}
+        panels = sorted(
+            (panel for panel in data.get("panels", []) if panel.get("id")),
+            key=lambda panel: (str(panel.get("name") or "").casefold(), str(panel["id"])),
+        )
+        self.stored_ratings = main_breaker_ratings(options)
+        self.stored_types = panel_types(options)
+        self.fields: dict[str, str] = {}  # its type field -> the load center
+        taken: set[str] = set()
+        for panel in panels:
+            name = _field_name(str(panel.get("name") or panel["id"]), panel["id"], taken)
+            self.fields[name] = panel["id"]
+
+    def schema(self, chosen: Mapping[str, Any] | None) -> dict[Any, Any]:
+        """Return the section for the form, or nothing without a load center to set."""
+        if not self.fields:
+            return {}
+        kinds = [
+            selector.SelectOptionDict(value=PANEL_MAIN, label="Main panel (main breaker)"),
+            selector.SelectOptionDict(value=PANEL_MAIN_HIDDEN, label="Main panel (hide main breaker)"),
+            selector.SelectOptionDict(value=PANEL_SUB, label="Sub-panel (no main breaker)"),
+        ]
+        fields = {}
+        for field, panel_id in self.fields.items():
+            kind = (chosen or {}).get(field) or self.stored_types.get(panel_id)
+            if kind not in PANEL_TYPES:
+                kind = PANEL_SUB
+            fields[vol.Required(field, default=kind)] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=kinds,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                    translation_key="panel_type",
+                )
+            )
+            rating_field = f"{field} (Amps)"
+            # Suggested rather than default, so that it can be emptied.
+            rating = chosen.get(rating_field) if chosen is not None else self.stored_ratings.get(panel_id)
+            fields[vol.Optional(rating_field, description={"suggested_value": rating})] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=1200, step=1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement="A"
+                )
+            )
+        shown = set(self.fields.values())
+        stored = any(panel_id in shown for panel_id in (*self.stored_ratings, *self.stored_types))
+        return {
+            vol.Optional(MAIN_BREAKERS): section(
+                vol.Schema(fields), {"collapsed": not (stored or chosen)}
+            )
+        }
+
+    def read(self, chosen: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        """Return every load center's settings after the form: what was entered, and what it did not show."""
+        shown = set(self.fields.values())
+        settings: dict[str, dict[str, Any]] = {}
+        for panel_id, size in self.stored_ratings.items():
+            if panel_id not in shown:
+                settings.setdefault(panel_id, {})["rating"] = size
+        for panel_id, kind in self.stored_types.items():
+            if panel_id not in shown:
+                settings.setdefault(panel_id, {})["type"] = kind
+        for field, panel_id in self.fields.items():
+            entry: dict[str, Any] = {}
+            size = amps(chosen.get(f"{field} (Amps)"))
+            if size is not None:
+                entry["rating"] = size
+            kind = chosen.get(field)
+            # A sub-panel is what a load center is until said otherwise, so
+            # it is stored only next to a capacity: there, a missing type
+            # means a main panel, as the first test builds stored it.
+            if kind in PANEL_TYPES and (kind != PANEL_SUB or entry):
+                entry["type"] = kind
+            if entry:
+                settings[panel_id] = entry
+        return settings
+
+
 class OptionsFlow(config_entries.OptionsFlow):
     """Handle the options flow for Leviton LDATA."""
 
@@ -593,6 +702,8 @@ class OptionsFlow(config_entries.OptionsFlow):
         """Initialize options flow."""
         # The sub-panel section as the form showed it (see _SubPanelSection).
         self._sub_panels: _SubPanelSection | None = None
+        # The main breaker section as the form showed it (see _MainBreakerSection).
+        self._main_breakers: _MainBreakerSection | None = None
 
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Return the options form."""
@@ -600,8 +711,12 @@ class OptionsFlow(config_entries.OptionsFlow):
         if user_input is None or self._sub_panels is None:
             self._sub_panels = _SubPanelSection(coordinator, self.config_entry, self.config_entry.options)
         sub_panels = self._sub_panels
+        if user_input is None or self._main_breakers is None:
+            self._main_breakers = _MainBreakerSection(coordinator, self.config_entry.options)
+        main_breakers = self._main_breakers
         errors: dict[str, str] = {}
         chosen_feeds = None
+        chosen_mains = None
         if user_input is not None:
             user_input = dict(user_input)
             # Home Assistant's frontend leaves an emptied optional text field
@@ -628,6 +743,11 @@ class OptionsFlow(config_entries.OptionsFlow):
                         | ({"rating": sizes[sub_id]} if sub_id in sizes else {})
                         for sub_id, (panel_id, position) in feeds.items()
                     }
+            # The same for the main breakers' section, which is on the form
+            # while Leviton reports a load center.
+            chosen_mains = user_input.pop(MAIN_BREAKERS, None)
+            if main_breakers.fields and chosen_mains is not None:
+                user_input[MAIN_BREAKERS] = main_breakers.read(chosen_mains)
             # The entry's options also hold keys this form does not show: the
             # sensor platform's import-sensor classifications
             # (confirmed_solar_import_uids, suppressed_import_uids), and the gap
@@ -681,6 +801,7 @@ class OptionsFlow(config_entries.OptionsFlow):
                 default=current_options.get(SHOW_SIDEBAR_PANEL, current_data.get(SHOW_SIDEBAR_PANEL, SHOW_SIDEBAR_PANEL_DEFAULT)),
             ): bool,
         }
+        options_schema.update(main_breakers.schema(chosen_mains))
         options_schema.update(sub_panels.schema(chosen_feeds))
 
         # Only show gap handling when at least one panel lacks hw counters

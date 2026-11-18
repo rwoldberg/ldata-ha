@@ -20,6 +20,27 @@ most. The link is used in two places:
   the sidebar page alike.
 - The sidebar page puts a sub-panel right after the load center that feeds
   it (sidebar.py).
+
+Leviton doesn't report what a load center can carry either. The user says
+whether each one is a main panel, with its own main breaker, or a sub-panel
+without one, and gives its load capacity in amps, in the same options:
+
+    options["main_breakers"] = {"<panel id>": {"rating": 200, "type": "main"}}
+
+The rating is the load capacity: a main panel's main breaker rating, or for
+a sub-panel the rating of the breaker that feeds it (by the meter, say). The
+type is "main" for a main panel with its main breaker drawn, "main_hidden"
+for one whose main breaker the user would rather not see, and "sub" for a
+sub-panel, which has none. A load center is a sub-panel until the user says
+otherwise, so "sub" is stored only next to a rating: a rating without a type
+is a main panel's, as the first test builds stored it (panel_types). Which
+way up the panel is drawn isn't a setting: Leviton reports it, and the main
+breaker goes next to positions 1 and 2, at the bottom of a panel mounted
+upside down. Without a rating neither the main breaker nor the share in use
+is shown. The panel's Cloud Connected entity passes both on, so the panel
+card shows how much of its capacity is in use, and draws a main panel's main
+breaker, on the sidebar page and on any dashboard card that doesn't set its
+own load_capacity.
 """
 from __future__ import annotations
 
@@ -33,6 +54,16 @@ from homeassistant.helpers import device_registry as dr
 from .const import DOMAIN, PANEL_SUBENTRY_TYPE
 
 SUB_PANELS = "sub_panels"
+MAIN_BREAKERS = "main_breakers"
+# A load center's type: a main panel with its main breaker drawn or hidden,
+# or a sub-panel, which has none. A load center is a sub-panel until the user
+# says otherwise.
+PANEL_MAIN, PANEL_MAIN_HIDDEN, PANEL_SUB = "main", "main_hidden", "sub"
+PANEL_TYPES = (PANEL_MAIN, PANEL_MAIN_HIDDEN, PANEL_SUB)
+# The first test builds stored no type: a rating was a main breaker's, and a
+# "position" said where it was drawn, or "none" (or "none_flipped") for a
+# sub-panel.
+_OLD_POSITIONS = {"top": PANEL_MAIN, "bottom": PANEL_MAIN, "none": PANEL_SUB, "none_flipped": PANEL_SUB}
 # The form's choice for a load center that no other one feeds.
 NOT_FED = "none"
 
@@ -99,6 +130,43 @@ def amps(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return size if math.isfinite(size) and size > 0 else None
+
+
+def _main_breaker_entries(options: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    """Return {load center id: its stored main breaker settings}.
+
+    A bare number is a rating, as the first test builds stored it.
+    """
+    raw = options.get(MAIN_BREAKERS)
+    if not isinstance(raw, Mapping):
+        return {}
+    return {
+        str(panel_id): value if isinstance(value, Mapping) else {"rating": value}
+        for panel_id, value in raw.items()
+    }
+
+
+def main_breaker_ratings(options: Mapping[str, Any]) -> dict[str, float]:
+    """Return {load center id: amps} for the main breakers the user gave a rating."""
+    return {
+        panel_id: size
+        for panel_id, entry in _main_breaker_entries(options).items()
+        if (size := amps(entry.get("rating"))) is not None
+    }
+
+
+def panel_types(options: Mapping[str, Any]) -> dict[str, str]:
+    """Return {load center id: "main", "main_hidden" or "sub"} for the load centers the user gave a type."""
+    types: dict[str, str] = {}
+    for panel_id, entry in _main_breaker_entries(options).items():
+        kind = entry.get("type")
+        if kind not in PANEL_TYPES:
+            kind = _OLD_POSITIONS.get(entry.get("position"))
+        if kind is None and amps(entry.get("rating")) is not None:
+            kind = PANEL_MAIN
+        if kind is not None:
+            types[panel_id] = kind
+    return types
 
 
 def feed_ratings(

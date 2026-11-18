@@ -2,7 +2,7 @@
 
 The panel card (`custom_components/ldata/www/ldata-panel-card.js`) is not drawn with CSS. It is assembled from ray-traced images in `custom_components/ldata/www/img`, and those images are rendered from the 3D model in this folder.
 
-The model was measured from Leviton's straight-on catalog photographs of the 2nd Gen smart breakers (LB120-ST, LB220-ST, and the AFCI, GFCI and dual function LB120-AST, LB120-GST, LB220-GST and LB120-DST), the 1st Gen ones (the photos in their spec sheet, LB120-S and LB230-S), the standard breaker (LB120-T) and the load center covers (LDC series), and the handle and LED behavior follows the "Handle operation and LED diagnostics" table in Leviton's 2nd Gen Smart Circuit Breakers spec sheet. No Leviton image is used in the artwork; the photographs were only the reference.
+The model was measured from Leviton's straight-on catalog photographs of the 2nd Gen smart breakers (LB120-ST, LB220-ST, and the AFCI, GFCI and dual function LB120-AST, LB120-GST, LB220-GST and LB120-DST), the 1st Gen ones (the photos in their spec sheet, LB120-S and LB230-S), the standard breaker (LB120-T), the LM100-T main breaker (sized against the breaker spaces in the LP422-MB interior photo, with ON to the left as in the LMHPL instruction sheet) and the load center covers (LDC series), and the handle and LED behavior follows the "Handle operation and LED diagnostics" table in Leviton's 2nd Gen Smart Circuit Breakers spec sheet. No Leviton image is used in the artwork; the photographs were only the reference.
 
 ## Regenerating
 
@@ -29,7 +29,9 @@ The breakers are rendered with the maker's name on them, as the real ones are (s
 | `bk-{L,R}{1,2}{s,a,g,d,t}[1]-{on,off,trip}` | One breaker in the left or right column, 1- or 2-pole, in each handle position. The letter is its face: a smart breaker (`s`), a smart AFCI (`a`), GFCI (`g`) or dual function AFCI/GFCI (`d`) breaker, or a standard one (`t`). The protected ones have their `AF` and/or `GF` LEDs above the `OFF` LED and an `OFF/TEST` handle; `a` and `d` exist as 1-pole only, as Leviton makes them. A smart face followed by `1` (`s1`, `a1`, `g1`, `d1`) is the 1st Gen breaker, as in Leviton's 1st Gen spec sheet photos and the LB120-S and LB230-S catalog photos: no `OFF` LED, `REMOTELY OPERATED` marking or `T`, a larger radio mark, and its LEDs in a light strip down the seam. A plain one has a single unlabelled LED there, used to identify it: at the `AF` place on a 1-pole breaker, at the `GF` place on a 2-pole one. Each image is one space tall plus a strip underneath that holds only the shadow the breaker casts on the space below it. |
 | `fill-{L,R}`, `cap-{L,R}-{top,bot}` | The filler plate for an open space, and the dead front that closes the top and bottom of each column. |
 | `frame`, `cover` | The embossed door surround and the cover plate. Both are samples that the card stretches as nine-slices, which is how one set of images fits any panel size. |
-| `screw-a`, `screw-b`, `main-{on,off}` | Cover screws and the optional main breaker. |
+| `screw-a`, `screw-b` | Cover screws. |
+| `main-{on,off}` | The optional main breaker, a 2nd Gen LM-T seen through its opening in the dead front, switched on or off. Only its raised centre plate shows there, so only that is modelled. Its rating is left off, so one image serves every size; the card prints the rating in its place. |
+| `main-inv-{on,off}` | The same main breaker upside down, for the bottom of a panel turned 180°, where it is fitted with its handle next to positions 1 and 2. It is turned before it is lit, so the light still comes from above. |
 | `hero-{1,2}{s,a,g,d,t}[1]-{on,off,trip}` | The upright product shot shown in the breaker's detail sheet, for the same faces. |
 
 ## Changing the model

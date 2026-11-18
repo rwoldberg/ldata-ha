@@ -12,11 +12,14 @@ from custom_components.ldata.binary_sensor import LdataCloudConnectedSensor
 from custom_components.ldata.const import DOMAIN, SHOW_SIDEBAR_PANEL
 from custom_components.ldata.sidebar import async_update_sidebar_panel
 from custom_components.ldata.sub_panels import (
+    MAIN_BREAKERS,
     SUB_PANELS,
     feed_ratings,
     feeder_rating,
     feeds_of,
     looped,
+    main_breaker_ratings,
+    panel_types,
     shared,
     sub_panel_feeds,
 )
@@ -194,6 +197,61 @@ async def test_links_carry_the_size_of_the_feeding_breaker() -> None:
             {"position": 38, "device_id": _device_id(hass, "p2"), "rating": 100.0},
         ]
         assert garage["fed_from"] == {"device_id": _device_id(hass, "p1"), "position": 29, "rating": 50.0}
+
+
+def test_main_breaker_settings_are_read_from_the_options() -> None:
+    raw = {
+        "p1": {"rating": 200, "type": "main"},
+        "p2": {"rating": "100", "type": "main_hidden"},
+        "p3": {"rating": 0, "type": "sub"},
+        "p4": {"rating": "x", "type": "sideways"},
+        "p5": True,
+        "p6": 150,  # a bare rating, as the very first test build stored it
+        "p7": None,
+        "p8": {"rating": 200, "type": "sub"},  # a sub-panel: no main breaker drawn
+    }
+    assert main_breaker_ratings({MAIN_BREAKERS: raw}) == {"p1": 200.0, "p2": 100.0, "p6": 150.0, "p8": 200.0}
+    assert panel_types({MAIN_BREAKERS: raw}) == {
+        "p1": "main", "p2": "main_hidden", "p3": "sub", "p6": "main", "p8": "sub"
+    }
+    assert main_breaker_ratings({}) == {} == panel_types({})
+    assert main_breaker_ratings({MAIN_BREAKERS: ["p1"]}) == {}
+
+
+def test_the_first_test_builds_settings_keep_their_meaning() -> None:
+    """They stored a main breaker's position, not a type: a main breaker anywhere, or a capacity alone, was a main panel."""
+    raw = {
+        "top": {"rating": 200, "position": "top"},
+        "bottom": {"position": "bottom"},
+        "none": {"rating": 200, "position": "none"},
+        "flipped": {"position": "none_flipped"},
+        "default": {"rating": 100},  # the old default, next to positions 1 and 2
+        "unknown": {"position": "sideways"},
+    }
+    assert panel_types({MAIN_BREAKERS: raw}) == {
+        "top": "main", "bottom": "main", "none": "sub", "flipped": "sub", "default": "main"
+    }
+
+
+@pytest.mark.asyncio
+async def test_cloud_connected_carries_the_main_breaker_settings() -> None:
+    async with _home_assistant() as hass:
+        entry = _entry(
+            hass,
+            options={MAIN_BREAKERS: {"p1": {"rating": 200, "type": "main_hidden"}}},
+            panels=[("p1", "Main Panel"), ("p2", "Garage")],
+        )
+
+        main = _cloud_sensor(hass, entry, "p1").extra_state_attributes
+        garage = _cloud_sensor(hass, entry, "p2").extra_state_attributes
+
+        assert main["load_capacity"] == 200.0
+        assert main["panel_type"] == "main_hidden"
+        # The capacity isn't called a main breaker: a sub-panel has none.
+        assert "main_breaker" not in main and "main_breaker_position" not in main
+        # One without settings has no capacity, and is a sub-panel.
+        assert "load_capacity" not in garage
+        assert garage["panel_type"] == "sub"
 
 
 @pytest.mark.asyncio

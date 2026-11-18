@@ -79,9 +79,13 @@
                     "log_fields": "To find field names, enable 'Log All Parsed Data' and check Home Assistant logs. Enter above as comma separated."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Panel type and load capacity",
+                        "description": "Leviton doesn't report load center capacity, so configure it under each panel's name. Select main panel or sub-panel, then enter its capacity (Amps): the main breaker's rating for a main panel, or the feeding breaker's rating for a sub-panel. The card uses this to show capacity utilization on the sidebar and dashboard cards. Main panels also display their breaker and rating at the top or bottom, depending on orientation. Leave capacity blank to hide both."
+                    },
                     "sub_panels": {
                         "name": "Sub-panels",
-                        "description": "If a load center is fed from a breaker in another one, choose that breaker next to its name. That breaker then shows the sub-panel's live load and leads to the sub-panel. If that breaker isn't a smart breaker, enter its size in the field ending in (A) below it, so the card can show how much of it the sub-panel uses."
+                        "description": "If a load center is fed from a breaker in another one, choose that breaker next to its name. That breaker then shows the sub-panel's live load and leads to the sub-panel. If that breaker isn't a smart breaker, enter its size in the field ending in (Amps) below it, so the card can show how much of it the sub-panel uses."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Not a sub-panel"
+                "none": "Not fed from another load center"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Main panel (main breaker)",
+                "main_hidden": "Main panel (hide main breaker)",
+                "sub": "Sub-panel (no main breaker)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Follow theme",
             "appearance_light": "Bright",
             "appearance_dark": "Dimmed",
-            "main_breaker": "Main breaker rating (optional)",
-            "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty for a main-lug panel."
+            "load_capacity": "Load capacity (optional)",
+            "load_capacity_help": "What this load center can carry, in amps: its main breaker's rating, or the rating of what feeds it. Leave empty to use the capacity set in the integration's options."
         }
     }
 }

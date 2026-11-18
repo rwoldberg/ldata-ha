@@ -79,9 +79,13 @@
                     "log_fields": "Para encontrar nomes de campos, ative «Registar todos os dados analisados» e consulte os registos do Home Assistant. Introduza-os acima, separados por vírgulas."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Tipo de quadro e capacidade de carga",
+                        "description": "A Leviton não indica a capacidade dos quadros elétricos, por isso configure-a por baixo do nome de cada quadro. Selecione quadro geral ou quadro parcial e indique a capacidade (Amps): a corrente nominal do disjuntor geral para um quadro geral, ou a do disjuntor que o alimenta para um quadro parcial. O cartão usa este valor para mostrar a utilização da capacidade na barra lateral e nos cartões dos painéis. Os quadros gerais mostram também o seu disjuntor geral e a corrente nominal em cima ou em baixo, conforme a orientação. Deixe a capacidade vazia para ocultar ambos."
+                    },
                     "sub_panels": {
                         "name": "Quadros parciais",
-                        "description": "Se um quadro elétrico for alimentado por um disjuntor de outro quadro, escolha esse disjuntor junto ao nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro parcial e dá acesso a ele. Se esse disjuntor não for inteligente, indique o calibre no campo terminado em (A) por baixo, para que o cartão mostre quanto dele o quadro parcial usa."
+                        "description": "Se um quadro elétrico for alimentado por um disjuntor de outro quadro, escolha esse disjuntor junto ao nome do quadro. Esse disjuntor passa a mostrar a carga em tempo real do quadro parcial e dá acesso a ele. Se esse disjuntor não for inteligente, indique o calibre no campo terminado em (Amps) por baixo, para que o cartão mostre quanto dele o quadro parcial usa."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Não é um quadro parcial"
+                "none": "Não é alimentado por outro quadro"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Quadro geral (disjuntor geral)",
+                "main_hidden": "Quadro geral (ocultar disjuntor geral)",
+                "sub": "Quadro parcial (sem disjuntor geral)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Seguir o tema",
             "appearance_light": "Intensa",
             "appearance_dark": "Atenuada",
-            "main_breaker": "Corrente nominal do disjuntor geral (opcional)",
-            "main_breaker_help": "A Leviton não fornece informação sobre o disjuntor geral. Deixe vazio se o quadro não tiver disjuntor geral."
+            "load_capacity": "Capacidade de carga (opcional)",
+            "load_capacity_help": "Que carga este quadro suporta, em amperes: a corrente nominal do disjuntor geral ou do disjuntor que o alimenta. Deixe vazio para usar a capacidade definida nas opções da integração."
         }
     }
 }

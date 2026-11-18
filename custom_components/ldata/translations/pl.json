@@ -79,9 +79,13 @@
                     "log_fields": "Aby poznać nazwy pól, włącz opcję „Zapisuj w logach wszystkie przetworzone dane” i sprawdź logi Home Assistant. Wpisz je powyżej, oddzielając przecinkami."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Typ rozdzielnicy i obciążalność",
+                        "description": "Leviton nie podaje obciążalności rozdzielnic, więc ustaw ją pod nazwą każdej rozdzielnicy. Wybierz rozdzielnicę główną lub podrozdzielnicę, a następnie wpisz jej obciążalność (Amps): dla rozdzielnicy głównej prąd znamionowy wyłącznika głównego, dla podrozdzielnicy prąd znamionowy wyłącznika, który ją zasila. Karta pokazuje na tej podstawie wykorzystanie obciążalności na stronie w pasku bocznym i na kartach w dashboardach. Rozdzielnice główne pokazują też swój wyłącznik główny i jego prąd znamionowy na górze lub na dole, zależnie od kierunku montażu. Pozostaw obciążalność pustą, aby ukryć jedno i drugie."
+                    },
                     "sub_panels": {
                         "name": "Podrozdzielnice",
-                        "description": "Jeśli rozdzielnica jest zasilana z wyłącznika w innej rozdzielnicy, wybierz ten wyłącznik obok jej nazwy. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy i będzie można z niego do niej przejść. Jeśli ten wyłącznik nie jest inteligentny, wpisz jego prąd znamionowy w polu zakończonym (A) pod nim, aby karta mogła pokazać, jaką jego część wykorzystuje podrozdzielnica."
+                        "description": "Jeśli rozdzielnica jest zasilana z wyłącznika w innej rozdzielnicy, wybierz ten wyłącznik obok jej nazwy. Przy tym wyłączniku będzie wtedy widoczne bieżące obciążenie podrozdzielnicy i będzie można z niego do niej przejść. Jeśli ten wyłącznik nie jest inteligentny, wpisz jego prąd znamionowy w polu zakończonym (Amps) pod nim, aby karta mogła pokazać, jaką jego część wykorzystuje podrozdzielnica."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "To nie jest podrozdzielnica"
+                "none": "Nie jest zasilana z innej rozdzielnicy"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Rozdzielnica główna (wyłącznik główny)",
+                "main_hidden": "Rozdzielnica główna (ukryj wyłącznik główny)",
+                "sub": "Podrozdzielnica (bez wyłącznika głównego)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Zgodnie z motywem",
             "appearance_light": "Jasne",
             "appearance_dark": "Przygaszone",
-            "main_breaker": "Prąd znamionowy wyłącznika głównego (opcjonalnie)",
-            "main_breaker_help": "Leviton nie udostępnia danych wyłącznika głównego. Pozostaw puste w przypadku rozdzielnicy bez wyłącznika głównego."
+            "load_capacity": "Obciążalność (opcjonalnie)",
+            "load_capacity_help": "Jakie obciążenie wytrzyma ta rozdzielnica, w amperach: prąd znamionowy jej wyłącznika głównego lub wyłącznika, który ją zasila. Pozostaw puste, aby użyć obciążalności ustawionej w opcjach integracji."
         }
     }
 }

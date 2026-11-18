@@ -410,6 +410,27 @@ def cap_ratio(key):
     return _CAP[key]
 
 
+_LENGTH = {}
+
+
+def text_length(body, cap, face="regular"):
+    """How long a legend set at `cap` height runs, unstretched."""
+    if (body, face) not in _LENGTH:
+        curve = bpy.data.curves.new("probe", "FONT")
+        curve.body = body
+        curve.font = font(face)
+        curve.size = 1.0
+        ob = bpy.data.objects.new("probe", curve)
+        link(ob)
+        bpy.context.view_layer.update()
+        mesh = ob.to_mesh()
+        xs = [v.co.x for v in mesh.vertices]
+        _LENGTH[body, face] = max(xs) - min(xs)
+        ob.to_mesh_clear()
+        bpy.data.objects.remove(ob)
+    return _LENGTH[body, face] * cap / cap_ratio(face)
+
+
 def text(name, body, cap, loc, mat, face="regular", spacing=1.0, rot_z=0.0, stretch=1.0, align="CENTER", parent=None, lift=0.0012, weight=0.0):
     """Flat printed legend. `loc` is the centre of the cap height."""
     curve = bpy.data.curves.new(name, "FONT")
@@ -993,22 +1014,395 @@ def render(path, samples=200, transparent=True):
     bpy.ops.render.render(write_still=True)
 
 
+# ---- main breaker ----------------------------------------------------------------
+# Leviton's 2nd Gen main breaker, the LM-T (LM100-T up to LM225-T), measured
+# from the LM100-T catalog photo against the breaker spaces in the LP422-MB
+# interior photo. Through the dead front only its raised centre plate shows,
+# so that is all that is modelled: centred on the origin, +Y toward the top
+# of the panel. Its printing reads from bottom to top, and ON is the handle
+# toward the top of the printing (left), as on the 1st Gen LM100. The rating
+# is left off, so one image serves every size: the card prints the rating set
+# for the load center where Leviton prints it (LMT_RATING).
+LMT_W, LMT_H = 2.49, 2.79  # the raised centre plate
+# A raised rail runs down each long side of the face: its width, the flat on
+# top, and its height. On the photo the left one shades the face beside it
+# and the inside of the right one catches the light.
+LMT_RAIL = (0.175, 0.08, 0.09)
+LMT_Z = -0.04  # the face, a little below the raised dead front around it
+LMT_GAP = 0.025  # clearance around the plate in the dead front opening
+LMT_WIN = (-0.741, 0.431, -0.839, -0.270)  # handle window: x0, x1, y0, y1
+LMT_FLOOR = -0.18  # the slider seen through the window, printed ON or OFF
+# The window sits at the bottom of a recess in the face, curved for the
+# handle's swing: shallow in the middle and deeper toward the ends, so its
+# outline on the face is narrowest in the middle and its top and bottom
+# edges curve in. A narrow flat ledge runs round the window at the bottom.
+# All its corners are rounded.
+LMT_RECESS_X = (-0.940, 0.600)  # its ends
+LMT_RECESS_TOP = (-0.155, -0.228)  # its top edge at the ends and in the middle
+LMT_RECESS_BOT = (-1.000, -0.930)  # its bottom edge at the ends and in the middle
+LMT_RECESS_DEPTH = (0.025, 0.08)  # the ledge, in the middle and at the ends
+LMT_RECESS_ROUND = (0.08, 0.05, 0.03)  # corner radii: on the face, round the ledge, and the window's
+LMT_LEDGE = 0.05
+# The handle, from the straight-on photo: its face shows 0.21 wide and the
+# side it leans away from 0.20, out to where it meets the slider. The notches
+# under its two ends are the same length; the photo, taken from above the
+# handle, makes the top one look shorter.
+LMT_HANDLE = (0.238, -0.8565, -0.2795, 0.14)  # width, bottom, top, face's height above the plate
+LMT_REACH = 0.42  # the centre of its face, either side of the window's middle
+LMT_SWING = radians(28.0)  # it leans this far toward ON (left) or OFF (right)
+LMT_LEVER_DEPTH = (0.426, 0.27)  # from its face down to the slider, and to the notches in its base
+LMT_LEVER_NOTCH = (-0.396, -0.740)  # the top and bottom of its base, where the square notches under its ends begin
+LMT_LEVER_ROUND = 0.05  # radius of the long edges of its face and underside
+LMT_LEVER_CORE = (0.055, 0.04, 0.025, 0.08)  # its hollow: side walls, face and underside walls, the rib between the two channels, each channel's depth
+# The padlock hole (for Leviton's LMHPL) runs straight up from the cutout in
+# the bottom edge of the face, under the face, and out of the top of a block
+# left standing in the bottom of the recess, toward the handle. The block is
+# flush with the face and reaches a little way into the window, and the long
+# edges of its face are rounded like the handle's. A window in its face,
+# round-topped under a thin bridge, opens onto the hole; on the photo, taken
+# from above, the hole shows dark at the window's foot where it carries on
+# down under the face.
+LMT_LOCK = (-0.425, -0.165, -0.770, 0.025)  # the block: x0, x1, its top end, radius of that end's corners
+LMT_LOCK_HOLE = (-0.295, -0.060, 0.040)  # the hole: centre x, centre z (the cutout's back wall), radius
+LMT_LOCK_WINDOW = (-0.849, -0.785, 0.03, 0.25)  # onto it: bottom, top, radius of the top corners, how deep the well under it goes
+# The cutout in the bottom edge of the face, centred on the hole, which runs
+# up its back wall as a rounded channel. Its rim is rounded, and so are its
+# inside corners. The rim's rounding is wide and shallow: one as deep as it
+# is wide turns away from the light at the walls, and its dark band made the
+# cutout look bigger than it is.
+LMT_NOTCH = (-0.355, -0.235, 0.085, 0.06, 0.012, (0.02, 0.008))  # x0, x1 (its walls), height, depth, radius of its inside corners, the rim's width and depth
+# Printing: centre x, centre y, cap height (and length where it was measured).
+LMT_LOGO = (-0.109, 0.263, 0.124, 0.723)
+LMT_LOGO_FRAME = (-0.303, (0.394, -0.155), (0.628, -0.047), 0.0095)  # bar x, (leg y, leg end x) x2, stroke
+LMT_REG = (-0.075, 0.662, 0.042)
+LMT_T = (0.912, 0.613, 0.124)
+LMT_RATING = (0.102, 0.263, 0.182)  # printed bold; the card's overlay
+# The slider's legend beside the handle: word, its centre x, its symbol's centre x.
+LMT_LEGEND = {"off": ("OFF", -0.482, -0.285), "on": ("ON", -0.031, 0.166)}
+LMT_LEGEND_Y, LMT_SYMBOL_Y = -0.533, -0.544
+LMT_LEGEND_CAP, LMT_LEGEND_LEN = 0.168, 0.307  # "OFF" is set condensed to this length
+LMT_SYMBOL = (0.091, 0.022)  # O: outer radius, stroke; I: a bar as long as the cap height
+BOSS_W, BOSS_H = 0.38, 0.07  # raised dead front around the opening
+MAIN_M = 0.10  # flat dead front around the boss
+MAIN_W = LMT_W + 2 * (LMT_GAP + BOSS_W + MAIN_M)
+MAIN_H = LMT_H + 2 * (LMT_GAP + BOSS_W + MAIN_M)
+UP = radians(90.0)  # turns a legend to read from bottom to top
+
+
+def cut(ob, cutter):
+    """Subtract a hidden cutter from `ob`."""
+    link(cutter)
+    cutter.hide_render = True
+    cutter.display_type = "WIRE"
+    mod = ob.modifiers.new("cut", "BOOLEAN")
+    mod.operation = "DIFFERENCE"
+    mod.solver = "EXACT"
+    mod.object = cutter
+
+
+def rounded_box(name, x0, x1, y0, y1, z0, z1, r):
+    return prism(name, fillet([(x0, y0), (x1, y0), (x1, y1), (x0, y1)], r), z0, z1)
+
+
+def skin(name, rings):
+    """A closed solid through same-count rings of 3D points, capped at both ends."""
+    bm = bmesh.new()
+    verts = [[bm.verts.new(p) for p in points] for points in rings]
+    n = len(verts[0])
+    for a, b in zip(verts, verts[1:]):
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((a[i], a[j], b[j], b[i]))
+    bm.faces.new(verts[0])
+    bm.faces.new(verts[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    mesh = bpy.data.meshes.new(name)
+    bm.to_mesh(mesh)
+    bm.free()
+    return bpy.data.objects.new(name, mesh)
+
+
+def lmt_recess():
+    """Cutter for the recess around the handle window and the window itself.
+
+    The recess slopes from its outline on the face down to a ledge round the
+    window, whose depth follows an arc: shallow in the middle, deeper at the
+    ends.
+    """
+    x0, x1, y0, y1 = LMT_WIN
+    ex0, ex1 = LMT_RECESS_X
+    (top_end, top_mid), (bot_end, bot_mid) = LMT_RECESS_TOP, LMT_RECESS_BOT
+    mid_x, half = (ex0 + ex1) / 2, (ex1 - ex0) / 2
+
+    def top_y(x):
+        return top_mid + (top_end - top_mid) * ((x - mid_x) / half) ** 2
+
+    def bot_y(x):
+        return bot_mid + (bot_end - bot_mid) * ((x - mid_x) / half) ** 2
+
+    shallow, deep = LMT_RECESS_DEPTH
+    reach = (x1 - x0) / 2
+    radius = (reach * reach + (deep - shallow) ** 2) / (2 * (deep - shallow))
+
+    def depth(x):  # of the ledge beside the window's edge at x
+        dx = min(max(x, x0), x1) - (x0 + x1) / 2
+        return shallow + radius - sqrt(max(radius * radius - dx * dx, 0.0))
+
+    n, ends, w = 16, 4, LMT_LEDGE
+    # Along the top and bottom edges, a longer first step from each corner
+    # leaves room to round it.
+    along = [0.0] + [0.15 + 0.7 * i / (n - 2) for i in range(n - 1)] + [1.0]
+
+    def outline(xa, xb, top, bottom, corner):
+        """Top edge left to right, right end down, bottom edge back, left end up; corners rounded."""
+        pts = [(xa + f * (xb - xa), top(xa + f * (xb - xa))) for f in along]
+        pts += [(xb, top(xb) + i / ends * (bottom(xb) - top(xb))) for i in range(1, ends)]
+        pts += [(xb - f * (xb - xa), bottom(xb - f * (xb - xa))) for f in along]
+        pts += [(xa, bottom(xa) + i / ends * (top(xa) - bottom(xa))) for i in range(1, ends)]
+        corners = {0, n, n + ends, 2 * n + ends}
+        return fillet(pts, [corner if i in corners else 0.0 for i in range(len(pts))], steps=8)
+
+    on_face, round_ledge, round_window = LMT_RECESS_ROUND
+    face = outline(ex0, ex1, top_y, bot_y, on_face)
+    ledge = outline(x0 - w, x1 + w, lambda x: y1 + w, lambda x: y0 - w, round_ledge)
+    window = outline(x0, x1, lambda x: y1, lambda x: y0, round_window)
+    beside = (x1 - x0) / (x1 - x0 + 2 * w)  # the ledge's outer edge to the window's
+    return skin("lmt_recess", [
+        [(x, y, 0.3) for x, y in face],
+        [(x, y, 0.001) for x, y in face],
+        [(x, y, -depth(x0 + (x - x0 + w) * beside)) for x, y in ledge],
+        [(x, y, -depth(x)) for x, y in window],
+        [(x, y, LMT_FLOOR) for x, y in window],
+    ])
+
+
+def lmt_lock_block(y0):
+    """The padlock block, from `y0` (inside the plate) up to its top end.
+
+    In section it is the handle's shape: the long edges of its face are
+    rounded. The corners of its top end are rounded too, and the rounded
+    edges follow them round. It is taken out of the recess's cutter, so the
+    plate keeps it; its top stands a hair proud of the face, so that the
+    rounded edges cross the face rather than meeting it edge-on, which the
+    boolean gets wrong.
+    """
+    x0, x1, top, corner = LMT_LOCK
+    base, proud = LMT_FLOOR - 0.03, 0.001
+    rings = []
+    for k in range(-1, 7):
+        turn = max(k, 0) / 6 * math.pi / 2  # round the top end's corners
+        y = y0 if k < 0 else top - corner + corner * sin(turn)
+        inset = corner * (1 - cos(turn))
+        section = [(x0 + inset, base), (x1 - inset, base), (x1 - inset, proud), (x0 + inset, proud)]
+        section = fillet(section, [0.0, 0.0, LMT_LEVER_ROUND, LMT_LEVER_ROUND], steps=8)
+        rings.append([(x, y, z) for x, z in section])
+    return skin("lmt_lock", rings)
+
+
+def lmt_notch(hh):
+    """Cutter for the cutout in the bottom edge of the face.
+
+    Built as outlines on the face, one under another: wider toward the face
+    by its rounded rim (whose top stands a hair proud of the face, as on the
+    block), straight down the walls, then drawn in by the rounded inside
+    corners to the back wall.
+    """
+    nx0, nx1, rise, sink, inside, (rim, dip) = LMT_NOTCH
+    top, below, proud, corner = -hh + rise, -hh - 0.2, 0.001, inside + 0.003
+
+    def outline(grow):
+        r = corner + grow  # its top corners, which stay round at every depth
+        pts = [(nx0 - grow, below)]
+        pts += [(nx0 + corner + r * cos(a), top - corner + r * sin(a)) for a in (math.pi * (1 - k / 12) for k in range(7))]
+        pts += [(nx1 - corner + r * cos(a), top - corner + r * sin(a)) for a in (math.pi * (0.5 - k / 12) for k in range(7))]
+        return pts + [(nx1 + grow, below)]
+
+    steps = [(rim, 0.3)]
+    steps += [(rim * (1 - sin(a)), proud - dip * (1 - cos(a))) for a in (math.pi / 2 * k / 6 for k in range(7))]
+    steps += [(-inside * (1 - cos(a)), -sink + inside - inside * sin(a)) for a in (math.pi / 2 * k / 4 for k in range(5))]
+    return skin("lmt_notch", [[(x, y, z) for x, y in outline(grow)] for grow, z in steps])
+
+
+def ring(cx, cy, r, w):
+    """An annulus as two half bands, for flat_mesh."""
+    return [arc_band(cx, cy, r - w / 2, 0.0, math.pi, w, 24), arc_band(cx, cy, r - w / 2, math.pi, 2 * math.pi, w, 24)]
+
+
+def build_main_lmt(m, state, rating=None, inverted=False):
+    """The LM-T's centre plate with its handle in the `state` ("on" or "off") position.
+
+    Built with its face at z = 0, then lowered to LMT_Z as one piece, and
+    turned 180° when `inverted`: at the bottom of a panel turned upside down,
+    with its handle next to positions 1 and 2. It is turned before it is lit,
+    so the light still comes from above.
+    """
+    before = {ob.name for ob in bpy.context.scene.collection.objects}
+    hw, hh = LMT_W / 2, LMT_H / 2
+    x0, x1, y0, y1 = LMT_WIN
+    ink = m["ink"]
+
+    # The breaker body behind the plate, seen only in the gap around it.
+    body = box("lmt_body", -hw - 0.3, hw + 0.3, -hh - 0.3, hh + 0.3, -0.8, -0.30)
+    body.data.materials.append(m["body"])
+    link(body)
+
+    # The plate in section, extruded from its bottom edge to its top: the
+    # face between the two rails, which end square at both edges.
+    rail_w, rail_top, rail_h = LMT_RAIL
+    edge = 0.03  # rounded outer corner of each rail
+    section = [
+        (-hw, -0.40), (hw, -0.40),
+        (hw, rail_h - edge), (hw - edge, rail_h), (hw - edge - rail_top, rail_h), (hw - rail_w, 0.0),
+        (-hw + rail_w, 0.0), (-hw + edge + rail_top, rail_h), (-hw + edge, rail_h), (-hw, rail_h - edge),
+    ]
+    plate = prism("lmt_plate", section, -hh, hh, to3d=lambda x, z, y: (x, y, z))
+    # The recess, less the padlock block left standing in its bottom.
+    recess = lmt_recess()
+    block = lmt_lock_block(-hh + 0.2)
+    link(block)
+    block.hide_render = True
+    block.display_type = "WIRE"
+    keep = recess.modifiers.new("lock", "BOOLEAN")
+    keep.operation = "DIFFERENCE"
+    keep.solver = "EXACT"
+    keep.object = block
+    cut(plate, recess)
+    # The cutout in the bottom edge: a shallow notch, not through the plate.
+    cut(plate, lmt_notch(hh))
+    # The hole up through the block from the notch, and the window onto it.
+    by1 = LMT_LOCK[2]
+    hx, hz, hr = LMT_LOCK_HOLE
+    bore = [(hx + hr * cos(k * math.pi / 24), hz + hr * sin(k * math.pi / 24)) for k in range(48)]
+    cut(plate, prism("lmt_lock_hole", bore, -hh - 0.1, by1 + 0.1, to3d=lambda x, z, y: (x, y, z)))
+    wy0, wy1, arch, well = LMT_LOCK_WINDOW
+    half = hr - 0.001  # just inside the hole, so its sides cross the bore cleanly
+    outline = fillet([(hx - half, wy0), (hx + half, wy0), (hx + half, wy1), (hx - half, wy1)], [0.0, 0.0, arch, arch], steps=8)
+    cut(plate, prism("lmt_lock_window", outline, -well, 0.3))
+    finish(plate, m["body"], bevel=0.008, angle=25.0)
+    link(plate)
+
+    # The slider under the window, a shade darker than the moulding around it.
+    slider = box("lmt_slider", x0 - 0.05, x1 + 0.05, y0 - 0.05, y1 + 0.05, LMT_FLOOR - 0.03, LMT_FLOOR + 0.0004)
+    slider.data.materials.append(material("slider", (0.60, 0.60, 0.595), rough=0.5, sss=0.08))
+    link(slider)
+
+    # The handle: a narrow block that swings about an axis deep in the
+    # breaker, so it leans well over toward the side it is switched to and
+    # shows that side. The long edges of its face and of its underside are
+    # rounded; its ends are square. Its base is narrower than its face, which
+    # leaves a square notch under each end, and it is hollow: two channels
+    # run through it from end to end, open at the top and bottom, not on its
+    # face. Built upright, then leaned.
+    width, hy0, hy1, height = LMT_HANDLE
+    mid = (x0 + x1) / 2
+    arm = LMT_REACH / sin(LMT_SWING)
+    pivot = empty("lmt_pivot", (mid, 0.0, height - arm * cos(LMT_SWING)))
+    tip = pivot.location.z + arm
+    xl, xr = mid - width / 2, mid + width / 2
+    under = tip - LMT_LEVER_DEPTH[1]  # the underside of its ends
+    top_y, foot_y = LMT_LEVER_NOTCH
+    section = fillet([(xl, under), (xr, under), (xr, tip), (xl, tip)], LMT_LEVER_ROUND, steps=8)
+    handle = prism("lmt_handle", section, hy0, hy1, to3d=lambda x, z, y: (x, y, z))
+    # The base, joined on under the middle; it fills the rounding there so
+    # the side runs flat down to the slider.
+    base = box("lmt_base", xl + 0.0005, xr - 0.0005, foot_y, top_y, LMT_FLOOR - 1.0, under + LMT_LEVER_ROUND + 0.01)
+    link(base)
+    base.hide_render = True
+    base.display_type = "WIRE"
+    join = handle.modifiers.new("base", "BOOLEAN")
+    join.operation = "UNION"
+    join.solver = "EXACT"
+    join.object = base
+    cutters = []
+    side, wall, rib, core = LMT_LEVER_CORE
+    for k in range(2):
+        z1 = tip - wall - k * (core + rib)
+        cutters.append(box("lmt_core", xl + side, xr - side, hy0 - 0.2, hy1 + 0.2, z1 - core, z1))
+    for cutter in cutters:
+        cut(handle, cutter)
+    finish(handle, m["handle"], bevel=0.008, segments=3)
+    link(handle)
+    for part in [handle, base] + cutters:
+        part.parent = pivot
+        part.matrix_parent_inverse = Matrix.Translation(-pivot.location)
+    pivot.rotation_euler = (0.0, LMT_SWING if state == "off" else -LMT_SWING, 0.0)
+
+    # Printing on the plate.
+    lx, ly, cap, length = LMT_LOGO
+    if BRAND:
+        text("lmt_logo", "LEVITON", cap, (lx, ly, 0.0), ink, face="bold", rot_z=UP, stretch=length / text_length("LEVITON", cap, "bold"))
+        bar_x, legs, stroke = LMT_LOGO_FRAME[0], LMT_LOGO_FRAME[1:3], LMT_LOGO_FRAME[3]
+        ys = [leg_y for leg_y, _ in legs]
+        frame = [[(bar_x, min(ys) - stroke / 2), (bar_x + stroke, min(ys) - stroke / 2), (bar_x + stroke, max(ys) + stroke / 2), (bar_x, max(ys) + stroke / 2)]]
+        for leg_y, end_x in legs:
+            frame.append([(bar_x, leg_y - stroke / 2), (end_x, leg_y - stroke / 2), (end_x, leg_y + stroke / 2), (bar_x, leg_y + stroke / 2)])
+        link(flat_mesh("lmt_logo_frame", frame, 0.0012, ink))
+        rx, ry, rcap = LMT_REG
+        text("lmt_reg", "®", rcap, (rx, ry, 0.0), ink, rot_z=UP)
+    tx, ty, tcap = LMT_T
+    text("lmt_type", "T", tcap, (tx, ty, 0.0), ink, face="narrow", rot_z=UP)
+    if rating:  # only to check the card's overlay against
+        rx, ry, rcap = LMT_RATING
+        text("lmt_rating", str(rating), rcap, (rx, ry, 0.0), ink, face="bold", rot_z=UP)
+
+    # The slider's legend, in the part of the window the handle leaves open.
+    word, wx, sx = LMT_LEGEND[state]
+    squeeze = LMT_LEGEND_LEN / text_length("OFF", LMT_LEGEND_CAP, "narrow")
+    text("lmt_legend", word, LMT_LEGEND_CAP, (wx, LMT_LEGEND_Y, LMT_FLOOR), ink, face="narrow", rot_z=UP, stretch=squeeze)
+    radius, stroke = LMT_SYMBOL
+    if state == "off":
+        symbol = ring(sx, LMT_SYMBOL_Y, radius, stroke)
+    else:
+        half = LMT_LEGEND_CAP / 2
+        symbol = [[(sx - half, LMT_SYMBOL_Y - stroke / 2), (sx + half, LMT_SYMBOL_Y - stroke / 2), (sx + half, LMT_SYMBOL_Y + stroke / 2), (sx - half, LMT_SYMBOL_Y + stroke / 2)]]
+    link(flat_mesh("lmt_symbol", symbol, LMT_FLOOR + 0.0012, ink))
+
+    # Everything above, cutters included, moves down (and turns) together.
+    root = empty("lmt", (0.0, 0.0, LMT_Z))
+    for ob in list(bpy.context.scene.collection.objects):
+        if ob.name not in before and ob.parent is None and ob is not root:
+            ob.parent = root
+    if inverted:
+        root.rotation_euler = (0.0, 0.0, math.pi)
+    return root
+
+
+# Raised dead front around the main breaker's opening: (distance out from the
+# opening, height, corner radius), from the opening outward.
+BOSS_PROFILE = [
+    (0.000, DF_Z - 0.08, 0.06),
+    (0.000, DF_Z + BOSS_H - 0.022, 0.06),
+    (0.008, DF_Z + BOSS_H - 0.006, 0.068),
+    (0.025, DF_Z + BOSS_H, 0.085),
+    (BOSS_W - 0.17, DF_Z + BOSS_H, 0.20),
+    (BOSS_W - 0.11, DF_Z + BOSS_H - 0.010, 0.25),
+    (BOSS_W - 0.06, DF_Z + 0.024, 0.29),
+    (BOSS_W - 0.02, DF_Z + 0.004, 0.32),
+    (BOSS_W, DF_Z, 0.33),
+]
+
+
+def build_boss(m, hw, hh):
+    """The raised surround of an opening of half size `hw` x `hh` in the dead front."""
+    loops = [(rrect(hw + grow, hh + grow, radius, n=16), z) for grow, z, radius in reversed(BOSS_PROFILE)]
+    boss = loft("boss", loops)
+    finish(boss, m["steel"], bevel=0)
+    link(boss)
+    return boss
+
+
 # ---- jobs ----------------------------------------------------------------------
-MAIN_SCALE = 1.25
-MAIN_W, MAIN_H, MAIN_M = 3.30, 2.40, 0.15
-
-
 def job_main(job):
-    """Main breaker seen through its opening at the top of the dead front."""
+    """Main breaker: an LM-T seen through its opening in the dead front (upside down at the bottom of an inverted panel)."""
     reset_scene()
     m = mats("std")
-    build_dead_front(m, [(-MAIN_W / 2, MAIN_W / 2, -MAIN_H / 2, MAIN_H / 2)], rounded=0.10)
-    root = build_breaker(poles=2, kind="std", state=job.get("state", "on"))
-    root.scale = (MAIN_SCALE, MAIN_SCALE, MAIN_SCALE)
-    root.rotation_euler = (0.0, 0.0, radians(-90.0))
-    root.location = (0.0, 0.0, -0.115)
+    hw, hh = LMT_W / 2 + LMT_GAP, LMT_H / 2 + LMT_GAP
+    # The opening is cut a hair wider than the boss's inner wall, which hides its edge.
+    build_dead_front(m, [(-hw - 0.004, hw + 0.004, -hh - 0.004, hh + 0.004)], rounded=0.06)
+    build_boss(m, hw, hh)
+    build_main_lmt(m, job.get("state", "on"), rating=job.get("rating"), inverted=job.get("inverted", False))
     lighting(**job.get("light", {}))
-    camera(-MAIN_W / 2 - MAIN_M, MAIN_W / 2 + MAIN_M, -MAIN_H / 2 - MAIN_M, MAIN_H / 2 + MAIN_M, job.get("ppi", 200))
+    camera(-MAIN_W / 2, MAIN_W / 2, -MAIN_H / 2, MAIN_H / 2, job.get("ppi", 200))
     render(job["out"], samples=job.get("samples", 128), transparent=False)
 
 
@@ -1189,7 +1583,14 @@ def geometry():
         "led_gf": {"d": list(led_span("g")), "x": list(LED_X)},
         "rating": {"d": 1.775, "x": 0.19, "cap": 0.076},
         "hero": {"body_w": BODY_W, "step_top": STEP_TOP, "step_bot": STEP_BOT, "pad": 0.08},
-        "main": {"w": MAIN_W + 2 * MAIN_M, "h": MAIN_H + 2 * MAIN_M, "m": MAIN_M, "scale": MAIN_SCALE},
+        # The main breaker image, and where (from its top left) and how large
+        # the card prints the rating: font size is the cap height / 0.716.
+        "main": {
+            "w": round(MAIN_W, 3),
+            "h": round(MAIN_H, 3),
+            "rating": [round(MAIN_W / 2 + LMT_RATING[0], 3), round(MAIN_H / 2 - LMT_RATING[1], 3)],
+            "size": round(LMT_RATING[2] / 0.716, 3),
+        },
         "pivot_d": PIVOT_D,
         "body_w": BODY_W,
     }

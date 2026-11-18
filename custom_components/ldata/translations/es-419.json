@@ -79,9 +79,13 @@
                     "log_fields": "Para encontrar los nombres de los campos, habilite “Registrar todos los datos analizados” y revise los registros de Home Assistant. Ingréselos arriba separados por comas."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Tipo de centro de carga y capacidad",
+                        "description": "Leviton no reporta la capacidad de los centros de carga, así que configúrela debajo del nombre de cada uno. Seleccione centro de carga principal o subpanel y escriba su capacidad (Amps): la capacidad del interruptor principal para un centro de carga principal, o la del interruptor que lo alimenta para un subpanel. La tarjeta la usa para mostrar el uso de la capacidad en la barra lateral y en las tarjetas de los paneles de control. Los centros de carga principales también muestran su interruptor principal y su capacidad arriba o abajo, según su orientación. Deje la capacidad vacía para ocultar ambas cosas."
+                    },
                     "sub_panels": {
                         "name": "Subpaneles",
-                        "description": "Si un centro de carga se alimenta desde un interruptor de otro centro de carga, elija ese interruptor junto a su nombre. Ese interruptor mostrará entonces la carga en tiempo real del subpanel y permitirá ir a él. Si ese interruptor no es inteligente, escriba su capacidad en el campo terminado en (A) que está debajo, para que la tarjeta muestre cuánto de él usa el subpanel."
+                        "description": "Si un centro de carga se alimenta desde un interruptor de otro centro de carga, elija ese interruptor junto a su nombre. Ese interruptor mostrará entonces la carga en tiempo real del subpanel y permitirá ir a él. Si ese interruptor no es inteligente, escriba su capacidad en el campo terminado en (Amps) que está debajo, para que la tarjeta muestre cuánto de él usa el subpanel."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "No es un subpanel"
+                "none": "No se alimenta de otro centro de carga"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Principal (interruptor principal)",
+                "main_hidden": "Principal (ocultar interruptor principal)",
+                "sub": "Subpanel (sin interruptor principal)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Según el tema",
             "appearance_light": "Intensa",
             "appearance_dark": "Tenue",
-            "main_breaker": "Capacidad del interruptor principal (opcional)",
-            "main_breaker_help": "Leviton no reporta el interruptor principal. Déjelo vacío si el centro de carga es de zapatas principales (sin interruptor principal)."
+            "load_capacity": "Capacidad de carga (opcional)",
+            "load_capacity_help": "Cuánta carga admite este centro de carga, en amperios: la capacidad de su interruptor principal o la del interruptor que lo alimenta. Déjelo vacío para usar la capacidad configurada en las opciones de la integración."
         }
     }
 }

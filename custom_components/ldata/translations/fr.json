@@ -79,9 +79,13 @@
                     "log_fields": "Pour trouver les noms des champs, activez « Journaliser toutes les données analysées » et consultez les journaux de Home Assistant. Saisissez-les ci-dessus, séparés par des virgules."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Type de panneau et capacité de charge",
+                        "description": "Leviton ne transmet pas la capacité des panneaux électriques : indiquez-la sous le nom de chaque panneau. Choisissez panneau principal ou panneau secondaire, puis saisissez sa capacité (Amps) : le courant nominal du disjoncteur principal pour un panneau principal, ou celui du disjoncteur qui l'alimente pour un panneau secondaire. La carte s'en sert pour afficher l'utilisation de la capacité dans la barre latérale et sur les cartes des tableaux de bord. Les panneaux principaux affichent aussi leur disjoncteur principal et son courant nominal en haut ou en bas, selon leur orientation. Laissez la capacité vide pour masquer les deux."
+                    },
                     "sub_panels": {
                         "name": "Panneaux secondaires",
-                        "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder. Si ce disjoncteur n'est pas un disjoncteur intelligent, indiquez son calibre dans le champ se terminant par (A) en dessous, pour que la carte puisse montrer quelle part en utilise le panneau secondaire."
+                        "description": "Si un panneau électrique est alimenté par un disjoncteur d'un autre panneau, choisissez ce disjoncteur en face de son nom. Ce disjoncteur affiche alors la charge en direct du panneau secondaire et permet d'y accéder. Si ce disjoncteur n'est pas un disjoncteur intelligent, indiquez son calibre dans le champ se terminant par (Amps) en dessous, pour que la carte puisse montrer quelle part en utilise le panneau secondaire."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Pas un panneau secondaire"
+                "none": "Pas alimenté par un autre panneau"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Panneau principal (disjoncteur principal)",
+                "main_hidden": "Panneau principal (masquer le disjoncteur principal)",
+                "sub": "Panneau secondaire (sans disjoncteur principal)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Suivre le thème",
             "appearance_light": "Lumineux",
             "appearance_dark": "Tamisé",
-            "main_breaker": "Courant nominal du disjoncteur principal (facultatif)",
-            "main_breaker_help": "Leviton ne transmet aucune donnée sur le disjoncteur principal. Laissez vide pour un panneau sans disjoncteur principal (à cosses principales)."
+            "load_capacity": "Capacité de charge (facultatif)",
+            "load_capacity_help": "La charge que ce panneau peut supporter, en ampères : le courant nominal de son disjoncteur principal, ou celui du disjoncteur qui l'alimente. Laissez vide pour utiliser la capacité définie dans les options de l'intégration."
         }
     }
 }

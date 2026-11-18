@@ -45,8 +45,15 @@
  *   confirm: true              # optional, ask before switching a breaker
  *   show_panel_info: true      # optional, the panel's own readings above the door
  *   appearance: auto           # optional, auto | light | dark (dimmed lighting)
- *   main_breaker: 200          # optional, show a main breaker with this rating
- *                              # (the header then shows how much of it is in use)
+ *   load_capacity: 200         # optional, what this load center can carry, in
+ *                              # amps: the header shows how much of it is in use,
+ *                              # and a main panel's main breaker is drawn with it
+ *                              # as its rating. Without it, the capacity set for
+ *                              # this load center in the integration's options,
+ *                              # which also say whether it is a main panel or a
+ *                              # sub-panel, and whether to draw its main breaker.
+ *                              # (Called main_breaker in the first test builds,
+ *                              # which is still read.)
  *   rotate_180: true           # optional override — by default the card reads
  *                              # the panel's reported mounting orientation.
  *   sub_panels:                # optional — link a breaker that feeds a
@@ -76,7 +83,7 @@ const CARD_VERSION = "3.1.0";
 // tools/panel_card_art. ART_REV is the content hash of that folder (written
 // by build_assets.py); it is part of every image URL, so browsers fetch new
 // artwork after an upgrade instead of serving a cached copy.
-const ART_REV = "30073e47f0";
+const ART_REV = "afd77a7fda";
 const ART_SERVED = new URL("/ldata_static/img/", location.href).href; // always served by the integration
 
 // Where this file was loaded from. `import.meta.url` would say, but it is a
@@ -129,7 +136,9 @@ const G = {
   gen1LedX: 0, // a Gen 1 breaker's LEDs, in a light strip centred on the seam
   rating: { d: 1.775, x: 0.19, size: 0.106 },
   hero: { w1: 1.14, w2: 2.14, h: 3.796, top: 0.52 }, // upright product shot
-  main: { w: 3.6, h: 2.7, scale: 1.25, rating: [1.372, 2.212] }, // main breaker in its opening
+  // Main breaker (Leviton's LM-T) in its opening, and its rating: printed
+  // bold and reading upward, where Leviton prints it.
+  main: { w: 3.5, h: 3.8, rating: [1.852, 1.637], size: 0.254 },
 };
 G.fieldW = 2 * G.tileW + G.strip + 2 * G.fieldX;
 
@@ -235,7 +244,7 @@ function fallbackRole(match, entityIds, role, test) {
 // outage can still draw the panel. Nothing is kept that the states don't
 // already carry.
 const BREAKER_LAYOUT = ["position", "poles", "model", "hardware", "rating", "canRemoteOn", "leg"];
-const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from"];
+const PANEL_LAYOUT = ["orientation", "panel_size", "dumb_breakers", "sub_panels", "fed_from", "load_capacity", "panel_type"];
 const LAYOUT_STORE = "ldata.layout.v1."; // + the panel's device id
 const layouts = new Map(); // entity id -> what its state last carried, and the handle seen then
 const layoutSeen = new Map(); // entity id -> the state object that was read
@@ -463,12 +472,12 @@ const ledHtml = (which, spot) => `<i class="led led--${which}" style="left:${pct
 
 // Printed amp rating. SVG, so it scales with the artwork instead of being
 // clamped by the browser's minimum font size.
-function ratingSvg(w, h, x, y, turn, text, size) {
+function ratingSvg(w, h, x, y, turn, text, size, bold = false) {
   return `<svg class="ink" viewBox="0 0 ${w * 100} ${h * 100}" preserveAspectRatio="none" aria-hidden="true"><text transform="translate(${(
     x * 100
   ).toFixed(1)} ${(y * 100).toFixed(1)}) rotate(${turn})" text-anchor="middle" dominant-baseline="central" font-size="${(
     size * 100
-  ).toFixed(1)}">${esc(text)}</text></svg>`;
+  ).toFixed(1)}"${bold ? ' font-weight="700"' : ""}>${esc(text)}</text></svg>`;
 }
 
 // ── Language ─────────────────────────────────────────────────────────────
@@ -687,8 +696,8 @@ const EN = {
     "appearance_auto": "Follow theme",
     "appearance_light": "Bright",
     "appearance_dark": "Dimmed",
-    "main_breaker": "Main breaker rating (optional)",
-    "main_breaker_help": "Leviton doesn't report the main breaker. Leave empty for a main-lug panel."
+    "load_capacity": "Load capacity (optional)",
+    "load_capacity_help": "What this load center can carry, in amps: its main breaker's rating, or the rating of what feeds it. Leave empty to use the capacity set in the integration's options."
   }
 };
 /* i18n:end */
@@ -831,6 +840,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     if (!config || typeof config !== "object") {
       throw new Error("ldata-panel-card: invalid configuration.");
     }
+    config = currentOptions(config);
     this._config = {
       show_power: true,
       show_alarms: true,
@@ -1380,10 +1390,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     let learned = rememberLayout(cloudId, cloud, PANEL_LAYOUT);
     const ca = layoutOf(cloudId, cloud);
 
-    const rotate =
-      cfg.rotate_180 !== undefined && cfg.rotate_180 !== null
-        ? !!cfg.rotate_180
-        : Number(ca.orientation) === 180;
+    const rotate = this._upsideDown(ca);
 
     const slots = [];
     const taken = new Set();
@@ -1500,7 +1507,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       cfg.toggle,
       cfg.show_power,
       cfg.show_panel_info,
-      cfg.main_breaker || null,
+      this._mainDrawn(ca),
       Object.keys(d.panel.roles).sort(),
       d.cts.map((c) => [c.deviceId, c.name]),
       placed.map((p) => [
@@ -1531,6 +1538,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       head: this._headDynamics(st, d),
       structKey,
       panelDevice,
+      mainBreaker: this._mainDrawn(ca),
     };
   }
 
@@ -1657,11 +1665,42 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     saveLayouts(this._config.device_id, [d.panel.roles.cloud, ...d.breakers.map((b) => b.roles.status)]);
   }
 
+  // The load center's capacity, which Leviton doesn't report: this card's own
+  // load_capacity, or else the one set for this load center in the
+  // integration's options, which its Cloud Connected entity carries.
+  _capacity(layout) {
+    const positive = (v) => {
+      const n = numOrNull(v);
+      return n !== null && n > 0 ? n : null;
+    };
+    return positive(this._config.load_capacity) ?? positive(layout && layout.load_capacity);
+  }
+
+  // The main breaker to draw: its rating (the capacity), or null for none.
+  // Only a main panel draws one, and not when the integration's options hide
+  // it. A load center is a sub-panel until said otherwise: its capacity is
+  // what feeds it, such as a main breaker by the meter. Either way the
+  // capacity still says how much of it is in use.
+  _mainDrawn(layout) {
+    return layout && layout.panel_type === "main" ? this._capacity(layout) : null;
+  }
+
+  // Whether the panel is drawn turned 180°, with positions 1 and 2 at the
+  // bottom: as this card's rotate_180 says, or else as Leviton reports the
+  // panel mounted. A main breaker is always next to positions 1 and 2, so it
+  // turns with them.
+  _upsideDown(layout) {
+    const turn = this._config.rotate_180;
+    if (turn !== undefined && turn !== null) return !!turn;
+    return Number(layout && layout.orientation) === 180;
+  }
+
   _headDynamics(st, d) {
     const r = d.panel.roles;
     const val = (eid) => (eid && st[eid] ? numOrNull(st[eid].state) : null);
     const cloud = r.cloud ? st[r.cloud] : null;
-    const fedFrom = layoutOf(r.cloud, cloud).fed_from;
+    const layout = layoutOf(r.cloud, cloud);
+    const fedFrom = layout.fed_from;
     const fw = r.firmware ? st[r.firmware] : null;
     return {
       watts: val(r.watts),
@@ -1677,9 +1716,9 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       cloud: cloud ? cloud.state : null,
       fwAvailable: !!fw && fw.state === "on",
       // What this load center may draw: the breaker feeding it, if it is a
-      // sub-panel (from the integration), or the main breaker on the card,
-      // whichever is smaller.
-      capacity: Math.min(...[numOrNull(fedFrom && fedFrom.rating), numOrNull(this._config.main_breaker)].filter((v) => v > 0), Infinity),
+      // sub-panel of another load center (from the integration), or its own
+      // load capacity, whichever is smaller.
+      capacity: Math.min(...[numOrNull(fedFrom && fedFrom.rating), this._capacity(layout)].filter((v) => v > 0), Infinity),
       busiest: [val(r.ampsL1), val(r.ampsL2)].filter((v) => v !== null).reduce((a, v) => Math.max(a === null ? v : a, v), null),
       overVoltage: !!(r.overVoltage && st[r.overVoltage] && st[r.overVoltage].state === "on"),
       underVoltage: !!(r.underVoltage && st[r.underVoltage] && st[r.underVoltage].state === "on"),
@@ -1721,7 +1760,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
   _build(m) {
     const cfg = this._config;
     const rows = m.rows;
-    const main = numOrNull(cfg.main_breaker);
+    const main = m.mainBreaker;
 
     // One grid holds everything from the labels inward, so a label and its
     // breaker share a row and follow each other in the page order. Grid row
@@ -1741,10 +1780,15 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
     for (const n of m.numbers) {
       numbers += `<div class="num" style="grid-row:${n.row + 2}" aria-hidden="true"><span>${n.left ?? ""}</span><span>${n.right ?? ""}</span></div>`;
     }
+    // At the bottom of the panel the main breaker is fitted upside down, its
+    // handle next to positions 1 and 2: that image, and its rating turned with it.
+    const low = !!(main && m.rotate);
+    this._mainArt = low ? "main-inv" : "main";
+    const [rx, ry] = low ? [G.main.w - G.main.rating[0], G.main.h - G.main.rating[1]] : G.main.rating;
     const mainHtml = main
       ? `<div class="main" data-h="main">
            <img class="main-sp" data-h="mainImg" alt="" draggable="false">
-           ${ratingSvg(G.main.w, G.main.h, G.main.rating[0], G.main.rating[1], 90, String(main), G.rating.size * G.main.scale)}
+           ${ratingSvg(G.main.w, G.main.h, rx, ry, low ? 90 : -90, String(main), G.main.size, true)}
            <span class="main-cap" aria-hidden="true">${esc(this._t("card.meter.main"))}</span>
          </div>`
       : "";
@@ -1752,7 +1796,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
 
     this._content.innerHTML = `
       <div class="stage">
-        <div class="cover${main ? " has-main" : ""}" style="--rows:${rows}">
+        <div class="cover${main ? " has-main" : ""}${low ? " main-low" : ""}" style="--rows:${rows}">
           <i class="screw screw--tl"></i><i class="screw screw--tr"></i><i class="screw screw--bl"></i><i class="screw screw--br"></i>
           ${this._headHtml(m)}
           <div class="body">
@@ -2122,7 +2166,7 @@ class LdataPanelCard extends LanguageMixin(HTMLElement) {
       // it: with both legs dead, the main is open.
       const dead = h.voltsL1 !== null && h.voltsL2 !== null && h.voltsL1 <= 90 && h.voltsL2 <= 90;
       this._set(c, "main", dead ? "off" : "on", (v) => {
-        els.mainImg.src = art(`main-${v}`);
+        els.mainImg.src = art(`${this._mainArt}-${v}`);
         els.main.title = t(v === "on" ? "card.meter.main_breaker" : "card.meter.main_breaker_dead");
       });
     }
@@ -3124,10 +3168,13 @@ button { font: inherit; }
     calc(var(--u) * 0.2)
     repeat(var(--rows), var(--u))
     calc(var(--u) * 0.2)
-    calc(var(--u) * (0.78 * var(--k) + 0.25));
+    calc(var(--u) * (0.78 * var(--k) + 0.25) + var(--mainh-low, 0px));
   padding: 0 calc(var(--u) * var(--edge));
 }
-.has-main { --mainh: calc(var(--u) * 2.86); }
+.has-main { --mainh: calc(var(--u) * 3.96); }
+/* A panel turned 180° has positions 1 and 2 at the bottom, and its main
+   breaker next to them. */
+.has-main.main-low { --mainh: 0px; --mainh-low: calc(var(--u) * 3.96); }
 /* The embossed surround, door opening and dead front rim: one nine-slice.
    Its middle is the flat dead front, so it also paints behind the breakers. */
 .well {
@@ -3234,8 +3281,10 @@ button { font: inherit; }
   pointer-events: none;
 }
 
-/* Main breaker, seen through its own opening above the columns. */
-.main { position: relative; grid-column: 3 / 6; grid-row: 1; align-self: end; justify-self: center; width: calc(var(--u) * 3.6); height: calc(var(--u) * 2.7); margin-bottom: calc(var(--u) * 0.16); }
+/* Main breaker, seen through its own opening above the columns (below them
+   on a panel turned 180°). */
+.main { position: relative; grid-column: 3 / 6; grid-row: 1; align-self: end; justify-self: center; width: calc(var(--u) * 3.5); height: calc(var(--u) * 3.8); margin-bottom: calc(var(--u) * 0.16); }
+.main-low .main { grid-row: -2; align-self: start; margin-bottom: 0; margin-top: calc(var(--u) * 0.16); }
 .main-sp { position: absolute; inset: 0; display: block; width: 100%; height: 100%; user-select: none; }
 .main-cap {
   position: absolute;
@@ -3256,7 +3305,7 @@ button { font: inherit; }
 /* a word too long for that (see _fitMainCaption) runs down the breaker's side */
 .main-cap--tall {
   max-width: none;
-  max-height: calc(var(--u) * 2.6);
+  max-height: calc(var(--u) * 3.6);
   writing-mode: vertical-rl;
   text-overflow: clip;
 }
@@ -3264,18 +3313,26 @@ button { font: inherit; }
 /* ── Circuit directory: printed on the cover beside the door ───── */
 .lbl {
   all: unset;
+  /* Its text size, line height, the gap under the name (in em), the
+     readings' size against the name's, and its bottom padding. They also
+     place a 2-pole label's readings (see .lbl--tall .lbl-sub). */
+  --lbl-font: clamp(10px, calc(var(--u) * 0.365), 14.5px);
+  --lbl-line: 1.16;
+  --lbl-gap: 0.06;
+  --lbl-sub: 0.84;
+  --lbl-pad: calc(var(--u) * 0.04);
   position: relative;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 0.06em;
+  gap: calc(var(--lbl-gap) * 1em);
   min-width: 0;
-  padding: 0 calc(var(--u) * 0.2) calc(var(--u) * 0.04);
+  padding: 0 calc(var(--u) * 0.2) var(--lbl-pad);
   cursor: pointer;
   color: var(--ink);
-  font-size: clamp(10px, calc(var(--u) * 0.365), 14.5px);
-  line-height: 1.16;
+  font-size: var(--lbl-font);
+  line-height: var(--lbl-line);
   -webkit-tap-highlight-color: transparent;
 }
 .lbl--left { grid-column: 1; align-items: flex-end; text-align: right; }
@@ -3292,11 +3349,20 @@ button { font: inherit; }
 .lbl-sub {
   max-width: 100%;
   color: var(--ink-2);
-  font-size: 0.84em;
+  font-size: calc(var(--lbl-sub) * 1em);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* A 2-pole label's name stays centred in its double space, and its readings
+   sit just above its bar, as high as a single pole's: half of what one space
+   leaves around a name and its readings, plus the padding. */
+.lbl--tall .lbl-sub {
+  position: absolute;
+  left: calc(var(--u) * 0.2);
+  right: calc(var(--u) * 0.2);
+  bottom: calc((var(--u) + var(--lbl-pad) - var(--lbl-font) * (var(--lbl-line) * (1 + var(--lbl-sub)) + var(--lbl-gap))) / 2);
 }
 .lbl-sub[data-tone="muted"] { color: var(--ink-3); }
 .lbl-sub[data-tone="bad"] { color: var(--ink-bad); font-weight: 700; }
@@ -3670,8 +3736,17 @@ function editorSchema(t) {
         },
       },
     },
-    { name: "main_breaker", selector: { number: { min: 0, max: 600, step: 5, mode: "box", unit_of_measurement: "A" } } },
+    { name: "load_capacity", selector: { number: { min: 0, max: 600, step: 5, mode: "box", unit_of_measurement: "A" } } },
   ];
+}
+
+// A card's settings under their current names. main_breaker became
+// load_capacity in 2.0.14's test builds; a dashboard saved before still works,
+// and the editor saves it under the new name.
+function currentOptions(config) {
+  if (!("main_breaker" in config)) return config;
+  const { main_breaker: capacity, ...rest } = config;
+  return "load_capacity" in rest ? rest : { ...rest, load_capacity: capacity };
 }
 
 const EDITOR_LABELS = {
@@ -3683,12 +3758,12 @@ const EDITOR_LABELS = {
   confirm: "editor.confirm",
   show_panel_info: "editor.show_panel_info",
   appearance: "editor.appearance",
-  main_breaker: "editor.main_breaker",
+  load_capacity: "editor.load_capacity",
 };
 
 const EDITOR_HELP = {
   device_id: "editor.panel_help",
-  main_breaker: "editor.main_breaker_help",
+  load_capacity: "editor.load_capacity_help",
 };
 
 const EDITOR_DEFAULTS = {
@@ -3707,7 +3782,7 @@ class LdataPanelCardEditor extends LanguageMixin(HTMLElement) {
   }
 
   setConfig(config) {
-    this._config = config || {};
+    this._config = currentOptions(config || {});
     this._render();
   }
 
@@ -3740,7 +3815,7 @@ class LdataPanelCardEditor extends LanguageMixin(HTMLElement) {
       this._form.addEventListener("value-changed", (ev) => {
         const value = { ...this._config, ...ev.detail.value };
         for (const [k, v] of Object.entries(EDITOR_DEFAULTS)) if (value[k] === v) delete value[k];
-        for (const k of ["title", "main_breaker"]) if (value[k] === "" || value[k] === null || value[k] === 0) delete value[k];
+        for (const k of ["title", "load_capacity"]) if (value[k] === "" || value[k] === null || value[k] === 0) delete value[k];
         this._config = value;
         this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: value }, bubbles: true, composed: true }));
       });

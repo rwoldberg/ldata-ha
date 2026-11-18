@@ -79,9 +79,13 @@
                     "log_fields": "Per trovare i nomi dei campi, abilita \"Registra tutti i dati analizzati\" e controlla i registri di Home Assistant. Inseriscili qui sopra separati da virgole."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Tipo di quadro e capacità di carico",
+                        "description": "Leviton non comunica la capacità dei quadri elettrici, quindi impostala sotto il nome di ogni quadro. Scegli quadro generale o sottoquadro, poi inserisci la sua capacità (Amps): la corrente nominale dell'interruttore generale per un quadro generale, o quella dell'interruttore che lo alimenta per un sottoquadro. La scheda la usa per mostrare l'utilizzo della capacità nella barra laterale e nelle schede delle plance. I quadri generali mostrano anche il loro interruttore generale e la sua corrente nominale in alto o in basso, a seconda dell'orientamento. Lascia vuota la capacità per nascondere entrambi."
+                    },
                     "sub_panels": {
                         "name": "Sottoquadri",
-                        "description": "Se un quadro elettrico è alimentato da un interruttore di un altro quadro, scegli quell'interruttore accanto al suo nome. L'interruttore mostrerà quindi il carico in tempo reale del sottoquadro e permetterà di aprirlo. Se quell'interruttore non è smart, inserisci la sua taglia nel campo che termina con (A) sotto di esso, così la scheda può mostrare quanto ne usa il sottoquadro."
+                        "description": "Se un quadro elettrico è alimentato da un interruttore di un altro quadro, scegli quell'interruttore accanto al suo nome. L'interruttore mostrerà quindi il carico in tempo reale del sottoquadro e permetterà di aprirlo. Se quell'interruttore non è smart, inserisci la sua taglia nel campo che termina con (Amps) sotto di esso, così la scheda può mostrare quanto ne usa il sottoquadro."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Non è un sottoquadro"
+                "none": "Non alimentato da un altro quadro"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Quadro generale (interruttore generale)",
+                "main_hidden": "Quadro generale (nascondi interruttore generale)",
+                "sub": "Sottoquadro (senza interruttore generale)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Segui il tema",
             "appearance_light": "Luminosa",
             "appearance_dark": "Soffusa",
-            "main_breaker": "Corrente nominale dell'interruttore generale (facoltativa)",
-            "main_breaker_help": "Leviton non comunica alcun dato sull'interruttore generale. Lascia vuoto per un quadro senza interruttore generale."
+            "load_capacity": "Capacità di carico (facoltativa)",
+            "load_capacity_help": "Quanto carico può sopportare questo quadro, in ampere: la corrente nominale del suo interruttore generale o dell'interruttore che lo alimenta. Lascia vuoto per usare la capacità impostata nelle opzioni dell'integrazione."
         }
     }
 }

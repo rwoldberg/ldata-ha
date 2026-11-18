@@ -79,9 +79,13 @@
                     "log_fields": "A mezőnevek megtalálásához kapcsolja be a „Minden feldolgozott adat naplózása” opciót, és nézze meg a Home Assistant naplóját. A neveket fent, vesszővel elválasztva adja meg."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Elosztótábla típusa és terhelhetősége",
+                        "description": "A Leviton nem közli az elosztótáblák terhelhetőségét, ezért adja meg minden tábla neve alatt. Válassza ki, hogy főelosztó vagy alelosztó, majd írja be a terhelhetőségét (Amps): főelosztónál a főmegszakító névleges áramát, alelosztónál az azt tápláló megszakítóét. A kártya ez alapján mutatja a kapacitás kihasználtságát az oldalsáv oldalán és az irányítópult-kártyákon. A főelosztók emellett megjelenítik a főmegszakítójukat és annak névleges áramát felül vagy alul, a tábla irányától függően. Ha egyiket sem szeretné megjeleníteni, hagyja üresen a terhelhetőséget."
+                    },
                     "sub_panels": {
                         "name": "Alelosztók",
-                        "description": "Ha egy elosztótáblát egy másik elosztótábla megszakítója táplál, válassza ki azt a megszakítót a neve mellett. Ezután az a megszakító mutatja az alelosztó élő terhelését, és onnan megnyitható az alelosztó. Ha ez a megszakító nem okos megszakító, adja meg a névleges áramát az alatta lévő, (A) végű mezőben, hogy a kártya megmutathassa, mennyit használ belőle az alelosztó."
+                        "description": "Ha egy elosztótáblát egy másik elosztótábla megszakítója táplál, válassza ki azt a megszakítót a neve mellett. Ezután az a megszakító mutatja az alelosztó élő terhelését, és onnan megnyitható az alelosztó. Ha ez a megszakító nem okos megszakító, adja meg a névleges áramát az alatta lévő, (Amps) végű mezőben, hogy a kártya megmutathassa, mennyit használ belőle az alelosztó."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Nem alelosztó"
+                "none": "Nem másik elosztótábláról táplált"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Főelosztó (főmegszakító)",
+                "main_hidden": "Főelosztó (főmegszakító elrejtése)",
+                "sub": "Alelosztó (főmegszakító nélkül)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Téma követése",
             "appearance_light": "Világos",
             "appearance_dark": "Tompított",
-            "main_breaker": "Főmegszakító névleges árama (opcionális)",
-            "main_breaker_help": "A Leviton nem közli a főmegszakító adatait. Főmegszakító nélküli elosztótáblánál hagyja üresen."
+            "load_capacity": "Terhelhetőség (opcionális)",
+            "load_capacity_help": "Mekkora terhelést bír ez az elosztótábla, amperben: a főmegszakítója vagy az azt tápláló megszakító névleges árama. Hagyja üresen az integráció beállításaiban megadott terhelhetőség használatához."
         }
     }
 }

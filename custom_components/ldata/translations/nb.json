@@ -79,9 +79,13 @@
                     "log_fields": "For å finne feltnavnene aktiverer du «Logg alle tolkede data» og ser i loggene til Home Assistant. Skriv dem inn ovenfor, atskilt med komma."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Tavletype og belastningskapasitet",
+                        "description": "Leviton rapporterer ikke kapasiteten til sikringsskap, så angi den under navnet på hvert sikringsskap. Velg hovedfordeling eller underfordeling, og skriv deretter inn kapasiteten (Amps): merkestrømmen til hovedsikringen for en hovedfordeling, eller merkestrømmen til sikringen som forsyner den, for en underfordeling. Kortet bruker den til å vise hvor mye av kapasiteten som brukes, på siden i sidepanelet og på kort i dashbord. Hovedfordelinger viser også hovedsikringen og merkestrømmen øverst eller nederst, avhengig av monteringsretningen. La kapasiteten stå tom for å skjule begge deler."
+                    },
                     "sub_panels": {
                         "name": "Underfordelinger",
-                        "description": "Hvis et sikringsskap forsynes fra en automatsikring i et annet sikringsskap, velger du den automatsikringen ved siden av navnet. Automatsikringen viser deretter underfordelingens gjeldende belastning og fører videre til underfordelingen. Hvis automatsikringen ikke er en smart automatsikring, angir du størrelsen i feltet som slutter på (A), under den, slik at kortet kan vise hvor mye av den underfordelingen bruker."
+                        "description": "Hvis et sikringsskap forsynes fra en automatsikring i et annet sikringsskap, velger du den automatsikringen ved siden av navnet. Automatsikringen viser deretter underfordelingens gjeldende belastning og fører videre til underfordelingen. Hvis automatsikringen ikke er en smart automatsikring, angir du størrelsen i feltet som slutter på (Amps), under den, slik at kortet kan vise hvor mye av den underfordelingen bruker."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Ikke en underfordeling"
+                "none": "Forsynes ikke fra et annet sikringsskap"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Hovedfordeling (hovedsikring)",
+                "main_hidden": "Hovedfordeling (skjul hovedsikring)",
+                "sub": "Underfordeling (ingen hovedsikring)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Følg tema",
             "appearance_light": "Lyst",
             "appearance_dark": "Dempet",
-            "main_breaker": "Hovedsikringens merkestrøm (valgfritt)",
-            "main_breaker_help": "Leviton rapporterer ikke hovedsikringen. La feltet stå tomt for et sikringsskap uten hovedsikring."
+            "load_capacity": "Belastningskapasitet (valgfritt)",
+            "load_capacity_help": "Hvor mye dette sikringsskapet tåler, i ampere: merkestrømmen til hovedsikringen eller til sikringen som forsyner det. La feltet stå tomt for å bruke kapasiteten fra integrasjonens innstillinger."
         }
     }
 }

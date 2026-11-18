@@ -79,9 +79,13 @@
                     "log_fields": "För att hitta fältnamnen aktiverar du ”Logga all tolkad data” och tittar i Home Assistants loggar. Ange dem ovan, avgränsade med kommatecken."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Centraltyp och belastningskapacitet",
+                        "description": "Leviton rapporterar inte elcentralens kapacitet, så ange den under varje elcentrals namn. Välj huvudcentral eller undercentral och skriv sedan in dess kapacitet (Amps): huvudbrytarens märkström för en huvudcentral, eller märkströmmen hos brytaren som matar den för en undercentral. Kortet använder den för att visa hur mycket av kapaciteten som används, på sidan i sidofältet och på kort i instrumentpaneler. Huvudcentraler visar också sin huvudbrytare och märkström överst eller nederst, beroende på riktningen. Lämna kapaciteten tom för att dölja båda."
+                    },
                     "sub_panels": {
                         "name": "Undercentraler",
-                        "description": "Om en elcentral matas från en dvärgbrytare i en annan elcentral väljer du den dvärgbrytaren bredvid centralens namn. Dvärgbrytaren visar sedan undercentralens aktuella belastning och leder vidare till undercentralen. Om dvärgbrytaren inte är en smart brytare anger du dess storlek i fältet som slutar på (A) under den, så att kortet kan visa hur mycket av den undercentralen använder."
+                        "description": "Om en elcentral matas från en dvärgbrytare i en annan elcentral väljer du den dvärgbrytaren bredvid centralens namn. Dvärgbrytaren visar sedan undercentralens aktuella belastning och leder vidare till undercentralen. Om dvärgbrytaren inte är en smart brytare anger du dess storlek i fältet som slutar på (Amps) under den, så att kortet kan visa hur mycket av den undercentralen använder."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Inte en undercentral"
+                "none": "Matas inte från en annan elcentral"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Huvudcentral (huvudbrytare)",
+                "main_hidden": "Huvudcentral (dölj huvudbrytare)",
+                "sub": "Undercentral (ingen huvudbrytare)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Följ temat",
             "appearance_light": "Ljus",
             "appearance_dark": "Dämpad",
-            "main_breaker": "Huvudbrytarens märkström (valfritt)",
-            "main_breaker_help": "Leviton rapporterar inte huvudbrytaren. Lämna tomt för en elcentral utan huvudbrytare."
+            "load_capacity": "Belastningskapacitet (valfritt)",
+            "load_capacity_help": "Hur mycket den här elcentralen klarar, i ampere: märkströmmen för dess huvudbrytare eller för brytaren som matar den. Lämna tomt för att använda kapaciteten från integrationens alternativ."
         }
     }
 }

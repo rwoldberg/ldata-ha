@@ -2314,9 +2314,10 @@ class LDATAService:
             panel_data["panel_type"] = panel.get("ModuleType", "WHEMS")
             panel_data["connected"] = self._is_panel_connected(panel)
 
-            # Physical mounting orientation (0 or 180) and total breaker slot
-            # count — WHEMS panels report these directly; not present on the
-            # older LDATA (ResidentialBreakerPanels) panel type.
+            # Physical mounting orientation (0, or 180 with the main breaker at
+            # the bottom) and total breaker slot count, as set in the My
+            # Leviton app. Its code reads and writes both on LDATA
+            # (ResidentialBreakerPanels) and WHEMS (IotWhems) panels alike.
             panel_data["orientation"] = panel.get("orientation", 0)
             panel_data["panel_size"] = panel.get("panelSize")
 

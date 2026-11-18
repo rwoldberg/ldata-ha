@@ -79,9 +79,13 @@
                     "log_fields": "Om veldnamen te vinden, schakel je ‘Alle geparste data loggen’ in en bekijk je de logboeken van Home Assistant. Vul ze hierboven in, gescheiden door komma’s."
                 },
                 "sections": {
+                    "main_breakers": {
+                        "name": "Soort verdeler en belastbaarheid",
+                        "description": "Leviton geeft de belastbaarheid van groepenkasten niet door, dus stel die in onder de naam van elke groepenkast. Kies hoofdverdeler of onderverdeler en vul daarna de belastbaarheid (Amps) in: de nominale stroom van de hoofdschakelaar bij een hoofdverdeler, of die van de schakelaar die hem voedt bij een onderverdeler. De kaart gebruikt dit om te tonen hoeveel van de capaciteit in gebruik is, in de zijbalk en op dashboardkaarten. Hoofdverdelers tonen ook hun hoofdschakelaar en nominale stroom boven of onder, afhankelijk van de richting. Laat de belastbaarheid leeg om beide te verbergen."
+                    },
                     "sub_panels": {
                         "name": "Onderverdelers",
-                        "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe. Is die automaat geen slimme automaat, vul dan de grootte in het veld eronder in dat eindigt op (A), zodat de kaart kan tonen hoeveel ervan de onderverdeler gebruikt."
+                        "description": "Als een groepenkast wordt gevoed vanuit een automaat in een andere groepenkast, kies die automaat dan naast de naam. Die automaat toont daarna de actuele belasting van de onderverdeler en brengt je ernaartoe. Is die automaat geen slimme automaat, vul dan de grootte in het veld eronder in dat eindigt op (Amps), zodat de kaart kan tonen hoeveel ervan de onderverdeler gebruikt."
                     }
                 }
             }
@@ -101,7 +105,14 @@
         },
         "sub_panel_feed": {
             "options": {
-                "none": "Geen onderverdeler"
+                "none": "Niet gevoed vanuit een andere groepenkast"
+            }
+        },
+        "panel_type": {
+            "options": {
+                "main": "Hoofdverdeler (hoofdschakelaar)",
+                "main_hidden": "Hoofdverdeler (hoofdschakelaar verbergen)",
+                "sub": "Onderverdeler (geen hoofdschakelaar)"
             }
         }
     },
@@ -343,8 +354,8 @@
             "appearance_auto": "Thema volgen",
             "appearance_light": "Helder",
             "appearance_dark": "Gedimd",
-            "main_breaker": "Nominale stroom hoofdschakelaar (optioneel)",
-            "main_breaker_help": "Leviton geeft de hoofdschakelaar niet door. Laat leeg voor een groepenkast zonder hoofdschakelaar."
+            "load_capacity": "Belastbaarheid (optioneel)",
+            "load_capacity_help": "Hoeveel deze groepenkast kan dragen, in ampère: de nominale stroom van de hoofdschakelaar of van de schakelaar die hem voedt. Laat leeg om de belastbaarheid uit de opties van de integratie te gebruiken."
         }
     }
 }
