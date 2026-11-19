@@ -406,7 +406,9 @@ class LDATAService:
     def _check_rate_limit(self) -> None:
         """Enforces a 10-second wait between login attempts."""
         with LDATAService._login_rate_limit_lock:
-            current_time = time.time()
+            # Monotonic: a wall clock set back would otherwise make this
+            # wait as long as the clock moved, with the lock held.
+            current_time = time.monotonic()
 
             time_since_last_attempt = current_time - LDATAService._last_login_attempt_time
 
@@ -416,7 +418,7 @@ class LDATAService:
                 # This is running in an executor job, so time.sleep is OK.
                 time.sleep(wait_time)
 
-            LDATAService._last_login_attempt_time = time.time()
+            LDATAService._last_login_attempt_time = time.monotonic()
 
     def _pause(self, seconds: float) -> None:
         """time.sleep(), cut short at this thread's status() deadline if it has one."""
@@ -703,9 +705,11 @@ class LDATAService:
         for item in result_json:
             if "residentialAccountId" in item:
                 self.account_id = item["residentialAccountId"]
-                if self.account_id is not None:
+                if self.account_id:
                     break
-        if self.account_id is not None:
+        # account_id starts out "", so "is not None" took a list that names
+        # no account as having one.
+        if self.account_id:
             # Save the userId if we just got it
             if "userId" in result_json[0]:
                 self.userid = result_json[0]["userId"]
