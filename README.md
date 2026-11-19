@@ -416,6 +416,12 @@ Addon is auto reloading on submit.
 - Sub-panels (shown with two or more load centers)
   - For a load center that is fed from a breaker in another one, the breaker that feeds it. See [Sub-panels](#sub-panels).
 
+- Energy Tracking Mode (LDATA panels only, default Auto)
+  - LDATA hubs report breaker energy in one of two ways: some (seen on a DAU) send the kWh used in the last hour, with now and then the lifetime total; others send a lifetime counter.
+  - Auto: a panel uses its lifetime counters until its values show they are hourly deltas (they drop again and again, which a lifetime counter never does, in 3 different hours; usually within the first few hours). From then on its consumption energy comes from an hourly ledger that also fills missed hours from the Leviton energy history. The Lifetime and Daily sensors continue from where they were. The result is remembered across restarts and shown in the diagnostics (`energy_tracking`).
+  - Hourly deltas: always use the hourly ledger. Lifetime counter: never use it (the behaviour before the ledger existed).
+  - WHEM panels ignore this setting.
+
 - Log General Integration Errors
   - Integration crashes or web errors
 

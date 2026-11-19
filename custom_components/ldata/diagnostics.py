@@ -154,6 +154,8 @@ async def async_get_config_entry_diagnostics(
             "devices": devices,
             "entities": entities,
             "coordinator_data": async_redact_data(coordinator.data or {}, TO_REDACT),
+            # Per LDATA panel: "hourly" (energy ledger) or "counter".
+            "energy_tracking": coordinator._service.energy_tracking_modes(),
         },
         _account_strings(entry),
     )

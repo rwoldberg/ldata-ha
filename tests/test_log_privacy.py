@@ -275,7 +275,10 @@ def _coordinator(options: dict | None = None) -> LDATAUpdateCoordinator:
     entry.entry_id = "entry-1"
     entry.options = options or {}
     entry.async_create_background_task.side_effect = _no_task
-    return LDATAUpdateCoordinator(hass, EMAIL, "secret", entry)
+    coordinator = LDATAUpdateCoordinator(hass, EMAIL, "secret", entry)
+    # No stored LDATA energy ledger.
+    coordinator._energy_store = MagicMock(async_load=AsyncMock(return_value=None))
+    return coordinator
 
 
 @pytest.mark.asyncio

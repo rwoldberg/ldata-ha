@@ -514,6 +514,7 @@ async def test_setup_unload_and_removal_all_refresh_the_sidebar() -> None:
         patch.object(ldata, "_async_ensure_panel_devices"),
         patch.object(ldata, "_async_purge_orphaned_devices", AsyncMock()),
         patch.object(ldata, "_async_purge_stale_breaker_duplicates", AsyncMock()),
+        patch.object(ldata, "Store", return_value=MagicMock(async_remove=AsyncMock())) as store,
     ):
         assert await ldata.async_setup_entry(hass, entry)
         assert updater.await_count == 1
@@ -521,3 +522,5 @@ async def test_setup_unload_and_removal_all_refresh_the_sidebar() -> None:
         assert updater.await_count == 2
         await ldata.async_remove_entry(hass, entry)
         assert updater.await_args.kwargs == {"removed_entry_id": entry.entry_id}
+        # The entry's LDATA energy ledger is deleted with it.
+        store.return_value.async_remove.assert_awaited_once()

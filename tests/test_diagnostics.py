@@ -74,7 +74,8 @@ async def _download(entities: list[str], **decora) -> tuple[dict, dict]:
                         }
                     },
                     "panels": [{"id": "LDATA-1", "name": "Main Panel", "serialNumber": "LDATA-1"}],
-                }
+                },
+                _service=SimpleNamespace(energy_tracking_modes=lambda: {"LDATA-1": "hourly"}),
             )
         }
         try:
@@ -111,3 +112,4 @@ async def test_what_diagnoses_a_device_is_kept() -> None:
     for kept in ("AA:BB:CC:11:22:33", "1000AB12CD34", "LDATA-1", "Main Panel", "Hallway Dimmer"):
         assert kept in text, kept
     assert device_dump["device"]["identifiers"] == ["('ldata', 'AA:BB:CC:11:22:33')"]
+    assert entry_dump["energy_tracking"] == {"LDATA-1": "hourly"}

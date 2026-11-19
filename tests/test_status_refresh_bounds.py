@@ -208,6 +208,8 @@ def _coordinator() -> LDATAUpdateCoordinator:
     entry.async_create_background_task.side_effect = _no_task
     coordinator = LDATAUpdateCoordinator(hass, "user@example.com", "secret", entry)
     coordinator._persist_refreshed_tokens = MagicMock()
+    # No stored LDATA energy ledger.
+    coordinator._energy_store = MagicMock(async_load=AsyncMock(return_value=None))
     return coordinator
 
 
