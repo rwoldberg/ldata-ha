@@ -30,6 +30,7 @@ def clock(monkeypatch):
     now = SimpleNamespace(value=_dt(14, 23, 50))
     monkeypatch.setattr(sensor.dt_util, "now", lambda: now.value)
     monkeypatch.setattr(sensor.time, "time", lambda: now.value.timestamp())
+    monkeypatch.setattr(sensor.time, "monotonic", lambda: now.value.timestamp())
     return now
 
 

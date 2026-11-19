@@ -775,7 +775,7 @@ class _DailyEnergySensorMixin:
                 self._monotonic_reject_since = None
             return daily
 
-        now = time.time()
+        now = time.monotonic()
         if self._monotonic_reject_since is None:
             self._monotonic_reject_since = now
         elapsed = now - self._monotonic_reject_since
@@ -839,7 +839,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         self._midnight_baseline: float | None = None
         self._last_date: datetime.date | None = None
         # --- Power×time fallback mode ---
-        self._last_update_time: float | None = None  # time.time() of last update
+        self._last_update_time: float | None = None  # time.monotonic() of the last update
         self._last_power: float | None = None  # Last known power in watts
         # Track which mode this sensor is using (set on first update)
         self._use_hw_counters: bool | None = None
@@ -1291,7 +1291,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         except (ValueError, TypeError):
             return
 
-        now = time.time()
+        now = time.monotonic()
         options = self.coordinator.config_entry.options
         offline = is_source_offline(self.coordinator, {**self.breaker_data, **new_data})
 
@@ -1369,7 +1369,7 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
                 current_power += abs(raw_power)
             # Regular (non-solar) breakers never contribute to Import.
 
-        now = time.time()
+        now = time.monotonic()
         options = self.coordinator.config_entry.options
         offline = is_panel_offline(self.coordinator, self.panel_id)
 
@@ -1730,7 +1730,7 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
         except (ValueError, TypeError):
             return
 
-        now = time.time()
+        now = time.monotonic()
         options = self.coordinator.config_entry.options
         offline = is_source_offline(self.coordinator, {**self.breaker_data, **ct_data})
 
@@ -1995,7 +1995,7 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         self._implausible_rejections: int = 0
         # Power×time tracking for v2 panels (hw counters unavailable)
         self._last_power: float | None = None
-        self._last_update_time: float | None = None  # time.time() epoch seconds
+        self._last_update_time: float | None = None  # time.monotonic() of the last update
 
     @property
     def available(self) -> bool:
@@ -2090,7 +2090,7 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         else:
             current_power = abs(raw_power)
 
-        now = time.time()
+        now = time.monotonic()
         options = self.coordinator.config_entry.options
 
         if self._last_update_time is None:
@@ -2429,7 +2429,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
         self._accept_next_value: bool = False
         # Power×time tracking for v2 panels (hw counters unavailable)
         self._last_power: float | None = None
-        self._last_update_time: float | None = None  # time.time() epoch seconds
+        self._last_update_time: float | None = None  # time.monotonic() of the last update
 
     @property
     def available(self) -> bool:
@@ -2498,7 +2498,7 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             # Grid consumption: CT positive = grid → house
             current_power = max(raw_power, 0.0)
 
-        now = time.time()
+        now = time.monotonic()
         options = self.coordinator.config_entry.options
 
         if self._last_update_time is None:
