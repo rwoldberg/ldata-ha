@@ -5,6 +5,7 @@ All notable changes to the Leviton LDATA integration are documented here.
 ## 2.1.1 - Unreleased
 
 ### Fixed
+- **Decora devices no longer stop updating after a restart.** The integration shared its device data before it had added the Decora devices, and a WebSocket update that arrived in between dropped them until the next reload, leaving the Decora entities unavailable. The data is now shared only once complete. At startup the WebSocket also no longer subscribes before the panels are known: if the first refresh was still running 10 seconds after it connected, it subscribed without the panels, breakers and CTs and sent its keepalive to no panel, until it reconnected up to 55 minutes later. It now reconnects shortly after instead. (#127)
 - **Setting the system clock no longer stops energy counting or stalls the login.** Energy worked out from power over time, and the wait between logins, were measured with the system clock. When the clock was set back, for example by an NTP correction, the energy sensors counted nothing until the clock caught up, and the next login could wait as long as the clock had moved. A small step forward was counted as energy used. Both now use a clock that only moves forward. (#128)
 - **An account whose permissions name no account is no longer taken as having one.** Setup then asked Leviton for residences with an empty account id and cleared the stored token on the failure; it now reports that it could not get the account. (#129)
 
