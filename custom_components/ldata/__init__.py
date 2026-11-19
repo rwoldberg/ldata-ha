@@ -2,38 +2,39 @@
 from __future__ import annotations
 import logging
 import re
-from pathlib import Path
 
 import voluptuous as vol
 
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.components.lovelace.const import LOVELACE_DATA, MODE_STORAGE
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_ENTITY_ID, EVENT_HOMEASSISTANT_STARTED, Platform, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.core import CoreState, HomeAssistant, ServiceCall
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
+    CONF_PASSWORD,
+    CONF_USERNAME,
+    EVENT_CORE_CONFIG_UPDATE,
+    EVENT_HOMEASSISTANT_STARTED,
+    Platform,
+)
+from homeassistant.core import CoreState, Event, HomeAssistant, ServiceCall
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import entity_platform
+from homeassistant.helpers.service import async_register_admin_service
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.storage import Store
 
+from .card import CARD_URL, FRONTEND_URL_PATH, PANEL_CARD_FILENAME, async_serve_card
 from .const import DECORA_ROOM_SUBENTRY_TYPE, DOMAIN, LOGGER_NAME, MANUFACTURER, PANEL_SUBENTRY_TYPE
 from .coordinator import ENERGY_STORE_VERSION, LDATAUpdateCoordinator, energy_store_key
+from .ldata_base_entity import subentry_ids_by_unique_id
+from .sidebar import async_follow_entries, async_update_sidebar_panel
 from .ldata_service import (
     LDATAAuthError,
     LDATAConnectionError,
     LDATAService,
     TwoFactorRequired,
-    VERSION,
 )
-
-# URL path the panel card is served under — served directly from this
-# integration's own www/ folder (see _async_register_frontend below), so
-# users never need to copy the file into config/www or manually add it as
-# a Lovelace resource.
-_FRONTEND_URL_PATH = "/ldata_static"
-_PANEL_CARD_FILENAME = "ldata-panel-card.js"
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -46,6 +47,11 @@ PLATFORMS: list[Platform] = [
     Platform.UPDATE,
 ]
 _LOGGER = logging.getLogger(LOGGER_NAME)
+
+# The integration is set up from config entries only; async_setup below takes
+# nothing from configuration.yaml. Home Assistant's validation (hassfest)
+# expects an integration that has async_setup to say so.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 SERVICE_RESET_ENERGY = "reset_energy_baseline"
 SERVICE_RESET_PANEL = "reset_panel_energy"
@@ -267,9 +273,10 @@ def _panel_device_identifiers(panel_id: str, coordinators) -> set[tuple]:
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:
-    """Serve the panel card from this integration's own www/ folder and
-    register it as a genuine Lovelace resource, so users never need to copy
-    the file into config/www or manually add it via Settings > Dashboards.
+    """Register the panel card as a genuine Lovelace resource, so users never
+    need to copy the file into config/www or manually add it via Settings >
+    Dashboards. The file itself is served from this integration's own www/
+    folder (see card.py).
 
     Deliberately does NOT use frontend.add_extra_js_url() — that injects a
     raw `import()` into the index page, which races the rest of the
@@ -289,17 +296,11 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
         return
     hass.data.setdefault(DOMAIN, {})["_frontend_registered"] = True
 
-    www_dir = Path(__file__).parent / "www"
-    if not await hass.async_add_executor_job(www_dir.is_dir):
-        _LOGGER.warning("LDATA www directory not found at %s — panel card won't load", www_dir)
+    # The sidebar panel loads the card from this same URL, so a browser that
+    # uses both runs the file once.
+    versioned_url = await async_serve_card(hass)
+    if versioned_url is None:
         return
-
-    try:
-        await hass.http.async_register_static_paths([
-            StaticPathConfig(_FRONTEND_URL_PATH, str(www_dir), True)
-        ])
-    except RuntimeError:
-        _LOGGER.debug("LDATA static path already registered at %s", _FRONTEND_URL_PATH)
 
     lovelace = hass.data.get(LOVELACE_DATA)
     if lovelace is None or lovelace.resource_mode != MODE_STORAGE:
@@ -310,24 +311,69 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
             "Lovelace storage mode not available — panel card is served at "
             "%s/%s but won't be auto-registered as a resource; add it "
             "manually via Settings > Dashboards > Resources if needed.",
-            _FRONTEND_URL_PATH, _PANEL_CARD_FILENAME,
+            FRONTEND_URL_PATH, PANEL_CARD_FILENAME,
         )
         return
 
-    card_url = f"{_FRONTEND_URL_PATH}/{_PANEL_CARD_FILENAME}"
+    resources = lovelace.resources
     try:
-        already_registered = any(
-            resource["url"].split("?", 1)[0] == card_url
-            for resource in lovelace.resources.async_items()
-        )
-        if not already_registered:
-            await lovelace.resources.async_create_item({
-                "res_type": "module",
-                "url": f"{card_url}?v={VERSION}",
-            })
-            _LOGGER.info("Registered LDATA panel card as a Lovelace resource: %s", card_url)
+        # Lovelace loads this collection lazily, on the frontend's first
+        # request. Read unloaded it looks empty, and creating an item into it
+        # then saves over every resource the user already has.
+        if not resources.loaded:
+            await resources.async_load()
+            resources.loaded = True
+
+        ours = [
+            resource
+            for resource in resources.async_items()
+            if resource["url"].split("?", 1)[0] == CARD_URL
+        ]
+        if not ours:
+            await resources.async_create_item({"res_type": "module", "url": versioned_url})
+            _LOGGER.info("Registered LDATA panel card as a Lovelace resource: %s", versioned_url)
+            return
+
+        # Keep one entry, pointed at this card. Earlier versions never updated
+        # the ?v= after the first install (so upgrades kept running the cached
+        # old card) and could add a duplicate per restart; with two entries the
+        # browser loads both versions and whichever registers first wins.
+        first, *duplicates = ours
+        if first["url"] != versioned_url:
+            await resources.async_update_item(first["id"], {"url": versioned_url})
+            _LOGGER.info("Updated the LDATA panel card resource to %s", versioned_url)
+        for duplicate in duplicates:
+            await resources.async_delete_item(duplicate["id"])
+            _LOGGER.info("Removed duplicate LDATA panel card resource %s", duplicate["url"])
     except Exception:
         _LOGGER.exception("Failed to auto-register the LDATA panel card as a Lovelace resource")
+
+
+async def _async_unregister_frontend(hass: HomeAssistant) -> None:
+    """Take the panel card's Lovelace resource out once no entry is left.
+
+    Without entries the integration is not set up after a restart, so
+    nothing serves the card's file any more; left in, the resource would fail
+    to load on every page of the frontend. Dashboards that still hold the
+    card show it as one that doesn't exist, as they would anyway.
+    """
+    hass.data.get(DOMAIN, {}).pop("_frontend_registered", None)
+    lovelace = hass.data.get(LOVELACE_DATA)
+    if lovelace is None or lovelace.resource_mode != MODE_STORAGE:
+        return
+    resources = lovelace.resources
+    try:
+        # As in _async_register_frontend: read unloaded, the collection
+        # looks empty.
+        if not resources.loaded:
+            await resources.async_load()
+            resources.loaded = True
+        for resource in list(resources.async_items()):
+            if resource["url"].split("?", 1)[0] == CARD_URL:
+                await resources.async_delete_item(resource["id"])
+                _LOGGER.info("Removed the LDATA panel card resource %s", resource["url"])
+    except Exception:
+        _LOGGER.exception("Failed to remove the LDATA panel card's Lovelace resource")
 
 
 def _resolve_panel_id_for_device(
@@ -776,6 +822,134 @@ def _has_live_identifier(
     )
 
 
+# The options that hold import-sensor unique ids (see sensor.py).
+_UID_LIST_OPTIONS = ("confirmed_solar_import_uids", "suppressed_import_uids")
+
+
+def _has_prefix(unique_id, username: str) -> bool:
+    """Return whether a unique id starts with "<username>-", in any letter case."""
+    prefix = username + "-"
+    return isinstance(unique_id, str) and unique_id[: len(prefix)].casefold() == prefix.casefold()
+
+
+def _plan_unique_id_migration(
+    registered: list[tuple[str, str, str]],
+    username: str,
+    userid: str,
+    holder_of,
+) -> list[tuple[str, str]] | None:
+    """Plan moving one entry's unique ids from the email prefix to the user id prefix.
+
+    registered holds (entity_id, domain, unique_id) for each of the entry's
+    entities; holder_of(domain, unique_id) returns the entity_id of the
+    registry entry that has that unique id, or None. Returns the
+    (entity_id, new unique id) moves.
+
+    The entry's username is matched in any letter case: a reauth stores the
+    email as typed, so an entry can have entities under two casings of it,
+    the current one live and the older ones orphaned. When several map to
+    the same new unique id, the one under the current casing moves and the
+    others stay as they are. A new unique id this entry already uses (moved
+    earlier, or created since) is left alone. One that another entry uses
+    (two entries of the same account covering the same devices) means this
+    entry can't move without taking those entities from it: returns None,
+    and nothing moves.
+    """
+    own = {entity_id for entity_id, _domain, _unique_id in registered}
+    groups: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    for entity_id, domain, unique_id in registered:
+        if _has_prefix(unique_id, username):
+            new_unique_id = f"{userid}-{unique_id[len(username) + 1:]}"
+            groups.setdefault((domain, new_unique_id), []).append((entity_id, unique_id))
+
+    moves: list[tuple[str, str]] = []
+    for (domain, new_unique_id), group in groups.items():
+        holder = holder_of(domain, new_unique_id)
+        if holder is not None:
+            if holder not in own:
+                return None
+            continue
+        if len(group) > 1:
+            group = [item for item in group if item[1].startswith(username + "-")]
+            if len(group) != 1:
+                continue
+        moves.append((group[0][0], new_unique_id))
+    return moves
+
+
+def _migrated_uid_list(unique_ids, username: str, userid: str) -> list:
+    """Return an options list of unique ids with the email prefix replaced by the user id."""
+    migrated: list = []
+    for unique_id in unique_ids:
+        if _has_prefix(unique_id, username):
+            unique_id = f"{userid}-{unique_id[len(username) + 1:]}"
+        if unique_id not in migrated:
+            migrated.append(unique_id)
+    return migrated
+
+
+async def _async_migrate_unique_id_prefix(
+    hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
+) -> None:
+    """Key this entry's entities on the Leviton user id instead of the account email.
+
+    Every unique id started with the email the account was set up with.
+    Home Assistant's guidelines rule out emails as unique ids: they put the
+    address into the entity registry, the entry's options and error
+    messages, and a reauth that stores the email in another letter case
+    made every entity a new one. The user id names the same account and
+    doesn't change.
+
+    Moves this entry's registry entries and the unique ids kept in its
+    options, before the platforms set up, then sets the coordinator's
+    prefix the platforms use. Runs on every setup and moves only what is
+    still under the email, so it converges like the other reconciliations
+    here. If another entry already uses the new unique ids (see
+    _plan_unique_id_migration), this entry keeps the email prefix.
+    """
+    username = entry.data.get("email", entry.data.get(CONF_USERNAME)) or ""
+    userid = str(entry.data.get("userid") or "")
+    coordinator.unique_id_prefix = username
+    if not username or not userid:
+        return
+
+    ent_reg = er.async_get(hass)
+    registered = [
+        (ent.entity_id, ent.domain, ent.unique_id)
+        for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id)
+    ]
+    moves = _plan_unique_id_migration(
+        registered,
+        username,
+        userid,
+        lambda domain, unique_id: ent_reg.async_get_entity_id(domain, DOMAIN, unique_id),
+    )
+    if moves is None:
+        _LOGGER.warning(
+            "Another LDATA entry for the same Leviton account already has entities "
+            "for this entry's devices; this entry's entities stay keyed by the "
+            "account email"
+        )
+        return
+
+    for entity_id, new_unique_id in moves:
+        ent_reg.async_update_entity(entity_id, new_unique_id=new_unique_id)
+
+    options = dict(entry.options)
+    for key in _UID_LIST_OPTIONS:
+        if key in options:
+            options[key] = _migrated_uid_list(options[key], username, userid)
+    if options != dict(entry.options):
+        hass.config_entries.async_update_entry(entry, options=options)
+
+    if moves:
+        _LOGGER.info(
+            "Moved the unique ids of %d entities from the account email to the Leviton user id",
+            len(moves),
+        )
+    coordinator.unique_id_prefix = userid
+
+
 async def _async_reconcile_subentries(
     hass: HomeAssistant, entry: ConfigEntry, coordinator: LDATAUpdateCoordinator
 ) -> None:
@@ -799,16 +973,8 @@ async def _async_reconcile_subentries(
     if not coordinator.data:
         return
 
-    existing_panel = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
-    }
-    existing_room = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == DECORA_ROOM_SUBENTRY_TYPE and se.unique_id
-    }
+    existing_panel = subentry_ids_by_unique_id(entry, PANEL_SUBENTRY_TYPE)
+    existing_room = subentry_ids_by_unique_id(entry, DECORA_ROOM_SUBENTRY_TYPE)
 
     for panel in coordinator.data.get("panels", []):
         panel_id = panel.get("id")
@@ -1055,11 +1221,7 @@ def _async_ensure_panel_devices(
         return
 
     dev_reg = dr.async_get(hass)
-    subentry_by_panel = {
-        se.unique_id: se.subentry_id
-        for se in entry.subentries.values()
-        if se.subentry_type == PANEL_SUBENTRY_TYPE and se.unique_id
-    }
+    subentry_by_panel = subentry_ids_by_unique_id(entry, PANEL_SUBENTRY_TYPE)
     for panel in coordinator.data.get("panels", []):
         panel_id = panel.get("id")
         if not panel_id:
@@ -1146,10 +1308,27 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     Registers the panel card's frontend resources here rather than in
     async_setup_entry — that runs once per config entry (e.g. once per
     residence, per the residence picker), but frontend registration should
-    only ever happen once. Deferred until HA has fully started if it
-    hasn't yet, since Lovelace's storage-backed resources collection isn't
-    reliably available during early boot.
+    only ever happen once. The Lovelace resource is deferred until HA has
+    fully started if it hasn't yet, since Lovelace's storage-backed resources
+    collection isn't reliably available during early boot.
     """
+    # The sidebar panel, for the entries that ask for one, is registered right
+    # away rather than when an entry finishes loading: a browser already
+    # showing that page is sent to the default dashboard if the panel is not
+    # there once Home Assistant is up. The card's files have to be served by
+    # then too.
+    await async_serve_card(hass)
+    await async_update_sidebar_panel(hass)
+
+    async def _on_core_config_update(event: Event) -> None:
+        # The sidebar title is in the server's language.
+        if "language" in event.data:
+            await async_update_sidebar_panel(hass)
+
+    hass.bus.async_listen(EVENT_CORE_CONFIG_UPDATE, _on_core_config_update)
+    # An entry that is not loaded has no options listener of its own.
+    async_follow_entries(hass)
+
     if hass.state == CoreState.running:
         await _async_register_frontend(hass)
     else:
@@ -1268,6 +1447,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # Before the platforms register any entity: key them on the Leviton user
+    # id rather than the account email (see docstring).
+    await _async_migrate_unique_id_prefix(hass, entry, coordinator)
+
     # Ensure each panel has its own config subentry, and migrate any
     # pre-subentry devices/entities into theirs, before platforms set up —
     # so newly-discovered breakers get the right config_subentry_id from
@@ -1326,7 +1509,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             """Handle the reset_energy_baseline service call."""
             await _async_reset_energy_baseline(hass, call.data)
 
-        hass.services.async_register(
+        # Admin only, like the other ways to change these sensors' history:
+        # a reset rewrites energy totals the Energy dashboard records.
+        async_register_admin_service(
+            hass,
             DOMAIN,
             SERVICE_RESET_ENERGY,
             handle_reset_energy,
@@ -1338,12 +1524,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             """Handle the reset_panel_energy service call."""
             await _async_reset_panel_energy(hass, call.data[ATTR_DEVICE_ID])
 
-        hass.services.async_register(
+        async_register_admin_service(
+            hass,
             DOMAIN,
             SERVICE_RESET_PANEL,
             handle_reset_panel_energy,
             schema=SERVICE_RESET_PANEL_SCHEMA,
         )
+
+    # The panel devices exist now; let the sidebar page (if this entry asks
+    # for one) list them.
+    await async_update_sidebar_panel(hass)
+
+    # The card's resource is added once per run (see async_setup) and taken
+    # out with the last entry (async_remove_entry); an entry added after that
+    # puts it back. During startup, async_setup's own call does it.
+    if hass.state == CoreState.running:
+        await _async_register_frontend(hass)
 
     return True
 
@@ -1381,12 +1578,24 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             for service in (SERVICE_RESET_ENERGY, SERVICE_RESET_PANEL):
                 hass.services.async_remove(DOMAIN, service)
 
+        # A reload leaves the sidebar item alone; a disabled entry, or an
+        # option that was just turned off, drops out of it here.
+        await async_update_sidebar_panel(hass)
+
     return unload_ok
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Delete the LDATA energy ledger of a removed config entry."""
+    """Drop a deleted entry from the sidebar panel, the card with the last one, and its energy ledger."""
     await Store(hass, ENERGY_STORE_VERSION, energy_store_key(entry.entry_id)).async_remove()
+    await async_update_sidebar_panel(hass, removed_entry_id=entry.entry_id)
+    # Newer cores take the entry off their list before calling this, older
+    # ones after.
+    if not any(
+        other.entry_id != entry.entry_id
+        for other in hass.config_entries.async_entries(DOMAIN)
+    ):
+        await _async_unregister_frontend(hass)
 
 async def options_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""

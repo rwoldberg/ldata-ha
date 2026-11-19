@@ -55,6 +55,18 @@ def _today(ledger: LDATAEnergyLedger, key: str, day: int) -> float | None:
 # ── Ledger ─────────────────────────────────────────────────────────────
 
 
+
+def _recover(service) -> bool:
+    """Run the energy recovery as the coordinator's loop does, for the listing and then the history.
+
+    fetch_ldata_energy() reads one of them per cycle; the history only once
+    the listing's values are booked. Returns True if the ledger changed.
+    """
+    changed = service.merge_ldata_energy(service.fetch_ldata_energy())
+    if service._ldata_history_needed(time.time()):
+        changed = service.merge_ldata_energy(service.fetch_ldata_energy()) or changed
+    return changed
+
 def test_hourly_bound_uses_breaker_rating_with_fallback() -> None:
     assert hourly_bound_kwh(15) == pytest.approx(3.6)
     assert hourly_bound_kwh(30) == pytest.approx(7.2)
@@ -1012,6 +1024,8 @@ def _whems_panel(breakers: list[dict]) -> dict:
         "model": "LWHEM",
         "connected": True,
         "ModuleType": "WHEMS",
+        # The running firmware: a WHEMS panel listed without it is taken as v2.
+        "version": "1.7.6",
         "updateVersion": "1.7.6",
         "rmsVoltage": 121.0,
         "rmsVoltage2": 121.0,
@@ -1164,7 +1178,7 @@ def test_missed_burst_is_recovered_from_the_listing(clock) -> None:
     clock.value = _ts(14, 18, 6)
     assert service.needs_ldata_energy_recovery()
 
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
 
     assert service.energy_ledger.lifetime("tech") == pytest.approx(0.07)
     headers = _listing_calls(service)[0].kwargs["headers"]
@@ -1175,7 +1189,7 @@ def test_missed_burst_is_recovered_from_the_listing(clock) -> None:
     # Once per hour.
     clock.value = _ts(14, 18, 30)
     assert not service.needs_ldata_energy_recovery()
-    assert service.refresh_ldata_energy() is False
+    assert _recover(service) is False
     assert len(_listing_calls(service)) == 1
     assert len(_history_calls(service)) == 1
 
@@ -1199,7 +1213,7 @@ def test_recovery_retries_the_listing_once_on_a_dropped_connection(clock) -> Non
     service.session.get.side_effect = get
     clock.value = _ts(14, 18, 6)
 
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
 
     assert len(_listing_calls(service)) == 2
     assert service.energy_ledger.lifetime("tech") == pytest.approx(0.07)
@@ -1212,7 +1226,7 @@ def test_recovery_does_not_retry_a_read_timeout(clock) -> None:
     clock.value = _ts(14, 18, 6)
 
     with pytest.raises(requests.exceptions.ReadTimeout):
-        service.refresh_ldata_energy()
+        _recover(service)
 
     assert service.session.get.call_count == 1
     # The hour is not marked as read, so the next cycle tries again.
@@ -1224,20 +1238,20 @@ def test_recovery_reads_the_listing_once_per_hour_when_it_does_not_fill(clock) -
     service = _listing_service(clock, None)
     clock.value = _ts(14, 18, 6)
 
-    service.refresh_ldata_energy()
+    _recover(service)
     assert len(_listing_calls(service)) == 1
     assert len(_history_calls(service)) == 1  # The history has nothing either.
     assert not service.energy_ledger.has_delta_for("tech", int(_ts(14, 17)))
     assert service.needs_ldata_energy_recovery() is False
     for minute in (8, 10, 30, 59):
         clock.value = _ts(14, 18, minute)
-        assert service.refresh_ldata_energy() is False
+        assert _recover(service) is False
     assert service.session.get.call_count == 2
 
     # The next hour is checked again.
     clock.value = _ts(14, 19, 6)
     assert service.needs_ldata_energy_recovery() is True
-    service.refresh_ldata_energy()
+    _recover(service)
     assert len(_listing_calls(service)) == 2
     assert len(_history_calls(service)) == 2
 
@@ -1249,7 +1263,7 @@ def test_recovery_does_not_book_a_listing_value_left_from_the_previous_hour(cloc
     clock.value = _ts(14, 18, 6)
 
     # Only the zero on leg 2 is booked.
-    service.refresh_ldata_energy()
+    _recover(service)
 
     assert service.energy_ledger.lifetime("tech") == pytest.approx(0.03)
     assert not service.energy_ledger.has_delta_for("tech", int(_ts(14, 17)))
@@ -1266,7 +1280,7 @@ def test_no_recovery_when_burst_arrived(clock) -> None:
     clock.value = _ts(14, 18, 6)
 
     assert not service.needs_ldata_energy_recovery()
-    assert service.refresh_ldata_energy() is False
+    assert _recover(service) is False
     service.session.get.assert_not_called()
 
 
@@ -1301,7 +1315,7 @@ def test_listing_recovery_uses_the_listing_rating(clock) -> None:
     )
     clock.value = _ts(14, 18, 6)
 
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
 
     assert service.energy_ledger.lifetime("tech") == pytest.approx(5.07)
 
@@ -1322,7 +1336,7 @@ def test_recovery_does_not_book_the_listing_of_an_offline_panel(clock) -> None:
     )
     clock.value = _ts(14, 18, 6)
 
-    assert service.refresh_ldata_energy() is False
+    assert _recover(service) is False
 
     assert service.energy_ledger.lifetime("tech") == pytest.approx(0.03)
     assert not service.energy_ledger.has_delta_for("tech", int(_ts(14, 17)))
@@ -1337,7 +1351,7 @@ def test_recovery_waits_while_the_cached_panel_state_is_offline(clock) -> None:
     clock.value = _ts(14, 18, 6)
 
     assert not service.needs_ldata_energy_recovery()
-    assert service.refresh_ldata_energy() is False
+    assert _recover(service) is False
     service.session.get.assert_not_called()
 
     # Back online within the hour: the missed burst is read from the
@@ -1348,7 +1362,7 @@ def test_recovery_waits_while_the_cached_panel_state_is_offline(clock) -> None:
     assert not service.needs_ldata_energy_recovery()
     clock.value = _ts(14, 18, 6) + ldata_energy.PANEL_RECONNECT_SETTLE_SECS
     assert service.needs_ldata_energy_recovery()
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
     assert service.energy_ledger.lifetime("tech") == pytest.approx(0.07)
 
 
@@ -1361,7 +1375,7 @@ def test_offline_listing_still_applies_a_lifetime_counter(clock) -> None:
     )
     clock.value = _ts(14, 18, 6)
 
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
 
     assert service.energy_ledger.lifetime("tech") > 0.03
 
@@ -1432,7 +1446,7 @@ def test_hub_upload_after_an_outage_is_not_booked(clock) -> None:
         status_code=200,
         json=lambda: [_ldata_panel([_raw_breaker("tech", 15, 0.04, position=3)])],
     )
-    assert service._refresh_ldata_energy_locked() is False
+    assert service._merge_ldata_listing(service._fetch_ldata_listing_locked(), time.time()) is False
     assert ledger.lifetime("tech") == pytest.approx(0.0401)
     assert service._energy_recovery_hour is None
 
@@ -1519,6 +1533,7 @@ def test_coordinator_push_tracks_the_ldata_panel_state() -> None:
     coordinator.config_entry = SimpleNamespace(options={})
     coordinator._websocket_connected = True
     coordinator._debounce_timer = None
+    coordinator._auth_failed = False
     coordinator.async_set_updated_data = MagicMock()
     coordinator._save_energy_ledger = MagicMock()
     coordinator._log_data_if_enabled = MagicMock()
@@ -1858,6 +1873,7 @@ class _Coordinator:
         self.data = {"breakers": breakers}
         self.last_update_success = True
         self.user = "test-user"
+        self.unique_id_prefix = "test-user"
         self.config_entry = SimpleNamespace(options={})
 
     def async_add_listener(self, update_callback, context=None):
@@ -1976,6 +1992,8 @@ def _daily_sensor(ledger, breakers=None, panel_total=False, hourly=True):
 def sensor_clock(monkeypatch):
     now = SimpleNamespace(value=_ts(14, 17, 10))
     monkeypatch.setattr(sensor.time, "time", lambda: now.value)
+    # Power x time durations are measured with the monotonic clock.
+    monkeypatch.setattr(sensor.time, "monotonic", lambda: now.value)
     return now
 
 
@@ -2657,7 +2675,7 @@ def test_hour_without_a_burst_is_booked_from_the_energy_history(clock) -> None:
 
     clock.value = _ts(17, 22, 6, 25)
     assert service.needs_ldata_energy_recovery()
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
 
     assert len(_listing_calls(service)) == 1
     calls = _history_calls(service)
@@ -2689,7 +2707,7 @@ def test_hour_without_a_burst_is_booked_from_the_energy_history(clock) -> None:
     total = ledger.lifetime("outside")
     clock.value = _ts(17, 23, 6, 25)
     assert not service.needs_ldata_energy_recovery()
-    assert service.refresh_ldata_energy() is False
+    assert _recover(service) is False
     assert ledger.lifetime("outside") == pytest.approx(total)
     assert len(_history_calls(service)) == 1
     # 19-20h from the startup listing, then 20-21h, 21-22h and 22-23h.
@@ -2784,7 +2802,7 @@ def test_history_hour_not_computed_yet_is_retried_next_hour(clock) -> None:
     # At 22:06 the history shows 0 for 21-22h on the whole panel.
     service.history = _history_day("2026-10-17", {"26": {20: 1.46}}, {20: 1.84})
     clock.value = _ts(17, 22, 6, 25)
-    service.refresh_ldata_energy()
+    _recover(service)
     assert not service.energy_ledger.has_delta_for("outside", int(_ts(17, 21)))
     assert len(_history_calls(service)) == 1
     clock.value = _ts(17, 22, 40)
@@ -2798,7 +2816,7 @@ def test_history_hour_not_computed_yet_is_retried_next_hour(clock) -> None:
     before = service.energy_ledger.lifetime("outside")
     clock.value = _ts(17, 23, 6, 25)
     assert service.needs_ldata_energy_recovery()
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
     assert len(_listing_calls(service)) == 1  # The 22-23h burst arrived: no listing read.
     assert service.energy_ledger.lifetime("outside") - before == pytest.approx(1.47)
     assert service.energy_ledger.history_hours_needed("outside", int(_ts(17, 12)), int(_ts(17, 22))) == []
@@ -2810,16 +2828,16 @@ def test_history_is_not_read_while_the_panel_is_offline_or_settling(clock) -> No
     service.status_data["panels"][0]["connected"] = False
     clock.value = _ts(17, 22, 6, 25)
     service.observe_ldata_panels()
-    service.refresh_ldata_energy()
+    _recover(service)
     assert _history_calls(service) == []
 
     service.status_data["panels"][0]["connected"] = True
     clock.value = _ts(17, 22, 7)
     service.observe_ldata_panels()
-    assert service.refresh_ldata_energy() is False
+    assert _recover(service) is False
     assert _history_calls(service) == []
     clock.value = _ts(17, 22, 7) + ldata_energy.PANEL_RECONNECT_SETTLE_SECS
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
     assert len(_history_calls(service)) == 1
 
 
@@ -2866,7 +2884,7 @@ def test_history_waits_while_the_listing_of_the_hour_is_unread(clock) -> None:
         status_code=200, json=lambda: [_offline(_ldata_panel([_raw_breaker("outside", 30, 1.46, 0.0, position=26)]))]
     )
     clock.value = _ts(17, 22, 6, 25)
-    service.refresh_ldata_energy()
+    _recover(service)
     assert len(_listing_calls(service)) == 1
     assert _history_calls(service) == []
 
@@ -3186,7 +3204,7 @@ def test_claimed_hour_with_a_missed_burst_is_filled_from_the_history(clock) -> N
     # No 23:00 burst.
     clock.value = _ts(18, 23, 6, 25)
     assert service.needs_ldata_energy_recovery()
-    assert service.refresh_ldata_energy() is True
+    assert _recover(service) is True
     assert len(_history_calls(service)) == 1
     before = (OUTSIDE_COUNTER_AT - _ts(18, 22)) / 3600
     assert ledger.lifetime("outside") == pytest.approx(42.6 + 1.45 * (1 - before))

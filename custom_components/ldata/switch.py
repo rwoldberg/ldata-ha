@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -28,7 +29,12 @@ from .const import (
     POWER_ON,
 )
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
-from .ldata_base_entity import add_entities_grouped_by_panel, is_breaker_on
+from .ldata_base_entity import (
+    PanelOnlineMixin,
+    add_entities_grouped_by_panel,
+    is_breaker_on,
+    is_metering_accessory,
+)
 from .ldata_entity import LDATAEntity
 from .ldata_service import LDATAAuthError
 
@@ -52,6 +58,10 @@ async def async_setup_entry(
         switches = []
         for breaker_id in entry.data["breakers"]:
             breaker_data = entry.data["breakers"][breaker_id]
+            # A Metering Accessory only meters a standard breaker; there is
+            # no power to switch (its Blink LED below still identifies it).
+            if is_metering_accessory(breaker_data):
+                continue
             switches.append(LDATASwitch(entry, breaker_data))
         add_entities_grouped_by_panel(config_entry, async_add_entities, switches)
 
@@ -100,7 +110,7 @@ async def async_setup_entry(
         add_entities_grouped_by_decora_room(config_entry, async_add_entities, decora_entities)
 
 
-class LDATASwitch(LDATAEntity, SwitchEntity):
+class LDATASwitch(PanelOnlineMixin, LDATAEntity, SwitchEntity):
     """Define the switch for the breaker."""
 
     def __init__(self, coordinator, data) -> None:
@@ -120,7 +130,6 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         self._last_known_is_on = self._state
 
         # Subscribe to updates.
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -158,20 +167,20 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
                 self.coordinator.service.remote_off, self.breaker_data["id"]
             )
         except LDATAAuthError as ex:
-            _LOGGER.error("Auth error turning off breaker %s: %s", self.name, ex)
             self.async_write_ha_state()
-            return
+            raise HomeAssistantError(f"Could not turn off {self.name}: Leviton refused the request") from ex
         except Exception as ex:
-            _LOGGER.error("Error turning off breaker %s: %s", self.name, ex)
             self.async_write_ha_state()
-            return
+            raise HomeAssistantError(f"Could not turn off {self.name}") from ex
 
         if result:
             self._state = False
             self.async_write_ha_state()
         else:
-            _LOGGER.error("Failed to turn off breaker %s", self.name)
+            # A failed trip must fail the service call: an automation that
+            # trips a breaker has to know it did not happen.
             self.async_write_ha_state()
+            raise HomeAssistantError(f"Could not turn off {self.name}: Leviton did not accept the command")
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Reset the breaker."""
@@ -180,20 +189,18 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
                 self.coordinator.service.remote_on, self.breaker_data["id"]
             )
         except LDATAAuthError as ex:
-            _LOGGER.error("Auth error turning on breaker %s: %s", self.name, ex)
             self.async_write_ha_state()
-            return
+            raise HomeAssistantError(f"Could not turn on {self.name}: Leviton refused the request") from ex
         except Exception as ex:
-            _LOGGER.error("Error turning on breaker %s: %s", self.name, ex)
             self.async_write_ha_state()
-            return
+            raise HomeAssistantError(f"Could not turn on {self.name}") from ex
 
         if result:
             self._state = True
             self.async_write_ha_state()
         else:
-            _LOGGER.error("Failed to turn on breaker %s", self.name)
             self.async_write_ha_state()
+            raise HomeAssistantError(f"Could not turn on {self.name}: Leviton did not accept the command")
 
     @property
     def extra_state_attributes(self) -> dict[str, str]:
@@ -209,7 +216,7 @@ class LDATASwitch(LDATAEntity, SwitchEntity):
         return "Breaker"
 
 
-class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
+class LDATABlinkLEDSwitch(PanelOnlineMixin, LDATAEntity, SwitchEntity):
     """Toggle the blink-LED indicator on a breaker."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -220,7 +227,6 @@ class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state: bool = data.get("blinkLED", False)
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -245,15 +251,14 @@ class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
                 self.coordinator.service.set_blink_led, self.breaker_data["id"], True
             )
         except Exception as ex:
-            _LOGGER.error("Error enabling blink LED for %s: %s", self.name, ex)
             self.async_write_ha_state()
-            return
+            raise HomeAssistantError(f"Could not turn on {self.name}") from ex
         if result:
             self._state = True
             self.async_write_ha_state()
         else:
-            _LOGGER.error("Failed to enable blink LED for %s", self.name)
             self.async_write_ha_state()
+            raise HomeAssistantError(f"Could not turn on {self.name}: Leviton did not accept the command")
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Stop blinking the LED."""
@@ -262,15 +267,14 @@ class LDATABlinkLEDSwitch(LDATAEntity, SwitchEntity):
                 self.coordinator.service.set_blink_led, self.breaker_data["id"], False
             )
         except Exception as ex:
-            _LOGGER.error("Error disabling blink LED for %s: %s", self.name, ex)
             self.async_write_ha_state()
-            return
+            raise HomeAssistantError(f"Could not turn off {self.name}") from ex
         if result:
             self._state = False
             self.async_write_ha_state()
         else:
-            _LOGGER.error("Failed to disable blink LED for %s", self.name)
             self.async_write_ha_state()
+            raise HomeAssistantError(f"Could not turn off {self.name}: Leviton did not accept the command")
 
     @property
     def name_suffix(self) -> str | None:
@@ -318,45 +322,19 @@ class DecoraSwitch(DecoraEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
-        device = self._get_device_data()
-        if not device:
-            return
-
-        residence_id = device.get("residenceId")
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"power": POWER_ON},
-        )
-        if result:
-            self._state = True
-            self.async_write_ha_state()
-            await asyncio.sleep(1)
-            await self.coordinator.async_request_refresh()
-        else:
-            _LOGGER.error("Failed to turn on Decora switch %s", self.name)
+        await self._async_send_command({"power": POWER_ON}, "turn on")
+        self._state = True
+        self.async_write_ha_state()
+        await asyncio.sleep(1)
+        await self.coordinator.async_request_refresh()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
-        device = self._get_device_data()
-        if not device:
-            return
-
-        residence_id = device.get("residenceId")
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"power": POWER_OFF},
-        )
-        if result:
-            self._state = False
-            self.async_write_ha_state()
-            await asyncio.sleep(1)
-            await self.coordinator.async_request_refresh()
-        else:
-            _LOGGER.error("Failed to turn off Decora switch %s", self.name)
+        await self._async_send_command({"power": POWER_OFF}, "turn off")
+        self._state = False
+        self.async_write_ha_state()
+        await asyncio.sleep(1)
+        await self.coordinator.async_request_refresh()
 
     @property
     def name_suffix(self) -> str | None:
@@ -397,35 +375,15 @@ class DecoraBuzzerSwitch(DecoraEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable the buzzer."""
-        device = self._get_device_data()
-        if not device:
-            return
-        residence_id = device.get("residenceId")
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"enableBuzzer": True},
-        )
-        if result:
-            self._state = True
-            self.async_write_ha_state()
+        await self._async_send_command({"enableBuzzer": True}, "turn on")
+        self._state = True
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable the buzzer."""
-        device = self._get_device_data()
-        if not device:
-            return
-        residence_id = device.get("residenceId")
-        result = await self.coordinator.hass.async_add_executor_job(
-            self.coordinator.service.set_iot_switch,
-            residence_id,
-            self._dev_id,
-            {"enableBuzzer": False},
-        )
-        if result:
-            self._state = False
-            self.async_write_ha_state()
+        await self._async_send_command({"enableBuzzer": False}, "turn off")
+        self._state = False
+        self.async_write_ha_state()
 
     @property
     def name_suffix(self) -> str | None:

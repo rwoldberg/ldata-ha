@@ -9,3 +9,6 @@ __pycache__/
 
 # Intellij IDEA stores project information in this directory
 .idea
+
+# Intermediate renders for the panel card artwork (see tools/panel_card_art)
+tools/panel_card_art/renders/

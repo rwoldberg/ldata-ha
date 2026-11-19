@@ -51,7 +51,7 @@ def _decora_device(*, installed: str = "1.7.3", available: str | None = "1.7.4")
         "name": "Test Switch",
         "model": "D215S",
         "manufacturer": "Leviton",
-        "mac": "00:07:a6:49:85:d6",
+        "mac": "00:00:5e:00:53:01",
         "version": installed,
         "available_firmware": available,
         "connected": True,

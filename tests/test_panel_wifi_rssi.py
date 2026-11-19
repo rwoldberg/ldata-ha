@@ -35,6 +35,7 @@ def _panel(rssi, panel_type="LDATA", connected=True) -> dict:
 def _sensor(panel: dict) -> tuple[LDATAPanelWifiRSSISensor, MagicMock]:
     coordinator = MagicMock()
     coordinator.user = "test-user"
+    coordinator.unique_id_prefix = "test-user"
     coordinator.last_update_success = True
     coordinator.data = {"panels": [panel]}
     coordinator.async_add_listener.return_value = MagicMock()
@@ -64,6 +65,7 @@ def _registry(existing: dict[str, str]) -> MagicMock:
 async def _setup(panel: dict, registry: MagicMock) -> list:
     coordinator = MagicMock()
     coordinator.user = "test-user"
+    coordinator.unique_id_prefix = "test-user"
     coordinator.data = {"panels": [panel]}
     coordinator.async_add_listener.return_value = MagicMock()
     config_entry = SimpleNamespace(

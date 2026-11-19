@@ -1,6 +1,7 @@
 """Defines a binary sensor for an LDATA entity."""
 
 import logging
+from typing import Any
 
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
@@ -8,13 +9,29 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DECORA_MODELS_GFCI, DOMAIN, ENABLE_DECORA, ENABLE_DECORA_DEFAULT, LOGGER_NAME
 from .decora_entity import DecoraEntity, add_entities_grouped_by_decora_room
-from .ldata_base_entity import add_entities_grouped_by_panel, find_panel, is_breaker_on
+from .ldata_base_entity import (
+    PanelOnlineMixin,
+    add_entities_grouped_by_panel,
+    find_panel,
+    is_breaker_on,
+)
 from .ldata_entity import LDATAEntity
+from .sub_panels import (
+    PANEL_SUB,
+    feed_ratings,
+    feeder_rating,
+    feeds_of,
+    main_breaker_ratings,
+    panel_device,
+    panel_types,
+    sub_panel_feeds,
+)
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -60,7 +77,7 @@ async def async_setup_entry(
         add_entities_grouped_by_decora_room(config_entry, async_add_entities, decora_entities)
 
 
-class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
+class LDATABinarySensor(PanelOnlineMixin, LDATAEntity, BinarySensorEntity):
     """LDATA binary sensor class."""
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -68,7 +85,6 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
     def __init__(self, coordinator, data) -> None:
         """Init LDATABinarySensor."""
         super().__init__(data=data, coordinator=coordinator)
-        self._attr_unique_id = f"{data['id']}_status"
         self.breaker_data = data
         # `data` is the same breaker dict entry the coordinator already holds
         # at construction time (see async_setup_entry) — use it directly
@@ -77,7 +93,6 @@ class LDATABinarySensor(LDATAEntity, BinarySensorEntity):
         # coordinator's cache between setup and entity construction.
         self._state = is_breaker_on(data)
         # Subscribe to updates.
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -149,7 +164,6 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         
         self._update_state() # Set initial state
         # Subscribe to updates.
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -202,13 +216,81 @@ class LdataCloudConnectedSensor(LDATAEntity, BinarySensorEntity):
         attributes["orientation"] = self.panel_data.get("orientation", 0)
         attributes["panel_size"] = self.panel_data.get("panel_size")
         attributes["dumb_breakers"] = self.panel_data.get("dumb_breakers", [])
+        attributes["sub_panels"], attributes["fed_from"] = self._feeds()
+        capacity, kind = self._load_capacity()
+        if capacity is not None:
+            attributes["load_capacity"] = capacity
+        attributes["panel_type"] = kind
         return attributes
+
+    def _load_capacity(self) -> tuple[float | None, str]:
+        """Return this panel's load capacity, if the user gave one, and its type.
+
+        Leviton reports neither; they are set in the integration's options
+        (see sub_panels.py). The capacity is a main panel's main breaker
+        rating, or the rating of what feeds a sub-panel. The type is "main",
+        "main_hidden" for a main panel whose main breaker isn't drawn, or
+        "sub", which a load center is until the user says otherwise. The
+        panel card reads them here, so the sidebar page and every dashboard
+        card without a load_capacity of its own show how much of that
+        capacity the load center uses, and draw a main panel's main breaker,
+        next to positions 1 and 2 whichever way up Leviton reports the panel.
+        """
+        entry = getattr(self.coordinator, "config_entry", None)
+        if entry is None:
+            return None, PANEL_SUB
+        panel_id = self.panel_data.get("id")
+        return (
+            main_breaker_ratings(entry.options).get(panel_id),
+            panel_types(entry.options).get(panel_id, PANEL_SUB),
+        )
+
+    def _feeds(self) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """Return this panel's breakers that feed another load center, and what feeds it.
+
+        Set by the user in the integration's options (see sub_panels.py). The
+        panel card reads both here, as it does dumb_breakers: the first to show
+        a sub-panel's load on the breaker that feeds it, the second, with the
+        feeding breaker's size, to show how much of that breaker a sub-panel
+        uses.
+
+        Runs on every update of this entity, so the options are read once and
+        nothing more is done when no sub-panel is set.
+        """
+        entry = getattr(self.coordinator, "config_entry", None)
+        if self.hass is None or entry is None:
+            return [], None
+        options = entry.options
+        feeds = sub_panel_feeds(options)
+        if not feeds:
+            return [], None
+        ratings = feed_ratings(options, feeds)
+        data = getattr(self.coordinator, "data", None)
+        dev_reg = dr.async_get(self.hass)
+        panel_id = self.panel_data.get("id")
+
+        def rated(link: dict[str, Any], sub_id: str) -> dict[str, Any]:
+            rating = feeder_rating(options, data, sub_id, feeds=feeds, ratings=ratings)
+            if rating is not None:
+                link["rating"] = rating
+            return link
+
+        linked = []
+        for position, sub_id in feeds_of(options, panel_id, feeds):
+            device = panel_device(dev_reg, entry, sub_id)
+            if device is not None:
+                linked.append(rated({"position": position, "device_id": device.id}, sub_id))
+        fed = None
+        feed = feeds.get(panel_id)
+        if feed is not None and (device := panel_device(dev_reg, entry, feed[0])) is not None:
+            fed = rated({"device_id": device.id, "position": feed[1]}, panel_id)
+        return linked, fed
 
 
 # ── Panel alarm sensors ──────────────────────────────────────────────
 
 
-class _PanelAlarmSensor(LDATAEntity, BinarySensorEntity):
+class _PanelAlarmSensor(PanelOnlineMixin, LDATAEntity, BinarySensorEntity):
     """Base for panel-level alarm binary sensors (over/under voltage).
 
     Subclasses set _data_key/_threshold_key/_name_suffix/_unique_id_suffix.
@@ -227,7 +309,6 @@ class _PanelAlarmSensor(LDATAEntity, BinarySensorEntity):
         self.panel_data = data
         self._state = data.get(self._data_key, False)
         self._threshold = data.get(self._threshold_key)
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):
@@ -287,7 +368,7 @@ class LDATAPanelUnderVoltageSensor(_PanelAlarmSensor):
 # ── Breaker alarm sensors ────────────────────────────────────────────
 
 
-class _BreakerAlarmSensor(LDATAEntity, BinarySensorEntity):
+class _BreakerAlarmSensor(PanelOnlineMixin, LDATAEntity, BinarySensorEntity):
     """Base for breaker-level current and voltage alarm binary sensors.
 
     Subclasses set _data_key/_name_suffix/_unique_id_suffix/_icon_off.
@@ -305,7 +386,6 @@ class _BreakerAlarmSensor(LDATAEntity, BinarySensorEntity):
         super().__init__(data=data, coordinator=coordinator)
         self.breaker_data = data
         self._state = data.get(self._data_key, False)
-        self.async_on_remove(self.coordinator.async_add_listener(self._state_update))
 
     @callback
     def _state_update(self):

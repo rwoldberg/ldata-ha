@@ -1,14 +1,12 @@
 """The LDATAService object."""
 
+import contextlib
 import logging
 import typing
 import time
 import socket
 import re
 import os
-
-_RE_HTML_TAGS = re.compile(r'<[^<]+?>')
-_RE_WHITESPACE = re.compile(r'\s+')
 import json
 import threading
 import requests
@@ -24,6 +22,7 @@ from .const import (
     ENABLE_DECORA_DEFAULT, LOGGER_NAME, THREE_PHASE, THREE_PHASE_DEFAULT,
     CT_BANDWIDTH_SETTLE_SECS, CT_FETCH_RETRY_DELAYS,
     PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD,
+    STATUS_LOCK_WAIT, STATUS_TIME_BUDGET,
     HW_COUNTER_DECREASE_TOLERANCE_KWH, HW_COUNTER_DEFAULT_RATING_A,
     HW_COUNTER_DEMOTE_EVIDENCE, HW_COUNTER_EVIDENCE_SPACING_S,
     HW_COUNTER_MIN_PLAUSIBLE_KWH,
@@ -109,6 +108,109 @@ defaultHeaders = {
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
+# The two panel types and where Leviton's API keeps them: an LDATA hub is a
+# ResidentialBreakerPanel, an LWHEM hub an IotWhem.
+_API = "https://my.leviton.com/api"
+_PANEL_TYPES = ("LDATA", "WHEMS")
+
+
+def _panel_url(panel_id: str, panel_type: str) -> str:
+    """Return the REST URL of one panel."""
+    collection = "ResidentialBreakerPanels" if panel_type == "LDATA" else "IotWhems"
+    return f"{_API}/{collection}/{panel_id}"
+
+
+def _panel_listing_url(residence_id, panel_type: str) -> str:
+    """Return the REST URL listing a residence's panels of one type."""
+    listing = "residentialBreakerPanels" if panel_type == "LDATA" else "iotWhems"
+    return f"{_API}/Residences/{residence_id}/{listing}"
+
+
+class _DeadlineSession(requests.Session):
+    """A requests.Session whose requests can share one deadline per thread.
+
+    status() makes many requests in one executor job. Each has its own
+    timeout, but together they could outlast the time the coordinator waits
+    for the job, and an executor job that times out keeps running in its
+    thread. Inside deadline() every request's timeout is cut to the time
+    left, and once it has passed requests fail at once, so status() ends
+    within its budget. The deadline is per thread: the REST polls running
+    in other threads share this session and are not affected.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._local = threading.local()
+
+    @contextlib.contextmanager
+    def deadline(self, seconds: float):
+        """Give the requests this thread makes inside the block `seconds` in all."""
+        self._local.at = time.monotonic() + seconds
+        try:
+            yield
+        finally:
+            self._local.at = None
+
+    def time_left(self) -> float | None:
+        """Return the seconds left before this thread's deadline, or None without one."""
+        at = getattr(self._local, "at", None)
+        return None if at is None else at - time.monotonic()
+
+    def request(self, method, url, *args, **kwargs):
+        left = self.time_left()
+        if left is not None:
+            if left <= 0:
+                raise requests.exceptions.Timeout("Out of time for this status refresh")
+            timeout = kwargs.get("timeout")
+            if timeout is None or timeout > left:
+                kwargs["timeout"] = left
+        return super().request(method, url, *args, **kwargs)
+# Debug logs end up pasted into public GitHub issues, so nothing logged here
+# may carry a response body, the account's email, or a user, account or
+# residence id. Leviton's URLs carry those ids in their paths
+# (/api/Person/<user id>/..., /api/Residences/<residence id>/...), and
+# requests and urllib3 put the URL into their error text.
+_RE_URL = re.compile(r"https?://\S+|\burl: \S+")
+# The error code in a Leviton (LoopBack) error body, e.g. LOGIN_FAILED or
+# MODEL_NOT_FOUND. A fixed token, unlike the free-text message beside it.
+_RE_ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
+
+
+def _safe_error(ex: BaseException) -> str:
+    """Describe an exception for the log, with any URL in its text cut out."""
+    return f"{type(ex).__name__}: {_RE_URL.sub('<url>', str(ex))}"
+
+
+def _endpoint(url: str) -> str:
+    """Name a Leviton API endpoint for the log, e.g. Residences/<id>/iotWhems.
+
+    Leviton paths alternate collection names and ids, so every second
+    segment is an id and is left out.
+    """
+    path = url.split("/api/", 1)[-1].split("?", 1)[0]
+    return "/".join(
+        part if i % 2 == 0 else "<id>" for i, part in enumerate(path.split("/"))
+    )
+
+
+def _response_summary(result) -> str:
+    """Describe an HTTP response for the log by status, reason and error code.
+
+    Never the body: an error body can echo what was sent (a failed login
+    names the email), and a listing holds residences and device ids.
+    """
+    summary = f"HTTP {result.status_code}"
+    reason = getattr(result, "reason", None)
+    if isinstance(reason, str) and reason:
+        summary += f" {reason}"
+    try:
+        code = (result.json().get("error") or {}).get("code")
+    except Exception:  # pylint: disable=broad-except - not a JSON error object
+        code = None
+    if isinstance(code, str) and _RE_ERROR_CODE.match(code):
+        summary += f" ({code})"
+    return summary
+
 
 def _panel_firmware_versions(panel: dict) -> tuple[str, str | None]:
     """Return running and available firmware across both panel schemas.
@@ -127,6 +229,82 @@ def _panel_firmware_versions(panel: dict) -> tuple[str, str | None]:
     ):
         available = panel.get("updateVersion")
     return installed, available or None
+
+
+# The firmware a breaker runs as separate images, each with the version
+# installed and the one Leviton has downloaded to the panel for it. Names and
+# order (most important first) are the ones the My Leviton app uses.
+_BREAKER_FIRMWARE_IMAGES = (
+    ("BLE", "firmwareVersionBLE", "downloadedBLE"),
+    ("GFCI", "firmwareVersionGFCI", "downloadedGFCI"),
+    ("AFCI", "firmwareVersionAFCI", "downloadedAFCI"),
+    ("SiLabs", "firmwareVersionSiLabs", "downloadedSiLabs"),
+    ("TreeTable", "firmwareVersionTreeTable", "downloadedTreeTable"),
+)
+# Every breaker field the firmware check reads; kept as received so a partial
+# WebSocket frame can be merged into what is already known.
+BREAKER_FIRMWARE_FIELDS = (
+    "updateAvailability",
+    "updateVersion",
+    *(key for _name, installed, downloaded in _BREAKER_FIRMWARE_IMAGES for key in (installed, downloaded)),
+)
+# "FWC2422000100": the app compares the last three digits, the build.
+_BREAKER_FIRMWARE_BUILD = re.compile(r"^D?T?FW[A-Z]\d+(\d{3})$")
+
+
+def _breaker_firmware_build(version: typing.Any) -> int | None:
+    match = _BREAKER_FIRMWARE_BUILD.match(str(version or ""))
+    return int(match.group(1)) if match else None
+
+
+def _breaker_firmware_versions(
+    fields: dict, *, ldata: bool, firmware: str | None
+) -> tuple[str | None, str | None, str | None]:
+    """Return a breaker's installed and available firmware, and what changes.
+
+    Installed is always the breaker's main (meter) firmware, the version its
+    device page shows, so it doesn't change with what is waiting. Available is
+    the new version Leviton has for it, found with the My Leviton app's rules:
+    a breaker on an LDATA hub has an update when updateAvailability says
+    UPDATE_AVAILABLE, to updateVersion. A breaker on an LWHEM has one when the
+    panel has downloaded a newer build of any of its firmware images than the
+    breaker runs (updateAvailability stays UP_TO_DATE there); the first in the
+    app's order gives the version, and the third value names each image that
+    would change, old and new.
+    """
+    if ldata:
+        running = fields.get("firmwareVersionSiLabs") or None
+        installed = firmware or running
+        available = fields.get("updateVersion") or None
+        if fields.get("updateAvailability") != "UPDATE_AVAILABLE" or available in (running, installed):
+            available = None
+        return installed, available, None
+
+    pending = []
+    for name, installed_key, downloaded_key in _BREAKER_FIRMWARE_IMAGES:
+        running = _breaker_firmware_build(fields.get(installed_key))
+        staged = _breaker_firmware_build(fields.get(downloaded_key))
+        if running is not None and staged is not None and running < staged:
+            pending.append((name, fields[installed_key], fields[downloaded_key]))
+    if not pending:
+        return firmware or None, None, None
+    _name, running, available = pending[0]
+    summary = ", ".join(f"{name} {old} → {new}" for name, old, new in pending)
+    return firmware or running, available, summary
+
+
+def _apply_breaker_firmware(breaker: dict, raw: dict) -> None:
+    """Merge a raw record's firmware fields into a breaker and re-check it."""
+    fields = dict(breaker.get("firmware_fields") or {})
+    fields.update({key: raw[key] for key in BREAKER_FIRMWARE_FIELDS if key in raw})
+    breaker["firmware_fields"] = fields
+    (
+        breaker["installed_firmware"],
+        breaker["available_firmware"],
+        breaker["firmware_update_summary"],
+    ) = _breaker_firmware_versions(
+        fields, ldata=breaker.get("panel_type") == "LDATA", firmware=breaker.get("firmware")
+    )
 
 
 class TwoFactorRequired(Exception):
@@ -174,7 +352,7 @@ class LDATAService:
         self.userid = entry.data.get("userid", "") if entry else ""
         self.account_id = ""
         self.residence_id_list = []  # type: list[str]
-        self.session = requests.Session()
+        self.session = _DeadlineSession()
         self.session.headers.update(defaultHeaders)
         
         # Lock to serialize REST poll operations. The breaker poll and CT poll
@@ -188,6 +366,11 @@ class LDATAService:
         self._panel_status_poll_warned = False
         # Cache for the latest status data to support WebSocket updates
         self.status_data = None
+        # time.monotonic() at which a WebSocket notification last set each
+        # raw field of a breaker, CT or panel, keyed by ("breaker" | "ct" |
+        # "panel", id). The REST poll merges skip the fields the WebSocket
+        # set after their request went out (see _rest_fields_not_superseded).
+        self._ws_field_times: dict[tuple[str, str], dict[str, float]] = {}
         # Sources whose fetch failed during the current status() call.
         self._incomplete_fetches: set[str] = set()
         # True when the residence_id_list in use came from a legacy discovery
@@ -253,11 +436,6 @@ class LDATAService:
         # (Wh), to split an hour of the energy history over the legs and an
         # hour claimed by a lifetime counter at the counter.
         self._ldata_leg_energy: dict[str, dict] = {}
-        # Track how many IotWhem WS messages we've seen per panel without breaker data
-        self._ws_iotwhem_count: dict[str, int] = {}
-        # Detection threshold (still used for logging, but no longer triggers breaker REST poll)
-        _WS_DETECTION_THRESHOLD = 5
-        self._WS_DETECTION_THRESHOLD = _WS_DETECTION_THRESHOLD
 
         # ── Unified zero-transition protection ────────────────────────
         # On V2 firmware the cloud sporadically sends zero power *and/or*
@@ -302,7 +480,9 @@ class LDATAService:
     def _check_rate_limit(self) -> None:
         """Enforces a 10-second wait between login attempts."""
         with LDATAService._login_rate_limit_lock:
-            current_time = time.time()
+            # Monotonic: a wall clock set back would otherwise make this
+            # wait as long as the clock moved, with the lock held.
+            current_time = time.monotonic()
 
             time_since_last_attempt = current_time - LDATAService._last_login_attempt_time
 
@@ -312,7 +492,14 @@ class LDATAService:
                 # This is running in an executor job, so time.sleep is OK.
                 time.sleep(wait_time)
 
-            LDATAService._last_login_attempt_time = time.time()
+            LDATAService._last_login_attempt_time = time.monotonic()
+
+    def _pause(self, seconds: float) -> None:
+        """time.sleep(), cut short at this thread's status() deadline if it has one."""
+        left = (
+            self.session.time_left() if isinstance(self.session, _DeadlineSession) else None
+        )
+        time.sleep(seconds if left is None else max(0.0, min(seconds, left)))
 
     def _test_internet_connectivity(self) -> str:
         """Return 'ACTIVE' if google.com is resolvable, 'DOWN' otherwise.
@@ -326,21 +513,6 @@ class LDATAService:
             return "ACTIVE"
         except socket.error:
             return "DOWN"
-
-    def _get_clean_error_msg(self, response_text: str) -> str:
-        """Helper to strip HTML and deduplicate common gateway errors."""
-        # Strip HTML tags
-        msg = _RE_HTML_TAGS.sub('', response_text)
-        # Collapse multiple spaces into one
-        msg = _RE_WHITESPACE.sub(' ', msg).strip()
-        
-        # Deduplicate common Nginx/Gateway error strings that appear twice
-        if "502 Bad Gateway" in msg:
-            return "502 Bad Gateway"
-        if "504 Gateway Time-out" in msg:
-            return "504 Gateway Time-out"
-            
-        return msg
 
     def clear_tokens(self) -> None:
         """Clear the tokens to force a re-login."""
@@ -381,8 +553,6 @@ class LDATAService:
 
         # Treat both 401 and 406 as potential auth failures
         if result.status_code == 401 or result.status_code == 406:
-            clean_msg = self._get_clean_error_msg(result.text)
-
             if "InsufficientData:Personusestwofactorauthentication.Requirescode." in result.text:
                 # NOT a failure — this is Leviton's normal signal that the
                 # account has 2FA enabled and a code is needed next, on the
@@ -397,7 +567,7 @@ class LDATAService:
                 raise TwoFactorRequired
             else:
                 _LOGGER.warning(
-                    f"[v{self.version}] Authentication failed (HTTP {result.status_code}): {clean_msg}"
+                    f"[v{self.version}] Authentication failed ({_response_summary(result)})"
                 )
                 raise LDATAAuthError(f"[v{self.version}] Invalid username or password")
 
@@ -438,8 +608,7 @@ class LDATAService:
             return True
         
         # Failed 2FA
-        clean_msg = self._get_clean_error_msg(result.text)
-        _LOGGER.warning(f"[v{self.version}] 2FA completion failed (HTTP {result.status_code}). Response: {clean_msg}")
+        _LOGGER.warning(f"[v{self.version}] 2FA completion failed ({_response_summary(result)})")
         raise LDATAAuthError(f"[v{self.version}] Invalid 2FA code")
 
     def refresh_auth(self) -> bool:
@@ -486,7 +655,7 @@ class LDATAService:
                         f"[v{self.version}] Token check failed (Attempt {attempts}/{max_attempts}) with status {result.status_code}. Waiting..."
                     )
                     if attempts < max_attempts:
-                        time.sleep(5) # Wait 5 seconds before retrying
+                        self._pause(5) # Wait 5 seconds before retrying
                         continue # Try again
                     else:
                         # STRIKE 3: The token is truly dead.
@@ -496,35 +665,34 @@ class LDATAService:
                 
                 # Handle Server Errors (500, 502, 503, etc)
                 else:
-                    clean_msg = self._get_clean_error_msg(result.text)
                     _LOGGER.warning(
-                        f"[v{self.version}] Server error during token check (Attempt {attempts}/{max_attempts}): {result.status_code} {result.reason} - {clean_msg}. Waiting..."
+                        f"[v{self.version}] Server error during token check (Attempt {attempts}/{max_attempts}): {_response_summary(result)}. Waiting..."
                     )
                     if attempts < max_attempts:
-                        time.sleep(5)
+                        self._pause(5)
                         continue
                     else:
                         raise requests.exceptions.RequestException(f"Server error: {result.status_code} {result.reason}")
 
             except requests.exceptions.RequestException as ex:
                 # Handle Network Errors (DNS, Timeout, etc)
-                msg = str(ex)
-                if hasattr(ex, "response") and ex.response is not None:
-                     clean_msg = self._get_clean_error_msg(ex.response.text)
-                     msg = f"{ex.response.status_code} {ex.response.reason} - {clean_msg}"
+                if getattr(ex, "response", None) is not None:
+                    msg = _response_summary(ex.response)
+                else:
+                    msg = _safe_error(ex)
 
                 _LOGGER.warning(
                     f"[v{self.version}] Network error during token check (Attempt {attempts}/{max_attempts}): {msg}. Waiting..."
                 )
                 if attempts < max_attempts:
-                    time.sleep(5)
+                    self._pause(5)
                     continue
                 else:
                     raise
             except Exception as ex:
-                _LOGGER.error(f"[v{self.version}] Unexpected error during token check: {ex}")
+                _LOGGER.error(f"[v{self.version}] Unexpected error during token check: {_safe_error(ex)}")
                 self.clear_tokens()
-                raise LDATAAuthError(f"[v{self.version}] Token validation error: {ex}") from ex
+                raise LDATAAuthError(f"[v{self.version}] Token validation error: {_safe_error(ex)}") from ex
         
         return False
 
@@ -554,7 +722,7 @@ class LDATAService:
         except requests.exceptions.ConnectionError as ex:
             if isinstance(ex, requests.exceptions.Timeout):
                 raise
-            _LOGGER.debug(f"[v{self.version}] REST GET failed on a dropped connection ({ex}); retrying on a new connection")
+            _LOGGER.debug(f"[v{self.version}] REST GET failed on a dropped connection ({_safe_error(ex)}); retrying on a new connection")
             return self.session.get(url, **kwargs)
 
     def _residence_api_get(self, url: str, context_str: str, clear_tokens_on_failure: bool = False):
@@ -568,7 +736,7 @@ class LDATAService:
         self._residence_api_last_failed = True
         try:
             result = self.session.get(url, headers=headers, timeout=15)
-            _LOGGER.debug(f"[v{self.version}] Get {context_str} result {result.status_code}: {result.text}")
+            _LOGGER.debug(f"[v{self.version}] Get {context_str}: HTTP {result.status_code}")
 
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(
@@ -590,7 +758,7 @@ class LDATAService:
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting {context_str}!")
+            _LOGGER.error(f"[v{self.version}] Exception while getting {context_str}: {_safe_error(e)}")
             if clear_tokens_on_failure:
                 self.clear_tokens()
 
@@ -611,9 +779,11 @@ class LDATAService:
         for item in result_json:
             if "residentialAccountId" in item:
                 self.account_id = item["residentialAccountId"]
-                if self.account_id is not None:
+                if self.account_id:
                     break
-        if self.account_id is not None:
+        # account_id starts out "", so "is not None" took a list that names
+        # no account as having one.
+        if self.account_id:
             # Save the userId if we just got it
             if "userId" in result_json[0]:
                 self.userid = result_json[0]["userId"]
@@ -763,17 +933,16 @@ class LDATAService:
                         sw["_residenceId"] = residenceId
                     all_switches.extend(switches)
                 else:
-                    clean_msg = self._get_clean_error_msg(result.text)
                     _LOGGER.warning(
-                        f"[v{self.version}] Failed to get iotSwitches for residence {residenceId} "
-                        f"(HTTP {result.status_code}): {clean_msg}"
+                        f"[v{self.version}] Failed to get iotSwitches for a residence "
+                        f"({_response_summary(result)})"
                     )
                     self._incomplete_fetches.add(self.FETCH_DECORA)
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
                 _LOGGER.warning(
-                    f"[v{self.version}] Exception getting iotSwitches for residence {residenceId}: {e}"
+                    f"[v{self.version}] Exception getting iotSwitches for a residence: {_safe_error(e)}"
                 )
                 self._incomplete_fetches.add(self.FETCH_DECORA)
         return all_switches if all_switches else None
@@ -797,7 +966,7 @@ class LDATAService:
                     )
                 else:
                     _LOGGER.debug(
-                        f"[v{self.version}] Could not fetch iotBridges for residence {residenceId} "
+                        f"[v{self.version}] Could not fetch iotBridges for a residence "
                         f"(HTTP {result.status_code})"
                     )
                     self._incomplete_fetches.add(self.FETCH_DECORA)
@@ -805,7 +974,7 @@ class LDATAService:
                 if isinstance(e, LDATAAuthError):
                     raise
                 _LOGGER.debug(
-                    f"[v{self.version}] Could not fetch iotBridges for residence {residenceId}: {e}"
+                    f"[v{self.version}] Could not fetch iotBridges for a residence: {_safe_error(e)}"
                 )
                 self._incomplete_fetches.add(self.FETCH_DECORA)
         return all_bridges
@@ -829,7 +998,7 @@ class LDATAService:
                 if isinstance(e, LDATAAuthError):
                     raise
                 _LOGGER.debug(
-                    f"[v{self.version}] Could not fetch rooms for residence {residenceId}: {e}"
+                    f"[v{self.version}] Could not fetch rooms for a residence: {_safe_error(e)}"
                 )
         return rooms
 
@@ -854,7 +1023,7 @@ class LDATAService:
             dev_id = sw["id"]
             devices[dev_id] = {
                 "id": dev_id,
-                "name": sw.get("name", f"Decora {dev_id}"),
+                "name": sw.get("name") or f"Decora {dev_id}",
                 "model": model,
                 "manufacturer": sw.get("manufacturer", "Leviton"),
                 "serial": sw.get("serial"),
@@ -907,7 +1076,7 @@ class LDATAService:
             devices[f"bridge_{dev_id}"] = {
                 "id": f"bridge_{dev_id}",
                 "device_type": DEVICE_TYPE_BRIDGE,
-                "name": b.get("name", f"Wi-Fi Bridge {dev_id}"),
+                "name": b.get("name") or f"Wi-Fi Bridge {dev_id}",
                 "model": "MLWSB",
                 "manufacturer": "Leviton",
                 "serial": b.get("serial"),
@@ -953,24 +1122,21 @@ class LDATAService:
                 headers=headers,
                 timeout=15,
             )
-            _LOGGER.debug(
-                f"[v{self.version}] Get WHEMS {label} result {result.status_code}: {result.text}"
-            )
+            _LOGGER.debug(f"[v{self.version}] Get WHEMS {label}: HTTP {result.status_code}")
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid during API call get_Whems_{label}. Status code: {result.status_code}")
 
             if result.status_code == 200:
                 return result.json()
 
-            clean_msg = self._get_clean_error_msg(result.text)
             if result.status_code >= 500:
-                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} for {label} — will retry next cycle ({clean_msg})")
+                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {_response_summary(result)} for {label} — will retry next cycle")
             else:
-                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS {label}! HTTP {result.status_code}: {clean_msg}")
+                _LOGGER.error(f"[v{self.version}] Unable to get WHEMS {label}! {_response_summary(result)}")
         except Exception as e:  # pylint: disable=broad-except
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception(f"[v{self.version}] Exception while getting WHEMS {label}!")
+            _LOGGER.error(f"[v{self.version}] Exception while getting WHEMS {label}: {_safe_error(e)}")
         self._incomplete_fetches.add(self.FETCH_PANELS)
         return None
 
@@ -982,8 +1148,12 @@ class LDATAService:
         """Get the whemns CTs for the panel module."""
         return self._get_whems_resource(panel_id, "iotCts", "CTs")
 
-    def _fetch_panels(self, url_template: str, panel_type: str) -> object:
-        """Helper to fetch panels of a specific type (LDATA or WHEMS)."""
+    def _fetch_panels(self, panel_type: str, toggle_bandwidth: bool = True) -> object:
+        """Helper to fetch panels of a specific type (LDATA or WHEMS).
+
+        toggle_bandwidth: force each connected panel to push fresh values
+        first (see status()).
+        """
         allPanels = None
         for residenceId in self.residence_id_list:
             headers = self._auth_headers()
@@ -994,7 +1164,7 @@ class LDATAService:
             else:
                 headers["filter"] = "{}"
 
-            url = url_template.format(residenceId=residenceId)
+            url = _panel_listing_url(residenceId, panel_type)
             
             try:
                 result = self.session.get(
@@ -1008,26 +1178,25 @@ class LDATAService:
                 
                 if result.status_code in (403, 406):
                      _LOGGER.warning(
-                        f"[v{self.version}] Access forbidden or not acceptable (HTTP {result.status_code}) when getting {panel_type} panels for residence {residenceId}. "
+                        f"[v{self.version}] Access forbidden or not acceptable (HTTP {result.status_code}) when getting {panel_type} panels for a residence. "
                         "This may be a permission issue. Skipping."
                     )
                      self._incomplete_fetches.add(self.FETCH_PANELS)
                      continue 
 
                 if result.status_code == 200:
-                    _LOGGER.debug(
-                        f"[v{self.version}] Get {panel_type} Panels result {result.status_code}: {result.text}"
-                    )
-                    
                     try:
                         returnPanels = result.json()
                     except json.JSONDecodeError:
                         _LOGGER.warning(
-                            f"[v{self.version}] API returned invalid JSON for {panel_type} panels despite 200 OK. Response starts with: {result.text[:100]}..."
+                            f"[v{self.version}] API returned invalid JSON for {panel_type} panels despite 200 OK."
                         )
                         self._incomplete_fetches.add(self.FETCH_PANELS)
                         continue # Skip this residence/attempt and try the next one
-                        
+                    _LOGGER.debug(
+                        f"[v{self.version}] Get {panel_type} panels: HTTP 200, {len(returnPanels)} panel(s)"
+                    )
+
                     for panel in returnPanels:
                         panel["ModuleType"] = panel_type
 
@@ -1056,14 +1225,14 @@ class LDATAService:
 
                         # Only force an update if the panel is actually online.
                         # This avoids wasting API calls on offline devices, saving cost/load.
-                        if is_connected:
+                        if is_connected and toggle_bandwidth:
                             try:
                                 # Full 1→0→1 bandwidth toggle forces the panel to push
                                 # fresh data to the cloud.  A single bandwidth:1 PUT is
                                 # often too fast — the cloud returns stale cached values.
                                 self._bandwidth_toggle(panel["id"], panel.get("ModuleType", "WHEMS"))
                             except requests.exceptions.RequestException as e:
-                               _LOGGER.warning(f"[v{self.version}] Failed to request update from panel {panel.get('name', panel['id'])}: {e}")
+                               _LOGGER.warning(f"[v{self.version}] Failed to request update from panel {panel.get('name', panel['id'])}: {_safe_error(e)}")
                             except LDATAAuthError as e:
                                 _LOGGER.warning(f"[v{self.version}] Auth failed during panel update for {panel.get('name', panel['id'])}: {e}")
                                 raise
@@ -1072,21 +1241,25 @@ class LDATAService:
                         
                         # Apply WHEMS specific mapping
                         if panel_type == "WHEMS":
+                            # A disconnected panel can be listed without its
+                            # voltages and firmware version. It is kept, with
+                            # those unknown, rather than skipped: nothing
+                            # lists panels again after setup, so a panel left
+                            # out here stayed missing until a reload. Once it
+                            # connects, its WebSocket notifications fill them in.
                             if "rmsVoltageA" not in panel or "rmsVoltageB" not in panel or "version" not in panel:
                                 _LOGGER.warning(
                                     f"[v{self.version}] Panel '{panel.get('name', panel.get('id', '?'))}' "
                                     f"WHEMS response is missing rmsVoltageA/rmsVoltageB/version "
-                                    f"(e.g. a disconnected panel) — skipping this panel for this poll cycle."
+                                    f"(e.g. a disconnected panel) — adding it with those unknown."
                                 )
-                                self._incomplete_fetches.add(self.FETCH_PANELS)
-                                continue
-                            panel["rmsVoltage"] = panel["rmsVoltageA"]
-                            panel["rmsVoltage2"] = panel["rmsVoltageB"]
-                            panel["updateVersion"] = panel["version"]
+                            panel["rmsVoltage"] = panel.get("rmsVoltageA")
+                            panel["rmsVoltage2"] = panel.get("rmsVoltageB")
+                            panel["updateVersion"] = panel.get("version")
                             # Brief delay after toggle to let the cloud receive
                             # fresh values from the panel hardware before we fetch.
-                            if is_connected:
-                                time.sleep(2)
+                            if is_connected and toggle_bandwidth:
+                                self._pause(2)
                             panel["residentialBreakers"] = self.get_Whems_breakers(panel["id"])
                             panel["CTs"] = self.get_Whems_CT(panel["id"])
 
@@ -1095,16 +1268,15 @@ class LDATAService:
                         allPanels.append(panel)
                 
                 else:
-                    clean_msg = self._get_clean_error_msg(result.text)
-                    _LOGGER.warning(f"[v{self.version}] Failed to get {panel_type} panels (HTTP {result.status_code}): {clean_msg}")
+                    _LOGGER.warning(f"[v{self.version}] Failed to get {panel_type} panels ({_response_summary(result)})")
                     self._incomplete_fetches.add(self.FETCH_PANELS)
 
             except Exception as e:
                 if isinstance(e, LDATAAuthError):
                     raise
-                
+
                 # STOP! Do not clear tokens for generic errors.
-                _LOGGER.exception(f"[v{self.version}] Exception while getting {panel_type} Panels! Ignoring.")
+                _LOGGER.error(f"[v{self.version}] Exception while getting {panel_type} panels, ignoring: {_safe_error(e)}")
                 self._incomplete_fetches.add(self.FETCH_PANELS)
         
         return allPanels
@@ -1120,16 +1292,16 @@ class LDATAService:
         try:
             result = self.session.get(url, headers=self._auth_headers(**headers), timeout=15)
             if result.status_code != 200:
-                _LOGGER.debug(f"[v{self.version}] Device inventory: {url} returned HTTP {result.status_code}")
+                _LOGGER.debug(f"[v{self.version}] Device inventory: {_endpoint(url)} returned HTTP {result.status_code}")
                 return None
             payload = result.json()
         except (requests.exceptions.RequestException, ValueError) as e:
             # ValueError covers invalid JSON (json and requests both raise
             # a ValueError subclass).
-            _LOGGER.debug(f"[v{self.version}] Device inventory: {url} failed: {e}")
+            _LOGGER.debug(f"[v{self.version}] Device inventory: {_endpoint(url)} failed: {_safe_error(e)}")
             return None
         if not isinstance(payload, expect):
-            _LOGGER.debug(f"[v{self.version}] Device inventory: {url} did not return a {expect.__name__}")
+            _LOGGER.debug(f"[v{self.version}] Device inventory: {_endpoint(url)} did not return a {expect.__name__}")
             return None
         return payload
 
@@ -1167,18 +1339,17 @@ class LDATAService:
 
         Reads the same listings as get_ldata_panels()/get_iotWhemsPanels(),
         but without the bandwidth toggle (which knocks the panel off the
-        cloud for 10-20 s) and without skipping WHEMS panels that lack
-        voltage fields: a panel the listing returns exists, whatever its
+        cloud for 10-20 s): a panel the listing returns exists, whatever its
         live readings. Breakers and CTs are filtered as in parse_panels().
         Returns False if any listing could not be read.
         """
         base = "https://my.leviton.com/api"
         for residence_id in residence_ids:
             ldata = self._inventory_get(
-                f"{base}/Residences/{residence_id}/residentialBreakerPanels",
+                _panel_listing_url(residence_id, "LDATA"),
                 filter='{"include":["residentialBreakers"]}',
             )
-            whems = self._inventory_get(f"{base}/Residences/{residence_id}/iotWhems", filter="{}")
+            whems = self._inventory_get(_panel_listing_url(residence_id, "WHEMS"), filter="{}")
             if ldata is None or whems is None:
                 return False
             panels = [(panel, panel.get("residentialBreakers"), None) for panel in ldata]
@@ -1271,13 +1442,13 @@ class LDATAService:
             failed.add(self.FETCH_DECORA)
         return inventory, failed
 
-    def get_iotWhemsPanels(self) -> object:
+    def get_iotWhemsPanels(self, toggle_bandwidth: bool = True) -> object:
         """Get the whemns modules for all the residences the user has access to."""
-        return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/iotWhems", "WHEMS")
+        return self._fetch_panels("WHEMS", toggle_bandwidth)
 
-    def get_ldata_panels(self) -> object:
+    def get_ldata_panels(self, toggle_bandwidth: bool = True) -> object:
         """Get the ldata modules for all the residences the user has access to."""
-        return self._fetch_panels("https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels", "LDATA")
+        return self._fetch_panels("LDATA", toggle_bandwidth)
 
     def _put_request(self, url: str, json_data: dict, context_str: str, referer: str = None, method: str = "PUT") -> object:
         """Helper to handle PUT/PATCH requests with standardized error handling."""
@@ -1298,31 +1469,17 @@ class LDATAService:
             if result.status_code in (401, 403, 406):
                 raise LDATAAuthError(f"[v{self.version}] Auth token invalid (HTTP {result.status_code}) during {context_str}")
 
-            clean_msg = self._get_clean_error_msg(result.text)
             if result.status_code >= 500:
-                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {result.status_code} during {context_str} — will retry ({clean_msg})")
+                _LOGGER.warning(f"[v{self.version}] Leviton cloud returned {_response_summary(result)} during {context_str} — will retry")
             else:
-                _LOGGER.error(f"[v{self.version}] Failed to execute {context_str}! HTTP {result.status_code}: {clean_msg}")
-        
+                _LOGGER.error(f"[v{self.version}] Failed to execute {context_str}! {_response_summary(result)}")
+
         except Exception as e:
             if isinstance(e, LDATAAuthError):
                 raise
-            _LOGGER.exception(f"[v{self.version}] Exception during {context_str}: {e}")
+            _LOGGER.error(f"[v{self.version}] Exception during {context_str}: {_safe_error(e)}")
         
         return None
-
-    def put_residential_breaker_panels(self, panel_id: str, panel_type: str) -> None:
-        """Force an update of the power values via a bandwidth PATCH.
-
-        v1.66.0 HAR confirms the official app switched this endpoint from PUT
-        to PATCH (same {"bandwidth": 1} body); PUT no longer appears in traffic.
-        """
-        if panel_type == "LDATA":
-            url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-        else:
-            url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-
-        self._put_request(url, {"bandwidth": 1}, "put_residential_breaker_panels", method="PATCH")
 
     def remote_off(self, breaker_id):
         """Turn off a breaker."""
@@ -1349,9 +1506,11 @@ class LDATAService:
     def _is_panel_connected(self, panel: dict) -> bool:
         """Return whether a panel should be treated as connected.
 
-        DAU models report status="READY" instead of connected=True.
+        DAU models report status="READY" instead of connected=True. A hub that
+        is "SYNCHRONIZING" is online too; Leviton's app only shows NOT_READY
+        as disconnected.
         """
-        if panel.get("model") == "DAU" and panel.get("status") == "READY":
+        if panel.get("model") == "DAU" and panel.get("status") in ("READY", "SYNCHRONIZING"):
             return True
         return bool(panel.get("connected", False))
 
@@ -1720,6 +1879,8 @@ class LDATAService:
         # Diagnostic/alarm fields (arrive via WS status-only messages)
         if "operationalState" in raw:
             existing["operationalState"] = raw["operationalState"]
+        if "operationalState2" in raw:
+            existing["operationalState2"] = raw["operationalState2"]
         if "overCurrent" in raw:
             existing["overCurrent"] = raw["overCurrent"]
         if "overVoltage" in raw:
@@ -1749,7 +1910,9 @@ class LDATAService:
         for raw_key, cached_key in metadata_fields.items():
             if raw.get(raw_key) is not None:
                 existing[cached_key] = raw[raw_key]
-        
+        if "firmwareVersionMeter" in raw or any(key in raw for key in BREAKER_FIRMWARE_FIELDS):
+            _apply_breaker_firmware(existing, raw)
+
         # Capture energy counters (hardware-measured, not yet exposed as sensors)
         if "energyConsumption" in raw or "energyConsumption2" in raw:
             cached_ec1 = existing.get("consumption1", 0)
@@ -2068,8 +2231,35 @@ class LDATAService:
                     pass
         status_data[panel_id + "totalPower"] = total
 
-    def status(self):
-        """Get the breakers from the API."""
+    def status(self, toggle_bandwidth: bool = True):
+        """Get the breakers from the API.
+
+        toggle_bandwidth: run each connected panel's bandwidth toggle before
+        reading it, so it pushes fresh values (setup). A refresh while the
+        WebSocket is down passes False: it only needs the current values,
+        and the toggle knocks a panel off the cloud for 10-20 s on firmware
+        2.1.
+
+        Takes _rest_poll_lock, like the REST polls, so its requests and
+        toggles can't land inside a poll's bandwidth toggle, and runs within
+        STATUS_TIME_BUDGET once it has the lock (see _DeadlineSession), so it
+        always ends before the coordinator's STATUS_TIMEOUT.
+        """
+        if not self._rest_poll_lock.acquire(timeout=STATUS_LOCK_WAIT):
+            raise LDATAConnectionError("A REST poll is still running; status refresh skipped")
+        try:
+            deadline = (
+                self.session.deadline(STATUS_TIME_BUDGET)
+                if isinstance(self.session, _DeadlineSession)
+                else contextlib.nullcontext()
+            )
+            with deadline:
+                return self._status(toggle_bandwidth)
+        finally:
+            self._rest_poll_lock.release()
+
+    def _status(self, toggle_bandwidth: bool):
+        """Inner implementation of status(), called under _rest_poll_lock."""
         try:
             # First, try to validate our existing token
             if not self.refresh_auth():
@@ -2118,17 +2308,17 @@ class LDATAService:
              # This is a network/DNS error, raise it for UpdateFailed
             
             # Extract response details if the exception wraps a response
-            msg = str(ex)
-            if hasattr(ex, "response") and ex.response is not None:
-                 clean_msg = self._get_clean_error_msg(ex.response.text)
-                 msg = f"{ex.response.status_code} {ex.response.reason} - {clean_msg}"
-            
+            if getattr(ex, "response", None) is not None:
+                msg = _response_summary(ex.response)
+            else:
+                msg = _safe_error(ex)
+
             _LOGGER.warning(f"[v{self.version}] Network error in status(): {msg}")
             raise
         except Exception as ex:
-            _LOGGER.error(f"[v{self.version}] Unknown error during auth: {ex}")
+            _LOGGER.error(f"[v{self.version}] Unknown error during auth: {_safe_error(ex)}")
             # Wrap unknown error
-            raise Exception(f"Unknown error during auth: {ex}") from ex
+            raise Exception(f"Unknown error during auth: {_safe_error(ex)}") from ex
 
         if self.auth_token is None or self.auth_token == "":
             _LOGGER.error(f"[v{self.version}] Still no auth token after all attempts.")
@@ -2151,11 +2341,12 @@ class LDATAService:
             # is scoped to, and this is the single most important line for
             # diagnosing whether that's because configured_residence_id
             # isn't resolving (falls through to the "every residence"
-            # fallback below) as opposed to a bug further downstream.
+            # fallback below) as opposed to a bug further downstream. Says
+            # whether a residence is configured, not which one.
             _LOGGER.info(
                 f"[v{self.version}] Residence scope resolution: entry_present="
-                f"{self.entry is not None}, configured_residence_id="
-                f"{configured_residence_id!r}"
+                f"{self.entry is not None}, configured residence: "
+                f"{'yes' if configured_residence_id else 'no (every residence on the account)'}"
             )
             if configured_residence_id:
                 # This entry was set up via the residence picker (config
@@ -2200,7 +2391,7 @@ class LDATAService:
             _LOGGER.error(f"[v{self.version}] Could not get Residence ID.")
             raise Exception("Could not get LDATA Residence ID.")
 
-        _LOGGER.info(f"[v{self.version}] Final residence_id_list for this poll: {self.residence_id_list}")
+        _LOGGER.info(f"[v{self.version}] Residences in this poll: {len(self.residence_id_list)}")
         
         self._incomplete_fetches = set()
         if self._residence_discovery_incomplete:
@@ -2209,8 +2400,8 @@ class LDATAService:
             self._incomplete_fetches.update((self.FETCH_PANELS, self.FETCH_DECORA))
 
         # Get the breaker panels.
-        panels_json = self.get_ldata_panels()
-        whems_panels_json = self.get_iotWhemsPanels()
+        panels_json = self.get_ldata_panels(toggle_bandwidth)
+        whems_panels_json = self.get_iotWhemsPanels(toggle_bandwidth)
         if panels_json is None:
             panels_json = whems_panels_json
         elif whems_panels_json is not None:
@@ -2230,7 +2421,10 @@ class LDATAService:
         if panels_json is None:
             _LOGGER.warning(f"[v{self.version}] No panels found or API returned no panel data.")
 
-        result = self.parse_panels(panels_json)
+        # Published only once complete, below: the WebSocket and the poll
+        # merges replace status_data with updated copies, and a copy taken
+        # before the Decora devices were added would lose them for good.
+        result = self.parse_panels(panels_json, publish=False)
 
         # Fetch Decora Smart Wi-Fi devices (iotSwitches), if enabled — most
         # LDATA accounts have none, so this is opt-in rather than always-on.
@@ -2249,7 +2443,7 @@ class LDATAService:
                     bridge_devices = self.parse_bridge_devices(bridges_json)
                     result["decora_devices"].update(bridge_devices)
                 except Exception as e:
-                    _LOGGER.debug(f"[v{self.version}] Could not fetch bridges: {e}")
+                    _LOGGER.debug(f"[v{self.version}] Could not fetch bridges: {_safe_error(e)}")
                     self._incomplete_fetches.add(self.FETCH_DECORA)
 
                 decora_count = len(result["decora_devices"])
@@ -2264,12 +2458,12 @@ class LDATAService:
                             if room_id and room_id in rooms:
                                 dev["roomName"] = rooms[room_id]
                     except Exception as e:
-                        _LOGGER.debug(f"[v{self.version}] Could not enrich devices with room names: {e}")
+                        _LOGGER.debug(f"[v{self.version}] Could not enrich devices with room names: {_safe_error(e)}")
                         result["rooms"] = {}
             except LDATAAuthError:
                 raise
             except Exception as e:
-                _LOGGER.warning(f"[v{self.version}] Failed to fetch Decora devices: {e}")
+                _LOGGER.warning(f"[v{self.version}] Failed to fetch Decora devices: {_safe_error(e)}")
                 self._incomplete_fetches.add(self.FETCH_DECORA)
                 result["decora_devices"] = {}
                 result["rooms"] = {}
@@ -2278,6 +2472,7 @@ class LDATAService:
             result["rooms"] = {}
 
         result[self.INCOMPLETE_FETCHES] = sorted(self._incomplete_fetches)
+        self.status_data = result
         return result
 
     @staticmethod
@@ -2370,8 +2565,8 @@ class LDATAService:
 
         return fields
 
-    def parse_panels(self, panels_json) -> object:
-        """Parse the panel json data."""
+    def parse_panels(self, panels_json, publish: bool = True) -> object:
+        """Parse the panel json data, and publish it as status_data unless told not to."""
         status_data: dict[str, typing.Any] = {}
         breakers: dict[str, typing.Any] = {}
         cts: dict[str, typing.Any] = {}
@@ -2413,20 +2608,21 @@ class LDATAService:
             panel_data["firmware"] = panel_data["installed_firmware"]
             panel_data["model"] = panel.get("model", "unknown")
             panel_data["id"] = panel.get("id")
-            panel_data["name"] = panel.get("name", "Unknown Panel")
+            panel_data["name"] = panel.get("name") or "Unknown Panel"
             panel_data["serialNumber"] = panel.get("id")
             
             if not panel_data["id"]:
-                _LOGGER.warning(f"[v{self.version}] Skipping panel with missing ID: {panel}")
+                _LOGGER.warning(f"[v{self.version}] Skipping a panel listed without an id")
                 continue
             panel_data["panel_type"] = panel.get("ModuleType", "WHEMS")
             panel_data["connected"] = self._is_panel_connected(panel)
             if panel_data["panel_type"] == "LDATA":
                 self._ldata_panel_ids.add(panel_data["id"])
 
-            # Physical mounting orientation (0 or 180) and total breaker slot
-            # count — WHEMS panels report these directly; not present on the
-            # older LDATA (ResidentialBreakerPanels) panel type.
+            # Physical mounting orientation (0, or 180 with the main breaker at
+            # the bottom) and total breaker slot count, as set in the My
+            # Leviton app. Its code reads and writes both on LDATA
+            # (ResidentialBreakerPanels) and WHEMS (IotWhems) panels alike.
             panel_data["orientation"] = panel.get("orientation", 0)
             panel_data["panel_size"] = panel.get("panelSize")
 
@@ -2445,6 +2641,13 @@ class LDATAService:
                 fw_major = int(fw_str.split(".")[0])
             except (ValueError, IndexError):
                 fw_major = 0
+            if panel.get("ModuleType") == "WHEMS" and not panel.get("version"):
+                # A WHEMS panel listed without its firmware (disconnected at
+                # setup, see _fetch_panels) is treated as current firmware:
+                # no REST polling, power×time energy. Guessing v1 instead
+                # would toggle its bandwidth every poll once it connects. A
+                # reload re-checks it.
+                fw_major = 2
             
             # _panel_needs_rest_poll tracks CT panels only.
             # CT energy counters need a bandwidth toggle to refresh (hardware requirement).
@@ -2453,7 +2656,6 @@ class LDATAService:
             # deliver these fields (confirmed by HAR traffic analysis).
             if panel["id"] not in self._panel_needs_rest_poll:
                 self._panel_needs_rest_poll[panel["id"]] = False
-                self._ws_iotwhem_count[panel["id"]] = 0
             _LOGGER.info(
                 f"[v{self.version}] Panel '{panel.get('name', panel['id'])}' "
                 f"({panel_data['panel_type']}) firmware {fw_str} "
@@ -2493,13 +2695,17 @@ class LDATAService:
                 if fw_major < 2:
                     self._panel_needs_rest_poll[panel["id"]] = True
                 for ct in panel["CTs"]:
-                    if ct["usageType"] != "NOT_USED":
+                    if ct.get("id") is None:
+                        continue
+                    if ct.get("usageType") != "NOT_USED":
                         # Create the CT data
                         ct_data = {}
-                        ct_data["name"] = ct["usageType"]
+                        # Entity names are built from this; a null must not
+                        # stop the platforms from loading.
+                        ct_data["name"] = ct.get("usageType") or f"CT {ct.get('channel', ct['id'])}"
                         ct_data["id"] = str(ct["id"])
                         ct_data["panel_id"] = panel["id"]
-                        ct_data["channel"] = str(ct["channel"])
+                        ct_data["channel"] = str(ct.get("channel"))
                         # Store individual power values for WebSocket partial update caching
                         ct_data["power1"] = self.none_to_zero(ct, "activePower")
                         ct_data["power2"] = self.none_to_zero(ct, "activePower2")
@@ -2549,28 +2755,42 @@ class LDATAService:
                 dumb_breakers = []
                 for breaker in panel["residentialBreakers"]:
                     if (
-                        breaker["model"] is not None
+                        breaker.get("model") is not None
                         and breaker["model"] != "NONE-2"
                         and breaker["model"] != "NONE-1"
                     ):
+                        if not breaker.get("id"):
+                            # Nothing could key, subscribe to or name it.
+                            continue
                         breaker_data = {}
                         breaker_data["panel_id"] = panel["id"]
-                        breaker_data["rating"] = breaker["currentRating"]
-                        breaker_data["position"] = breaker["position"]
-                        breaker_data["name"] = breaker["name"]
-                        breaker_data["state"] = breaker["currentState"]
+                        breaker_data["rating"] = breaker.get("currentRating")
+                        breaker_data["position"] = breaker.get("position")
+                        # Entity names are built from the name and each
+                        # entity's leg from the pole count, so a null in
+                        # either (e.g. a breaker not yet set up in the
+                        # Leviton app) stopped every platform from loading.
+                        # Defaults as for the standard breakers below.
+                        breaker_data["name"] = breaker.get("name") or (
+                            f"Breaker {breaker_data['position']}"
+                            if breaker_data["position"] is not None
+                            else "Breaker"
+                        )
+                        breaker_data["state"] = breaker.get("currentState")
                         breaker_data["id"] = breaker["id"]
                         breaker_data["stable_id"] = self._stable_breaker_id(breaker["id"], panel["id"])
                         breaker_data["model"] = breaker["model"]
-                        breaker_data["poles"] = breaker["poles"]
-                        breaker_data["serialNumber"] = breaker["serialNumber"]
-                        breaker_data["hardware"] = breaker["hwVersion"]
-                        breaker_data["firmware"] = breaker["firmwareVersionMeter"]
-                        if breaker["canRemoteOn"] is not None:
+                        breaker_data["poles"] = breaker.get("poles") or 1
+                        breaker_data["serialNumber"] = breaker.get("serialNumber")
+                        breaker_data["hardware"] = breaker.get("hwVersion")
+                        breaker_data["firmware"] = breaker.get("firmwareVersionMeter")
+                        breaker_data["panel_type"] = panel_data["panel_type"]
+                        _apply_breaker_firmware(breaker_data, breaker)
+                        if breaker.get("canRemoteOn") is not None:
                             breaker_data["canRemoteOn"] = breaker["canRemoteOn"]
                         else:
                             breaker_data["canRemoteOn"] = False
-                        if breaker["remoteState"] is not None:
+                        if breaker.get("remoteState") is not None:
                             breaker_data["remoteState"] = breaker["remoteState"]
                             if breaker_data["remoteState"] == "":
                                 breaker_data["remoteState"] = "RemoteON"
@@ -2578,6 +2798,8 @@ class LDATAService:
                             breaker_data["remoteState"] = "RemoteON"
                         # Diagnostic/alarm fields
                         breaker_data["operationalState"] = breaker.get("operationalState", "Normal")
+                        # The second pole of a 2-pole breaker reports its own health.
+                        breaker_data["operationalState2"] = breaker.get("operationalState2")
                         breaker_data["overCurrent"] = breaker.get("overCurrent", False)
                         breaker_data["overVoltage"] = breaker.get("overVoltage", False)
                         breaker_data["underVoltage"] = breaker.get("underVoltage", False)
@@ -2607,10 +2829,10 @@ class LDATAService:
                         _f2 = self.none_to_zero(breaker, "lineFrequency2")
 
                         breaker_data["voltage"] = self._combine_leg_voltage(
-                            _v1, _v2, three_phase=three_phase and breaker["poles"] != 1, average=False
+                            _v1, _v2, three_phase=three_phase and breaker_data["poles"] != 1, average=False
                         )
 
-                        if breaker["poles"] == 2:
+                        if breaker_data["poles"] == 2:
                             breaker_data["frequency"] = (_f1 + _f2) / 2.0
                             _c1_raw = self._none_or_float(breaker, "rmsCurrent")
                             _c2_raw = self._none_or_float(breaker, "rmsCurrent2")
@@ -2628,7 +2850,7 @@ class LDATAService:
                                 breaker_data["current"] = None
                             else:
                                 breaker_data["current"] = (_c1_raw or 0.0) + (_c2_raw or 0.0)
-                        if breaker["position"] in _LEG1_POSITIONS:
+                        if breaker_data["position"] in _LEG1_POSITIONS:
                             breaker_data["leg"] = 1
                             breaker_data["power1"] = self._none_or_float(breaker, "power")
                             breaker_data["power2"] = self._none_or_float(breaker, "power2")
@@ -2704,6 +2926,14 @@ class LDATAService:
                                 totalPower += float(breaker_power)
                         except (ValueError, TypeError):
                             totalPower += 0
+                    elif breaker.get("lsbmaId") or breaker.get("lsbmaId2"):
+                        # A standard breaker metered by Metering Accessories
+                        # (model LSBMA). Leviton keeps it as a NONE-2 record
+                        # that names its two accessories; the accessories are
+                        # in this list as breakers of their own, and they are
+                        # what is metered, so this record adds nothing. It is
+                        # not unmonitored either.
+                        continue
                     else:
                         # Physically present but non-smart ("dumb") breaker —
                         # model NONE-1/NONE-2 with no monitoring/control data
@@ -2785,7 +3015,7 @@ class LDATAService:
             # so skip the REST poll entirely — saves bandwidth-toggle disruptions.
             # On v1 panels, WebSocket does not deliver energyConsumption, so REST poll is needed.
             # LDATA panels: the hourly energy arrives over the WebSocket (missed
-            # hours are read from the listing by refresh_ldata_energy), and the
+            # hours are read from the listing by fetch_ldata_energy), and the
             # breaker poll has no LDATA endpoint (see _refresh_breaker_data_locked).
             if fw_major >= 2 or self.panel_uses_hourly_energy(panel["id"]):
                 self._panel_needs_breaker_poll[panel["id"]] = False
@@ -2796,7 +3026,8 @@ class LDATAService:
                 self._panel_needs_breaker_poll[panel["id"]] = panel_breaker_count > 0
         
         # Save cache for WS
-        self.status_data = status_data
+        if publish:
+            self.status_data = status_data
         status_data["breakers"] = breakers
         status_data["cts"] = cts
         status_data["panels"] = panels
@@ -2845,11 +3076,7 @@ class LDATAService:
         # bandwidth:0 window.
         self._panels_in_bandwidth_toggle.add(panel_id)
 
-        if panel_type == "LDATA":
-            url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-        else:
-            url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
-
+        url = _panel_url(panel_id, panel_type)
         headers = self._auth_headers()
 
         try:
@@ -2869,58 +3096,60 @@ class LDATAService:
         except LDATAAuthError:
             raise
         except Exception as e:
-            _LOGGER.debug(f"[v{self.version}] Bandwidth toggle for panel {panel_id}: {e}")
+            _LOGGER.debug(f"[v{self.version}] Bandwidth toggle for panel {panel_id}: {_safe_error(e)}")
         finally:
             # Clear the toggle flag.  Use discard() so it's safe even if
             # the flag was already removed (shouldn't happen, but defensive).
             self._panels_in_bandwidth_toggle.discard(panel_id)
 
-    def refresh_breaker_data(self) -> bool:
-        """Re-fetch breaker data from the REST API and merge into status_data.
+    def fetch_breaker_poll(self) -> list[dict] | None:
+        """Read fresh breaker (and CT) records from the REST API.
 
         Runs for ALL panels that have real breakers — energyConsumption/energyImport
         only arrive via GET /residentialBreakers (after a bandwidth toggle) and are
-        never delivered by WebSocket.  CT data is also refreshed here for panels that
+        never delivered by WebSocket.  CT data is also read here for panels that
         have CTs (_panel_needs_rest_poll), since the bandwidth toggle is already done.
 
-        Returns True if data was successfully refreshed.
+        Runs in the executor and only reads: merge_rest_poll() applies the
+        result on the event loop. Returns None when there was nothing to poll.
         """
         if not self.status_data or not self.status_data.get("panels"):
-            return False
+            return None
 
         if not self.auth_token:
-            return False
+            return None
 
         # Check if any panel has real breakers that need polling
         if not any(self._panel_needs_breaker_poll.values()):
-            return False
+            return None
         
         # Serialize with CT poll to prevent bandwidth:0 toggle from corrupting
         # breaker data mid-fetch.
         acquired = self._rest_poll_lock.acquire(timeout=30)
         if not acquired:
             _LOGGER.warning(f"[v{self.version}] Breaker poll timed out waiting for lock — skipping this cycle")
-            return False
+            return None
         try:
-            return self._refresh_breaker_data_locked()
+            return self._fetch_breaker_poll_locked()
         finally:
             self._rest_poll_lock.release()
 
-    def _fetch_and_merge_cts(self, panel_id: str, cts: dict, log_ctx: str = "") -> bool:
-        """Settle-delay, fetch-with-retry, and merge fresh CT data for one panel into `cts`.
+    def _fetch_cts(self, panel_id: str, log_ctx: str = "") -> tuple[list | None, float]:
+        """Settle-delay and fetch-with-retry the CT records of one panel.
 
         Firmware v2.1.0: bandwidth:0 causes the panel to disconnect from the
         cloud. Reconnection after bandwidth:1 takes 10-20s in v2.1.0 (vs.
         near-instant on earlier firmware). Waiting CT_BANDWIDTH_SETTLE_SECS
         before the first fetch avoids most 502 errors without burning a retry.
 
-        Shared by _refresh_breaker_data_locked (which fetches CTs
-        opportunistically after a breaker poll's bandwidth toggle) and
-        _refresh_ct_data_locked (the dedicated CT-only poll). Mutates `cts`
-        in place; returns True if anything was updated.
+        Shared by the breaker poll (which fetches CTs opportunistically after
+        its bandwidth toggle) and the dedicated CT-only poll. Returns the
+        records (None if every attempt failed) and the time.monotonic() at
+        which the request that returned them was sent.
         """
         time.sleep(CT_BANDWIDTH_SETTLE_SECS)
 
+        requested_at = time.monotonic()
         raw_cts = self.get_Whems_CT(panel_id)
         for attempt, delay in enumerate(CT_FETCH_RETRY_DELAYS, start=1):
             if raw_cts is not None:
@@ -2931,22 +3160,12 @@ class LDATAService:
                 f"— waiting {delay}s before retry"
             )
             time.sleep(delay)
+            requested_at = time.monotonic()
             raw_cts = self.get_Whems_CT(panel_id)
+        return raw_cts, requested_at
 
-        updated = False
-        if raw_cts:
-            for ct in raw_cts:
-                if ct.get("usageType") != "NOT_USED":
-                    ct_id = str(ct["id"])
-                    if ct_id in cts:
-                        existing_ct = cts[ct_id].copy()
-                        self._apply_ct_update(existing_ct, ct)
-                        cts[ct_id] = existing_ct
-                        updated = True
-        return updated
-
-    def _refresh_breaker_data_locked(self) -> bool:
-        """Inner implementation of refresh_breaker_data, called under _rest_poll_lock.
+    def _fetch_breaker_poll_locked(self) -> list[dict]:
+        """Inner implementation of fetch_breaker_poll, called under _rest_poll_lock.
 
         Runs a bandwidth toggle + breaker REST fetch for every panel that has real
         breakers (_panel_needs_breaker_poll).  energyConsumption/energyImport are
@@ -2956,14 +3175,8 @@ class LDATAService:
         in the same cycle (the bandwidth toggle is already done, so no extra cost).
         The dedicated _ct_poll_loop runs more frequently for CT-only refreshes.
         """
-
-        new_status_data = self.status_data.copy()
-        breakers = new_status_data.get("breakers", {}).copy()
-        cts = new_status_data.get("cts", {}).copy()
-        updated = False
-        panels_with_power_change = set()
-
-        for panel_data in new_status_data.get("panels", []):
+        results: list[dict] = []
+        for panel_data in list(self.status_data.get("panels", [])):
             panel_id = panel_data.get("id")
             panel_type = panel_data.get("panel_type", "WHEMS")
 
@@ -2987,38 +3200,117 @@ class LDATAService:
 
                 # Fetch fresh breaker data — energyConsumption/energyImport only
                 # arrive here; WebSocket never carries these fields.
-                raw_breakers = self.get_Whems_breakers(panel_id)
-                if raw_breakers:
-                    for breaker in raw_breakers:
-                        if (
-                            breaker.get("model") is not None
-                            and breaker["model"] != "NONE-2"
-                            and breaker["model"] != "NONE-1"
-                        ):
-                            b_id = breaker["id"]
-                            if b_id in breakers:
-                                existing = breakers[b_id].copy()
-                                power_changed = self._apply_breaker_update(
-                                    b_id, existing, breaker, source="REST",
-                                )
-                                if power_changed:
-                                    panels_with_power_change.add(existing.get("panel_id"))
-                                breakers[b_id] = existing
-                                updated = True
+                result: dict[str, typing.Any] = {
+                    "panel_id": panel_id,
+                    "breakers_requested_at": time.monotonic(),
+                }
+                result["breakers"] = self.get_Whems_breakers(panel_id)
 
                 # Fetch CT data only for panels that have CTs.
                 # The bandwidth toggle is already done above; apply the same
                 # settle delay and retry logic used in the dedicated CT poll
                 # so that firmware v2.1.0 reconnection time is absorbed here too.
                 if self._panel_needs_rest_poll.get(panel_id, False):
-                    if self._fetch_and_merge_cts(panel_id, cts, log_ctx=" (breaker poll)"):
-                        updated = True
-                
+                    result["cts"], result["cts_requested_at"] = self._fetch_cts(
+                        panel_id, log_ctx=" (breaker poll)"
+                    )
+                results.append(result)
+
             except LDATAAuthError:
                 raise
             except Exception as e:
-                _LOGGER.warning(f"[v{self.version}] Error refreshing data for panel {panel_id}: {e}")
-        
+                _LOGGER.warning(f"[v{self.version}] Error refreshing data for panel {panel_id}: {_safe_error(e)}")
+
+        return results
+
+    def _note_ws_fields(self, kind: str, item_id, data: dict) -> None:
+        """Remember when the WebSocket last set each field of a breaker, CT or panel."""
+        now = time.monotonic()
+        stamps = self._ws_field_times.setdefault((kind, str(item_id)), {})
+        for key in data:
+            stamps[key] = now
+
+    def _rest_fields_not_superseded(self, kind: str, item_id, raw: dict, requested_at: float) -> dict:
+        """Return the fields of a REST record the WebSocket has not set since it was requested.
+
+        A poll's request goes out seconds (with the CT settle delay, up to a
+        minute) before its result is merged, and the WebSocket keeps
+        updating status_data meanwhile. A field the WebSocket set after the
+        request is newer than the poll's copy of it, so the poll's copy is
+        dropped; every other field, including the energy counters the
+        WebSocket never sends, is applied.
+        """
+        stamps = self._ws_field_times.get((kind, str(item_id)))
+        if not stamps:
+            return raw
+        return {
+            key: value
+            for key, value in raw.items()
+            if stamps.get(key, float("-inf")) < requested_at
+        }
+
+    def _merge_rest_cts(self, cts: dict, raw_cts, requested_at) -> bool:
+        """Merge one panel's REST CT records into cts (a copy); True if any was applied."""
+        updated = False
+        for ct in raw_cts or []:
+            if ct.get("usageType") == "NOT_USED" or ct.get("id") is None:
+                continue
+            ct_id = str(ct["id"])
+            if ct_id not in cts:
+                continue
+            raw = self._rest_fields_not_superseded("ct", ct_id, ct, requested_at)
+            if not raw:
+                continue
+            existing_ct = cts[ct_id].copy()
+            self._apply_ct_update(existing_ct, raw)
+            cts[ct_id] = existing_ct
+            updated = True
+        return updated
+
+    def merge_rest_poll(self, results) -> bool:
+        """Merge breaker and CT poll results into the current status_data.
+
+        Runs on the event loop, where the WebSocket updates are applied too,
+        and works on the status_data as it is now: the polls used to copy it
+        before fetching and write that copy back afterwards, undoing every
+        WebSocket update that arrived in between (a breaker that tripped
+        during a CT poll's settle delay showed as on again). See
+        _rest_fields_not_superseded for the fields the WebSocket keeps.
+
+        Returns True if anything was applied.
+        """
+        if not results or not self.status_data:
+            return False
+
+        new_status_data = self.status_data.copy()
+        breakers = new_status_data.get("breakers", {}).copy()
+        cts = new_status_data.get("cts", {}).copy()
+        updated = False
+        panels_with_power_change = set()
+
+        for result in results:
+            for breaker in result.get("breakers") or []:
+                if breaker.get("model") in (None, "NONE-1", "NONE-2"):
+                    continue
+                b_id = breaker.get("id")
+                if b_id not in breakers:
+                    continue
+                raw = self._rest_fields_not_superseded(
+                    "breaker", b_id, breaker, result["breakers_requested_at"]
+                )
+                if not raw:
+                    continue
+                existing = breakers[b_id].copy()
+                if self._apply_breaker_update(b_id, existing, raw, source="REST"):
+                    panels_with_power_change.add(existing.get("panel_id"))
+                breakers[b_id] = existing
+                updated = True
+
+            if result.get("cts") and self._merge_rest_cts(
+                cts, result["cts"], result["cts_requested_at"]
+            ):
+                updated = True
+
         if updated:
             new_status_data["breakers"] = breakers
             new_status_data["cts"] = cts
@@ -3026,7 +3318,7 @@ class LDATAService:
                 if pid:
                     self._recalc_total_power(new_status_data, pid)
             self.status_data = new_status_data
-        
+
         return updated
 
     @property
@@ -3194,30 +3486,69 @@ class LDATAService:
             and self._ldata_panel_connected(b.get("panel_id"), now)
         )
 
-    def refresh_ldata_energy(self) -> bool:
-        """Book missed hourly deltas from the LDATA panel listing, then from the energy history.
+    def fetch_ldata_energy(self) -> dict | None:
+        """Read what is needed to book missed LDATA hourly energy.
 
-        The listing carries each breaker's last hourly delta, so a burst lost
-        to a WebSocket reconnect can still be booked within the hour. One
-        GET per residence, no bandwidth toggle. When the cloud sent no burst
-        at all, the listing shows the previous hour's delta again; the hours
-        still missing after it are read from the energy history (see
-        _refresh_ldata_history_locked). Returns True if the ledger changed.
+        The panel listing carries each breaker's last hourly delta, so a
+        burst lost to a WebSocket reconnect can still be booked within the
+        hour: one GET per residence, no bandwidth toggle. When the cloud sent
+        no burst at all, the listing shows the previous hour's delta again;
+        the hours still missing after it are read from the energy history
+        (see _fetch_ldata_history_locked). The listing is read first, the
+        history from the next cycle on, once the listing's values are booked.
+
+        Runs in the executor and only reads; merge_ldata_energy() books the
+        result on the event loop, against the status_data the WebSocket kept
+        current meanwhile. Returns None when nothing was read.
         """
-        if not self.needs_ldata_energy_recovery() or not self.auth_token:
-            return False
+        if not self.auth_token:
+            return None
+        now = time.time()
+        listing = self._needs_ldata_listing(now)
+        needed = {} if listing else self._ldata_history_needed(now)
+        if not listing and not needed:
+            return None
         if not self._rest_poll_lock.acquire(timeout=5):
             _LOGGER.debug(f"[v{self.version}] LDATA energy recovery skipped — another REST poll is running")
-            return False
+            return None
         try:
-            changed = False
-            if self._needs_ldata_listing(time.time()):
-                changed = self._refresh_ldata_energy_locked()
-            if self._ldata_history_needed(time.time()):
-                changed = self._refresh_ldata_history_locked() or changed
-            return changed
+            if listing:
+                return {"listing": self._fetch_ldata_listing_locked(), "now": now}
+            # At most once per hour, also when the reads fail.
+            self._energy_history_hour = delta_hour(now)
+            tz = dt_util.get_default_time_zone()
+            days = sorted({local_date(hour) for hours in needed.values() for hour in hours})
+            return {
+                "history": self._fetch_ldata_history_locked(days, tz),
+                "days": days,
+                "needed": needed,
+                "tz": tz,
+                "now": now,
+            }
         finally:
             self._rest_poll_lock.release()
+
+    def merge_ldata_energy(self, fetched: dict | None) -> bool:
+        """Book what fetch_ldata_energy() read. Returns True if the ledger changed."""
+        if not fetched:
+            return False
+        if "listing" in fetched:
+            return self._merge_ldata_listing(fetched["listing"], fetched["now"])
+        needed, tz, now = fetched["needed"], fetched["tz"], fetched["now"]
+        by_position = {}
+        for b_id, b in self.status_data.get("breakers", {}).items():
+            key = b.get("stable_id") or b_id
+            if key in needed and b.get("position") is not None:
+                by_position[(b.get("panel_id"), str(b.get("position")))] = (key, b)
+        changed = False
+        for data in fetched["history"]:
+            changed = self._apply_ldata_history(data, needed, by_position, tz, now) or changed
+        _LOGGER.debug(
+            f"[v{self.version}] LDATA energy history for "
+            f"{', '.join(d.isoformat() for d in fetched['days'])}: "
+            f"ledger {'updated' if changed else 'unchanged'}"
+        )
+        return changed
 
     def _ldata_history_needed(self, now: float) -> dict[str, list[int]]:
         """Return, per LDATA breaker, the hours of the last LDATA_HISTORY_LOOKBACK_SECS it is missing.
@@ -3246,33 +3577,21 @@ class LDATAService:
                 needed[key] = hours
         return needed
 
-    def _refresh_ldata_history_locked(self) -> bool:
-        """Book missed hours from the cloud's energy history (kWh per breaker and hour).
+    def _fetch_ldata_history_locked(self, days, tz) -> list:
+        """Read the cloud's energy history (kWh per breaker and hour) for these local days.
 
         ``Residences/getAllEnergyConsumptionForDay`` (the Leviton app's
         energy view) returns, per panel and breaker position, the kWh of
         every hour of a local day at 0.01 kWh, also for hours the cloud sent
         no burst for (2026-10-17 21-22h: 2.96 kWh, while the listing showed
         the 20-21h deltas again). One GET per residence and local day with a
-        missing hour, at most once per hour. An hour is taken only when the
+        missing hour. merge_ldata_energy() books an hour only when the
         panel's total for it is above 0: the cloud reports hours it has not
         computed yet (e.g. while the hub is offline) as 0. The ledger books
         an hour only for legs that have nothing for it (see
         LDATAEnergyLedger.apply_history), split by each leg's power x time.
         """
-        now = time.time()
-        needed = self._ldata_history_needed(now)
-        if not needed:
-            return False
-        self._energy_history_hour = delta_hour(now)
-        tz = dt_util.get_default_time_zone()
-        days = sorted({local_date(hour) for hours in needed.values() for hour in hours})
-        by_position = {}
-        for b_id, b in self.status_data.get("breakers", {}).items():
-            key = b.get("stable_id") or b_id
-            if key in needed and b.get("position") is not None:
-                by_position[(b.get("panel_id"), str(b.get("position")))] = (key, b)
-        changed = False
+        responses = []
         for residence_id in self.residence_id_list:
             for day in days:
                 try:
@@ -3283,7 +3602,7 @@ class LDATAService:
                         timeout=30,
                     )
                 except requests.exceptions.RequestException as ex:
-                    _LOGGER.debug(f"[v{self.version}] LDATA energy history for {day} failed: {ex}")
+                    _LOGGER.debug(f"[v{self.version}] LDATA energy history for {day} failed: {_safe_error(ex)}")
                     continue
                 if result.status_code == 401:
                     raise LDATAAuthError(f"[v{self.version}] Auth token invalid (401) during LDATA energy history.")
@@ -3291,16 +3610,10 @@ class LDATAService:
                     _LOGGER.debug(f"[v{self.version}] LDATA energy history for {day} returned HTTP {result.status_code}")
                     continue
                 try:
-                    data = result.json()
+                    responses.append(result.json())
                 except ValueError:
                     _LOGGER.debug(f"[v{self.version}] LDATA energy history for {day}: no JSON")
-                    continue
-                changed = self._apply_ldata_history(data, needed, by_position, tz, now) or changed
-        _LOGGER.debug(
-            f"[v{self.version}] LDATA energy history for {', '.join(d.isoformat() for d in days)}: "
-            f"ledger {'updated' if changed else 'unchanged'}"
-        )
-        return changed
+        return responses
 
     def _apply_ldata_history(self, data, needed, by_position, tz, now) -> bool:
         """Book the needed hours found in one getAllEnergyConsumptionForDay response."""
@@ -3333,13 +3646,9 @@ class LDATAService:
                         changed = True
         return changed
 
-    def _refresh_ldata_energy_locked(self) -> bool:
-        """Inner implementation of refresh_ldata_energy, called under _rest_poll_lock."""
-        now = time.time()
-        breakers = self.status_data.get("breakers", {})
-        changed = False
-        read_ok = False
-        all_connected = True
+    def _fetch_ldata_listing_locked(self) -> list | None:
+        """Read the panel listing with its breakers; None if no residence's listing could be read."""
+        panels = None
         for residence_id in self.residence_id_list:
             result = self._get_retry_dropped_connection(
                 f"https://my.leviton.com/api/Residences/{residence_id}/residentialBreakerPanels",
@@ -3351,100 +3660,101 @@ class LDATAService:
             if result.status_code != 200:
                 _LOGGER.debug(f"[v{self.version}] LDATA energy recovery returned HTTP {result.status_code}")
                 continue
-            read_ok = True
-            for panel in result.json():
-                if not self.panel_uses_hourly_energy(panel.get("id")):
-                    continue
-                # An offline panel's listing shows the last delta again (no
-                # burst reached the cloud), so only lifetime counters are
-                # taken from it, and the hour is checked again later.
-                connected = self._is_panel_connected(panel)
-                if not connected:
-                    all_connected = False
-                    _LOGGER.debug(
-                        f"[v{self.version}] LDATA energy recovery: panel {panel.get('id')} is "
-                        f"offline — not booking its listing values"
-                    )
-                elif not self._ldata_panel_connected(panel.get("id"), now):
-                    # Back online a moment ago: the listing may show an
-                    # hour the hub uploaded late, not the last one.
-                    connected = False
-                    all_connected = False
-                    _LOGGER.debug(
-                        f"[v{self.version}] LDATA energy recovery: panel {panel.get('id')} came "
-                        f"back online less than {PANEL_RECONNECT_SETTLE_SECS} s ago — not booking "
-                        f"its listing values yet"
-                    )
-                for raw in panel.get("residentialBreakers") or []:
-                    breaker = breakers.get(raw.get("id"))
-                    if breaker and self._apply_ldata_energy(
-                        breaker, raw, "REST", received=now, connected=connected
-                    ):
-                        changed = True
-        if read_ok and all_connected:
+            try:
+                listed = result.json()
+            except ValueError:
+                _LOGGER.debug(f"[v{self.version}] LDATA energy recovery: listing is not JSON")
+                continue
+            panels = (panels or []) + (listed if isinstance(listed, list) else [])
+        return panels
+
+    def _merge_ldata_listing(self, panels: list | None, now: float) -> bool:
+        """Book the hourly deltas of a panel listing read at ``now``."""
+        if panels is None:
+            return False
+        breakers = self.status_data.get("breakers", {})
+        changed = False
+        all_connected = True
+        for panel in panels:
+            if not self.panel_uses_hourly_energy(panel.get("id")):
+                continue
+            # An offline panel's listing shows the last delta again (no
+            # burst reached the cloud), so only lifetime counters are
+            # taken from it, and the hour is checked again later.
+            connected = self._is_panel_connected(panel)
+            if not connected:
+                all_connected = False
+                _LOGGER.debug(
+                    f"[v{self.version}] LDATA energy recovery: panel {panel.get('id')} is "
+                    f"offline — not booking its listing values"
+                )
+            elif not self._ldata_panel_connected(panel.get("id"), now):
+                # Back online a moment ago: the listing may show an
+                # hour the hub uploaded late, not the last one.
+                connected = False
+                all_connected = False
+                _LOGGER.debug(
+                    f"[v{self.version}] LDATA energy recovery: panel {panel.get('id')} came "
+                    f"back online less than {PANEL_RECONNECT_SETTLE_SECS} s ago — not booking "
+                    f"its listing values yet"
+                )
+            for raw in panel.get("residentialBreakers") or []:
+                breaker = breakers.get(raw.get("id"))
+                if breaker and self._apply_ldata_energy(
+                    breaker, raw, "REST", received=now, connected=connected
+                ):
+                    changed = True
+        if all_connected:
             self._energy_recovery_hour = delta_hour(now)
             _LOGGER.debug(f"[v{self.version}] LDATA energy recovery from listing: ledger {'updated' if changed else 'unchanged'}")
         return changed
 
-    def refresh_ct_data(self) -> bool:
-        """Re-fetch only CT data from the REST API and merge into status_data.
+    def fetch_ct_poll(self) -> list[dict] | None:
+        """Read fresh CT records from the REST API.
         
-        FALLBACK mechanism — only runs for panels where WS auto-detection has
-        confirmed that WebSocket does not deliver energyConsumption/energyImport.
+        Only runs for panels whose CT energy counters need a REST poll
+        (_panel_needs_rest_poll, v1 firmware with CTs).
         
-        Lightweight alternative to refresh_breaker_data that only polls the
+        Lightweight alternative to the breaker poll that only polls the
         /iotCts endpoint. Uses bandwidth toggle (1→0→1) to force the panel
         to push fresh energy counter values to the cloud.
         
-        Returns True if data was successfully refreshed.
+        Runs in the executor and only reads: merge_rest_poll() applies the
+        result on the event loop. Returns None when there was nothing to poll.
         """
         if not self.status_data or not self.status_data.get("panels"):
-            return False
+            return None
         
         if not self.auth_token:
-            return False
+            return None
         
         # Serialize with breaker poll so bandwidth:0 toggle doesn't corrupt
         # a concurrent breaker GET.
         acquired = self._rest_poll_lock.acquire(timeout=30)
         if not acquired:
             _LOGGER.warning(f"[v{self.version}] CT poll timed out waiting for lock — skipping this cycle")
-            return False
+            return None
         try:
-            return self._refresh_ct_data_locked()
+            results: list[dict] = []
+            for panel_data in list(self.status_data.get("panels", [])):
+                panel_id = panel_data.get("id")
+
+                if not panel_id or not self._panel_needs_rest_poll.get(panel_id, False):
+                    continue
+
+                try:
+                    self._bandwidth_toggle(panel_id, panel_data.get("panel_type", "WHEMS"))
+                    raw_cts, requested_at = self._fetch_cts(panel_id)
+                    results.append(
+                        {"panel_id": panel_id, "cts": raw_cts, "cts_requested_at": requested_at}
+                    )
+                except LDATAAuthError:
+                    raise
+                except Exception as e:
+                    _LOGGER.warning(f"[v{self.version}] Error refreshing CT data for panel {panel_id}: {_safe_error(e)}")
+            return results
         finally:
             self._rest_poll_lock.release()
-
-    def _refresh_ct_data_locked(self) -> bool:
-        """Inner implementation of refresh_ct_data, called under _rest_poll_lock."""
-        
-        new_status_data = self.status_data.copy()
-        cts = new_status_data.get("cts", {}).copy()
-        updated = False
-        
-        for panel_data in new_status_data.get("panels", []):
-            panel_id = panel_data.get("id")
-            
-            if not panel_id or not self._panel_needs_rest_poll.get(panel_id, False):
-                continue
-            
-            try:
-                panel_type = panel_data.get("panel_type", "WHEMS")
-                self._bandwidth_toggle(panel_id, panel_type)
-
-                if self._fetch_and_merge_cts(panel_id, cts):
-                    updated = True
-
-            except LDATAAuthError:
-                raise
-            except Exception as e:
-                _LOGGER.warning(f"[v{self.version}] Error refreshing CT data for panel {panel_id}: {e}")
-        
-        if updated:
-            new_status_data["cts"] = cts
-            self.status_data = new_status_data
-        
-        return updated
 
     # Panel fields refresh_panel_status() re-reads for LDATA panels.
     _REFRESHED_PANEL_FIELDS = (
@@ -3455,7 +3765,16 @@ class LDATAService:
     )
 
     def refresh_panel_status(self) -> bool:
-        """Re-read panel state from the REST panel listing.
+        """Re-read panel state from the REST panel listing, in the calling thread.
+
+        Runs fetch_panel_status() and merge_panel_status() one after the
+        other. The coordinator runs them on their own threads instead: the
+        fetch in the executor, the merge on the event loop.
+        """
+        return self.merge_panel_status(self.fetch_panel_status())
+
+    def fetch_panel_status(self) -> dict | None:
+        """Read panel state from the REST panel listing.
 
         The WebSocket only reports "connected" inside a panel notification, and
         an offline panel sends none, so the cached flag would otherwise keep its
@@ -3475,13 +3794,14 @@ class LDATAService:
         leaves the cached value unchanged, except LDATA rssi: null, which means
         the hub is on Ethernet and is stored as None.
 
-        Returns True if any panel's connected flag or refreshed field changed.
+        Runs in the executor and only reads; merge_panel_status() applies
+        the result. Returns None when the poll was skipped or failed.
         """
         if not self.status_data or not self.status_data.get("panels"):
-            return False
+            return None
 
         if not self.auth_token:
-            return False
+            return None
 
         # Serialize with the breaker/CT polls so this listing GET can't land
         # inside their bandwidth toggle, when the panel briefly drops off the
@@ -3489,12 +3809,12 @@ class LDATAService:
         # this cycle — the next one is only PANEL_STATUS_POLL_INTERVAL away.
         if not self._rest_poll_lock.acquire(timeout=5):
             _LOGGER.debug(f"[v{self.version}] Panel status poll skipped — another REST poll is running")
-            return False
+            return None
         try:
-            changed = self._refresh_panel_status_locked()
+            fetched = self._fetch_panel_status_locked()
         except requests.exceptions.RequestException as ex:
             self._record_panel_status_poll_failure(ex)
-            return False
+            return None
         finally:
             self._rest_poll_lock.release()
 
@@ -3505,7 +3825,7 @@ class LDATAService:
             )
         self._panel_status_poll_failures = 0
         self._panel_status_poll_warned = False
-        return changed
+        return fetched
 
     def _record_panel_status_poll_failure(self, ex: Exception) -> None:
         """Count a failed panel status poll; warn once per failure streak.
@@ -3517,7 +3837,7 @@ class LDATAService:
         at INFO when a poll succeeds after that.
         """
         self._panel_status_poll_failures += 1
-        error = f"{type(ex).__name__}: {ex}"
+        error = _safe_error(ex)
         if (
             self._panel_status_poll_failures >= PANEL_STATUS_POLL_FAILURE_WARN_THRESHOLD
             and not self._panel_status_poll_warned
@@ -3533,21 +3853,18 @@ class LDATAService:
                 f"(#{self._panel_status_poll_failures} in a row): {error}"
             )
 
-    def _refresh_panel_status_locked(self) -> bool:
-        """Inner implementation of refresh_panel_status, called under _rest_poll_lock."""
-        urls = {
-            "LDATA": "https://my.leviton.com/api/Residences/{residenceId}/residentialBreakerPanels",
-            "WHEMS": "https://my.leviton.com/api/Residences/{residenceId}/iotWhems",
-        }
+    def _fetch_panel_status_locked(self) -> dict:
+        """Inner implementation of fetch_panel_status, called under _rest_poll_lock."""
         panel_types = {p.get("panel_type", "WHEMS") for p in self.status_data["panels"]}
         raw_by_id: dict[str, tuple[str, dict]] = {}
+        requested_at = time.monotonic()
 
         for residence_id in self.residence_id_list:
             for panel_type in panel_types:
-                if panel_type not in urls:
+                if panel_type not in _PANEL_TYPES:
                     continue
                 result = self._get_retry_dropped_connection(
-                    urls[panel_type].format(residenceId=residence_id),
+                    _panel_listing_url(residence_id, panel_type),
                     headers=self._auth_headers(filter="{}"),
                     timeout=15,
                 )
@@ -3565,11 +3882,28 @@ class LDATAService:
                         continue
                     raw_by_id[panel_id] = (panel_type, panel)
 
+        return {"requested_at": requested_at, "panels": raw_by_id}
+
+    def merge_panel_status(self, fetched) -> bool:
+        """Apply a fetch_panel_status() result to the current status_data.
+
+        Runs on the event loop, like the WebSocket updates, so it works on
+        the panels as they are now. A panel the WebSocket updated after the
+        listing was requested keeps those newer values this cycle.
+
+        Returns True if any panel's connected flag or refreshed field changed.
+        """
+        if not fetched or not self.status_data or not self.status_data.get("panels"):
+            return False
+
+        raw_by_id = fetched["panels"]
+        requested_at = fetched["requested_at"]
         changed = False
         panels = []
         for panel in self.status_data["panels"]:
             panel_type, raw = raw_by_id.get(panel.get("id"), (None, None))
-            if raw is None:
+            stamps = self._ws_field_times.get(("panel", str(panel.get("id"))), {})
+            if raw is None or any(at >= requested_at for at in stamps.values()):
                 panels.append(panel)
                 continue
             connected = self._is_panel_connected(raw)
@@ -3666,6 +4000,7 @@ class LDATAService:
                   breaker = breakers[breaker_id].copy()
                   
                   power_changed = self._apply_breaker_update(breaker_id, breaker, data, source="WS")
+                  self._note_ws_fields("breaker", breaker_id, data)
                   
                   breakers[breaker_id] = breaker
                   new_status_data["breakers"] = breakers
@@ -3685,6 +4020,7 @@ class LDATAService:
                   cts = new_status_data["cts"].copy()
                   ct = cts[ct_id].copy()
                   self._apply_ct_update(ct, data)
+                  self._note_ws_fields("ct", ct_id, data)
                   cts[ct_id] = ct
                   new_status_data["cts"] = cts
                   updated = True
@@ -3693,38 +4029,8 @@ class LDATAService:
         # carry panel fields plus embedded ResidentialBreaker (and, for
         # IotWhem, IotCt) arrays in the same shape.
         elif model_name in ("IotWhem", "ResidentialBreakerPanel"):
-             panel_id = data.get("id")
              has_breaker_data = "ResidentialBreaker" in data
-             has_ct_data = "IotCt" in data
-             
-             # --- Auto-detection of REST polling need ---
-             # WS-first strategy: track whether IotWhem WS messages contain
-             # breaker ELECTRICAL data (power/current/voltage).
-             # The cloud sends two kinds of embedded breaker updates:
-             #   1. Status-only: {env, bleRSSI, connected, lastUpdated} — NOT useful
-             #   2. Electrical:  {power, rmsCurrent, rmsVoltage, ...} — useful
-             # Only type (2) should count as "WS is delivering breaker data".
-             has_electrical_data = False
-             if has_breaker_data:
-                 for b_check in data["ResidentialBreaker"]:
-                     if any(k in b_check for k in ("power", "power2", "rmsCurrent", "rmsCurrent2", "rmsVoltage", "rmsVoltage2")):
-                         has_electrical_data = True
-                         break
-             
-             if panel_id and panel_id in self._ws_iotwhem_count:
-                 if has_electrical_data:
-                     self._ws_iotwhem_count[panel_id] = 0
-                 else:
-                     self._ws_iotwhem_count[panel_id] = self._ws_iotwhem_count.get(panel_id, 0) + 1
-                     # Log for diagnostics but don't enable breaker REST polling —
-                     # breaker energyConsumption arrives via WS, no REST needed.
-                     if self._ws_iotwhem_count[panel_id] == self._WS_DETECTION_THRESHOLD:
-                         _LOGGER.debug(
-                             f"[v{self.version}] Panel {panel_id}: {self._ws_iotwhem_count[panel_id]} "
-                             f"IotWhem WS messages without breaker electrical data (expected for FW 2.0+ — "
-                             f"breaker data arrives via individual subscriptions)"
-                         )
-             
+
              if has_breaker_data:
                   breakers = new_status_data["breakers"].copy()
                   panels_with_power_change = set()
@@ -3735,6 +4041,7 @@ class LDATAService:
                             power_changed = self._apply_breaker_update(
                                 b_id, breaker, b_data, source="WS-bulk"
                             )
+                            self._note_ws_fields("breaker", b_id, b_data)
                             if power_changed:
                                 panels_with_power_change.add(breaker.get("panel_id"))
                             breakers[b_id] = breaker
@@ -3752,6 +4059,7 @@ class LDATAService:
                        if ct_id and ct_id in cts:
                             ct = cts[ct_id].copy()
                             self._apply_ct_update(ct, ct_data_item)
+                            self._note_ws_fields("ct", ct_id, ct_data_item)
                             cts[ct_id] = ct
                             updated = True
                   if updated:
@@ -3763,6 +4071,7 @@ class LDATAService:
                   panels = new_status_data["panels"].copy()
                   for i, panel in enumerate(panels):
                        if panel.get("id") == panel_id:
+                            self._note_ws_fields("panel", panel_id, data)
                             panel = panel.copy()
                             
                             # Update connected status. LDATA panels follow the
@@ -3940,12 +4249,8 @@ class LDATAService:
         for _round in range(2):
             for panel_id, panel_type in panel_info:
                 try:
-                    if panel_type == "LDATA":
-                        url = f"https://my.leviton.com/api/ResidentialBreakerPanels/{panel_id}"
-                    else:
-                        url = f"https://my.leviton.com/api/IotWhems/{panel_id}"
                     async with session.patch(
-                        url,
+                        _panel_url(panel_id, panel_type),
                         headers=headers,
                         json={"bandwidth": 1},
                         timeout=aiohttp.ClientTimeout(total=10)
@@ -3966,7 +4271,7 @@ class LDATAService:
                 except asyncio.CancelledError:
                     raise
                 except Exception as e:
-                    _LOGGER.debug(f"[v{self.version}] Bandwidth PATCH panel {panel_id} failed: {e}")
+                    _LOGGER.debug(f"[v{self.version}] Bandwidth PATCH panel {panel_id} failed: {_safe_error(e)}")
 
     async def _ws_apiversion_heartbeat(self, session: aiohttp.ClientSession) -> None:
         """GET /apiversion — the Leviton web app polls this every ~10s.
@@ -4041,7 +4346,7 @@ class LDATAService:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            _LOGGER.debug(f"[v{self.version}] API version heartbeat failed: {e}")
+            _LOGGER.debug(f"[v{self.version}] API version heartbeat failed: {_safe_error(e)}")
 
     def _ws_build_subscriptions(self) -> list:
         """Build the subscribe-message list for the current residences/panels/breakers/CTs."""
@@ -4093,7 +4398,9 @@ class LDATAService:
                 })
         return subscriptions
 
-    async def async_run_websocket(self, update_callback, connection_callback=None, decora_callback=None):
+    async def async_run_websocket(
+        self, update_callback, connection_callback=None, decora_callback=None, auth_rejected_callback=None
+    ):
         """Run the WebSocket connection loop — PRIMARY data source.
 
         WS-FIRST Strategy:
@@ -4116,6 +4423,11 @@ class LDATAService:
         immediate, no debounce (unlike update_callback, which the coordinator
         debounces via HA_INFORM_RATE). Falls back to update_callback if not
         provided, so Decora updates still surface even without it wired up.
+
+        auth_rejected_callback: called when Leviton rejects the WebSocket
+        login, so the coordinator can log in again for a new token. The loop
+        keeps backing off as for any failed attempt and uses whatever token
+        the service holds at its next attempt.
         """
         uri = "wss://socket.cloud.leviton.com/"
         # Wait before every connect attempt after the first. Each attempt
@@ -4178,7 +4490,7 @@ class LDATAService:
                 try:
                     connection_callback(connected)
                 except Exception as e:
-                    _LOGGER.error(f"[v{self.version}] Connection callback error: {e}")
+                    _LOGGER.error(f"[v{self.version}] Connection callback error: {_safe_error(e)}")
         
         def log_attempt_failure(message: str) -> None:
             nonlocal failed_attempts
@@ -4213,15 +4525,6 @@ class LDATAService:
                     }
                 ) as session:
                     
-                    # Get ALL panels with their types for bandwidth keepalive
-                    panel_info = []
-                    if self.status_data and self.status_data.get("panels"):
-                        panel_info = [
-                            (p.get("id"), p.get("panel_type", "WHEMS"))
-                            for p in self.status_data["panels"]
-                            if p.get("id")
-                        ]
-                    
                     try:
                         # Compression intentionally disabled: permessage-deflate
                         # routes sends through aiohttp's shielded background-task
@@ -4253,12 +4556,12 @@ class LDATAService:
                         if connectivity == "DOWN":
                             _LOGGER.warning(
                                 f"[v{self.version}] WS connect failed — "
-                                f"no internet connectivity: {e}"
+                                f"no internet connectivity: {_safe_error(e)}"
                             )
                         else:
                             _LOGGER.warning(
                                 f"[v{self.version}] WS connect failed — "
-                                f"internet up but Leviton cloud unreachable: {e}"
+                                f"internet up but Leviton cloud unreachable: {_safe_error(e)}"
                             )
                         failed_attempts += 1
                         notify_connection(False)
@@ -4301,8 +4604,13 @@ class LDATAService:
                                             _LOGGER.debug(f"[v{self.version}] WebSocket re-authenticated.")
                                         break
                                     elif "error" in data:
-                                        _LOGGER.error(f"[v{self.version}] Auth error: {data}")
+                                        _LOGGER.error(f"[v{self.version}] Leviton rejected the WebSocket login")
                                         failed_attempts += 1
+                                        if auth_rejected_callback:
+                                            try:
+                                                auth_rejected_callback()
+                                            except Exception as e:  # pylint: disable=broad-except
+                                                _LOGGER.error(f"[v{self.version}] Auth rejected callback error: {_safe_error(e)}")
                                         break
                                 elif msg.type in (
                                     aiohttp.WSMsgType.CLOSE,
@@ -4334,18 +4642,34 @@ class LDATAService:
                                 pass
                             continue
 
+                        # 3. Build and send subscriptions ONCE
+                        retry_count = 0
+                        while not self.status_data and retry_count < 5:
+                            await asyncio.sleep(2)
+                            retry_count += 1
+                        if not self.status_data:
+                            # Subscribing now would leave this connection
+                            # without its panels, breakers and CTs, and its
+                            # keepalives without a panel, for its whole life.
+                            # A slow first status() is normal: try again after
+                            # the backoff, without a warning.
+                            _LOGGER.debug(
+                                f"[v{self.version}] No panel data to subscribe to yet. "
+                                f"Reconnecting in {connect_wait}s"
+                            )
+                            continue
+                        panel_info = [
+                            (p.get("id"), p.get("panel_type", "WHEMS"))
+                            for p in self.status_data.get("panels", [])
+                            if p.get("id")
+                        ]
+
                         # Keepalive requests only for a session that became
                         # ready: a socket the server closes right away would
                         # otherwise cost a bandwidth PUT and a heartbeat
                         # per attempt.
                         await self._ws_bandwidth_put(session, panel_info)
                         await self._ws_apiversion_heartbeat(session)
-                        
-                        # 3. Build and send subscriptions ONCE
-                        retry_count = 0
-                        while not self.status_data and retry_count < 5:
-                            await asyncio.sleep(2)
-                            retry_count += 1
 
                         subscriptions = self._ws_build_subscriptions()
 
@@ -4518,7 +4842,7 @@ class LDATAService:
                                             try:
                                                 update_callback()
                                             except Exception as e:
-                                                _LOGGER.error(f"[v{self.version}] Callback error: {e}")
+                                                _LOGGER.error(f"[v{self.version}] Callback error: {_safe_error(e)}")
                                         # Decora is checked unconditionally alongside the LDATA
                                         # update above — the two match mutually exclusive
                                         # modelNames, so this is a no-op for LDATA notifications.
@@ -4529,7 +4853,7 @@ class LDATAService:
                                                 else:
                                                     update_callback()
                                             except Exception as e:
-                                                _LOGGER.error(f"[v{self.version}] Decora callback error: {e}")
+                                                _LOGGER.error(f"[v{self.version}] Decora callback error: {_safe_error(e)}")
                                     elif payload.get("type") == "keepalive":
                                         # Server-level liveness frame. It proves the
                                         # connection is up, not that subscriptions
@@ -4539,7 +4863,7 @@ class LDATAService:
                                         # (up to 15 s) receive wait.
                                         last_keepalive_time = asyncio.get_event_loop().time()
                                 except (ValueError, json.JSONDecodeError) as e:
-                                    _LOGGER.warning(f"[v{self.version}] Invalid JSON: {e}")
+                                    _LOGGER.warning(f"[v{self.version}] Invalid JSON: {_safe_error(e)}")
                                     
                             elif msg.type == aiohttp.WSMsgType.ERROR:
                                 _LOGGER.error(f"[v{self.version}] WS error: {ws.exception()}")
@@ -4579,7 +4903,7 @@ class LDATAService:
             
             except (aiohttp.ClientError, ConnectionResetError) as ex:
                 notify_connection(False)
-                _LOGGER.warning(f"[v{self.version}] WS client error: {ex}. Reconnecting in {connect_wait}s...")
+                _LOGGER.warning(f"[v{self.version}] WS client error: {_safe_error(ex)}. Reconnecting in {connect_wait}s...")
             except Exception as ex:
                 notify_connection(False)
-                _LOGGER.error(f"[v{self.version}] WS error: {type(ex).__name__}: {ex}. Reconnecting in {connect_wait}s...")
+                _LOGGER.error(f"[v{self.version}] WS error: {_safe_error(ex)}. Reconnecting in {connect_wait}s...")
