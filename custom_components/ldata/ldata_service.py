@@ -703,9 +703,11 @@ class LDATAService:
         for item in result_json:
             if "residentialAccountId" in item:
                 self.account_id = item["residentialAccountId"]
-                if self.account_id is not None:
+                if self.account_id:
                     break
-        if self.account_id is not None:
+        # account_id starts out "", so "is not None" took a list that names
+        # no account as having one.
+        if self.account_id:
             # Save the userId if we just got it
             if "userId" in result_json[0]:
                 self.userid = result_json[0]["userId"]
