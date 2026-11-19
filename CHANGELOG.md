@@ -2,6 +2,11 @@
 
 All notable changes to the Leviton LDATA integration are documented here.
 
+## 2.1.1 - Unreleased
+
+### Fixed
+- **Decora devices no longer stop updating after a restart.** The integration shared its device data before it had added the Decora devices, and a WebSocket update that arrived in between dropped them until the next reload, leaving the Decora entities unavailable. The data is now shared only once complete. At startup the WebSocket also no longer subscribes before the panels are known: if the first refresh was still running 10 seconds after it connected, it subscribed without the panels, breakers and CTs and sent its keepalive to no panel, until it reconnected up to 55 minutes later. It now reconnects shortly after instead. (#127)
+
 ## 2.1.0 - 2026-11-18
 
 # **Take a backup before updating.** Going back to an earlier version re-creates every entity as a new one without history, so the only way back is a backup. (#123)
