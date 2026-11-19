@@ -2,9 +2,9 @@
 
 All notable changes to the Leviton LDATA integration are documented here.
 
-## 2.0.14 - Unreleased
+## 2.1.0 - 2026-11-18
 
-**Take a backup before updating.** Going back to an earlier version re-creates every entity as a new one without history, so the only way back is a backup. (#123)
+# **Take a backup before updating.** Going back to an earlier version re-creates every entity as a new one without history, so the only way back is a backup. (#123)
 
 ### Added
 - **The load center can have its own page in the sidebar.** A new option, **Show the load center in the sidebar**, adds a sidebar item that opens a full page with the panel card, with no dashboard to set up. With more than one load center, each has its own tab. It is off by default and can be turned on at setup or in the integration's options; the item appears or disappears as soon as you save. With several LDATA entries, one item shows the load centers of every entry that has the option on. On a phone, a button in the page's header zooms the panel to 1.5× or 2×. (#118)
