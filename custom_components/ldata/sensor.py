@@ -55,6 +55,8 @@ from .ldata_base_entity import (
     PanelOnlineMixin,
     add_entities_grouped_by_panel,
     find_panel,
+    is_panel_offline,
+    is_source_offline,
 )
 from .ldata_ct_entity import LDATACTEntity
 from .ldata_entity import LDATAEntity
@@ -200,6 +202,20 @@ def _calc_pxt_energy(
     energy_kwh = max(0.0, min(energy_kwh, MAX_DAILY_ENERGY_KWH))
 
     return current_state + energy_kwh
+
+
+def _pause_integration(entity) -> None:
+    """Stop integrating power until the source reports again.
+
+    A panel or breaker that is offline sends no readings: the coordinator only
+    re-publishes the last ones. Integrating those would add the last power
+    times the whole outage (a 3 kW circuit adds 18 kWh in six hours) to a total
+    that Home Assistant's Energy dashboard cannot take back. What the circuit
+    drew meanwhile is unknown, so it is not counted. Dropping the clock makes
+    the next live reading start a fresh interval, with the total kept.
+    """
+    entity._last_update_time = None
+    entity._last_power = None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -1277,12 +1293,22 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
         now = time.time()
         options = self.coordinator.config_entry.options
+        offline = is_source_offline(self.coordinator, {**self.breaker_data, **new_data})
 
         if is_new_day:
+            # Midnight passes for an offline breaker too: the day starts at 0
+            # and counts on once it reports again.
             self._state = 0.0
-            self._last_update_time = now
-            self._last_power = current_power
+            if offline:
+                _pause_integration(self)
+            else:
+                self._last_update_time = now
+                self._last_power = current_power
             return True
+
+        if offline:
+            _pause_integration(self)
+            return
 
         if self._last_update_time is None or self._state is None:
             # First pxt run after startup or a hw→pxt mode switch.
@@ -1327,6 +1353,9 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
         for b_data in breakers.values():
             if b_data.get("panel_id") != self.panel_id:
                 continue
+            if b_data.get("connected") is False:
+                # An offline breaker's last power is not a reading.
+                continue
             try:
                 raw_power = float(b_data.get("power") or 0.0)
             except (ValueError, TypeError):
@@ -1342,12 +1371,20 @@ class LDATADailyUsageSensor(_DailyEnergySensorMixin, LDATAEntity, SensorEntity, 
 
         now = time.time()
         options = self.coordinator.config_entry.options
+        offline = is_panel_offline(self.coordinator, self.panel_id)
 
         if is_new_day:
             self._state = 0.0
-            self._last_update_time = now
-            self._last_power = current_power
+            if offline:
+                _pause_integration(self)
+            else:
+                self._last_update_time = now
+                self._last_power = current_power
             return True
+
+        if offline:
+            _pause_integration(self)
+            return
 
         if self._last_update_time is None or self._state is None:
             self._last_update_time = now
@@ -1695,12 +1732,20 @@ class LDATACTDailyUsageSensor(_DailyEnergySensorMixin, LDATACTEntity, SensorEnti
 
         now = time.time()
         options = self.coordinator.config_entry.options
+        offline = is_source_offline(self.coordinator, {**self.breaker_data, **ct_data})
 
         if is_new_day:
             self._state = 0.0
-            self._last_update_time = now
-            self._last_power = current_power
+            if offline:
+                _pause_integration(self)
+            else:
+                self._last_update_time = now
+                self._last_power = current_power
             self._last_date = today
+            return
+
+        if offline:
+            _pause_integration(self)
             return
 
         if self._last_update_time is None or self._state is None:
@@ -1984,18 +2029,13 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
         outage the first real reading would then be judged against only a
         minute of elapsed time and rejected as implausible. An offline source
         sends no readings, so they are skipped and the clock keeps measuring
-        from the last reading that actually came from the hub.
+        from the last reading that actually came from the hub. Power×time
+        integration pauses the same way (see _pause_integration).
 
         Only an explicit ``connected: False`` counts; a missing flag means
         online.
         """
-        if new_data.get("connected") is False:
-            return True
-        panel_id = self.breaker_data.get("panel_id")
-        for panel in (self.coordinator.data or {}).get("panels") or []:
-            if panel.get("id") == panel_id:
-                return panel.get("connected") is False
-        return False
+        return is_source_offline(self.coordinator, {**self.breaker_data, **new_data})
 
     def _is_implausible_increase(self, new_value: float, new_data: dict) -> bool:
         """Return True if the counter rose more than this breaker could have drawn.
@@ -2036,6 +2076,10 @@ class LDATABreakerEnergyUsageSensor(LDATAEntity, SensorEntity, RestoreEntity):
             Load breaker  — power is virtually always positive (consuming from
             the panel bus).  abs() absorbs rare firmware transients.
         """
+        if self._source_offline(new_data):
+            _pause_integration(self)
+            return
+
         try:
             raw_power = float(new_data.get("power", 0) or 0)
         except (ValueError, TypeError):
@@ -2413,6 +2457,14 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
                 return not self.coordinator._service.panel_has_hw_counters(panel_id)
         return False  # default: hw counter path (safe for v1)
 
+    def _source_offline(self, new_data: dict) -> bool:
+        """Return True while the CT's panel is reported offline.
+
+        An offline panel sends no readings: its CTs' last power is only
+        re-published, so it is not integrated (see _pause_integration).
+        """
+        return is_source_offline(self.coordinator, {**self.ct_data, **new_data})
+
     def _update_pxt(self, new_data) -> None:
         """Accumulate lifetime energy from instantaneous CT power (used on v2 panels).
 
@@ -2430,6 +2482,10 @@ class LDATAEnergyUsageSensor(LDATACTEntity, SensorEntity, RestoreEntity):
             Negative CT watts = solar excess flowing house → grid.
             Clamp to max(-power, 0) — only accumulate when CT is negative.
         """
+        if self._source_offline(new_data):
+            _pause_integration(self)
+            return
+
         try:
             raw_power = float(new_data.get("power", 0) or 0)
         except (ValueError, TypeError):

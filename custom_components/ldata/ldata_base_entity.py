@@ -116,6 +116,16 @@ def is_panel_offline(coordinator: LDATAUpdateCoordinator, panel_id: str) -> bool
     return panel is not None and not panel.get("connected", True)
 
 
+def is_source_offline(coordinator: LDATAUpdateCoordinator, data: dict) -> bool:
+    """Return whether what produced a breaker's or CT's readings is offline.
+
+    That is the case when its panel is offline, or when the breaker itself
+    reports ``connected`` False: one can drop out while its panel stays
+    online. A missing flag counts as online, as for the panel.
+    """
+    return data.get("connected") is False or is_panel_offline(coordinator, data.get("panel_id"))
+
+
 class PanelOnlineMixin:
     """Make an entity unavailable while its panel is offline.
 
