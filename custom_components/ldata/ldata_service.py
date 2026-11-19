@@ -2122,7 +2122,10 @@ class LDATAService:
         if panels_json is None:
             _LOGGER.warning(f"[v{self.version}] No panels found or API returned no panel data.")
 
-        result = self.parse_panels(panels_json)
+        # Published only once complete, below: the WebSocket and the poll
+        # merges replace status_data with updated copies, and a copy taken
+        # before the Decora devices were added would lose them for good.
+        result = self.parse_panels(panels_json, publish=False)
 
         # Fetch Decora Smart Wi-Fi devices (iotSwitches), if enabled — most
         # LDATA accounts have none, so this is opt-in rather than always-on.
@@ -2170,6 +2173,7 @@ class LDATAService:
             result["rooms"] = {}
 
         result[self.INCOMPLETE_FETCHES] = sorted(self._incomplete_fetches)
+        self.status_data = result
         return result
 
     @staticmethod
@@ -2262,8 +2266,8 @@ class LDATAService:
 
         return fields
 
-    def parse_panels(self, panels_json) -> object:
-        """Parse the panel json data."""
+    def parse_panels(self, panels_json, publish: bool = True) -> object:
+        """Parse the panel json data, and publish it as status_data unless told not to."""
         status_data: dict[str, typing.Any] = {}
         breakers: dict[str, typing.Any] = {}
         cts: dict[str, typing.Any] = {}
@@ -2701,7 +2705,8 @@ class LDATAService:
                 self._panel_needs_breaker_poll[panel["id"]] = panel_breaker_count > 0
         
         # Save cache for WS
-        self.status_data = status_data
+        if publish:
+            self.status_data = status_data
         status_data["breakers"] = breakers
         status_data["cts"] = cts
         status_data["panels"] = panels
@@ -3935,15 +3940,6 @@ class LDATAService:
                     }
                 ) as session:
                     
-                    # Get ALL panels with their types for bandwidth keepalive
-                    panel_info = []
-                    if self.status_data and self.status_data.get("panels"):
-                        panel_info = [
-                            (p.get("id"), p.get("panel_type", "WHEMS"))
-                            for p in self.status_data["panels"]
-                            if p.get("id")
-                        ]
-                    
                     try:
                         # Compression intentionally disabled: permessage-deflate
                         # routes sends through aiohttp's shielded background-task
@@ -4061,18 +4057,34 @@ class LDATAService:
                                 pass
                             continue
 
+                        # 3. Build and send subscriptions ONCE
+                        retry_count = 0
+                        while not self.status_data and retry_count < 5:
+                            await asyncio.sleep(2)
+                            retry_count += 1
+                        if not self.status_data:
+                            # Subscribing now would leave this connection
+                            # without its panels, breakers and CTs, and its
+                            # keepalives without a panel, for its whole life.
+                            # A slow first status() is normal: try again after
+                            # the backoff, without a warning.
+                            _LOGGER.debug(
+                                f"[v{self.version}] No panel data to subscribe to yet. "
+                                f"Reconnecting in {connect_wait}s"
+                            )
+                            continue
+                        panel_info = [
+                            (p.get("id"), p.get("panel_type", "WHEMS"))
+                            for p in self.status_data.get("panels", [])
+                            if p.get("id")
+                        ]
+
                         # Keepalive requests only for a session that became
                         # ready: a socket the server closes right away would
                         # otherwise cost a bandwidth PUT and a heartbeat
                         # per attempt.
                         await self._ws_bandwidth_put(session, panel_info)
                         await self._ws_apiversion_heartbeat(session)
-                        
-                        # 3. Build and send subscriptions ONCE
-                        retry_count = 0
-                        while not self.status_data and retry_count < 5:
-                            await asyncio.sleep(2)
-                            retry_count += 1
 
                         subscriptions = self._ws_build_subscriptions()
 
