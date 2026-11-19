@@ -2,6 +2,11 @@
 
 All notable changes to the Leviton LDATA integration are documented here.
 
+## 2.1.1 - Unreleased
+
+### Fixed
+- **Setting the system clock no longer stops energy counting or stalls the login.** Energy worked out from power over time, and the wait between logins, were measured with the system clock. When the clock was set back, for example by an NTP correction, the energy sensors counted nothing until the clock caught up, and the next login could wait as long as the clock had moved. A small step forward was counted as energy used. Both now use a clock that only moves forward. (#128)
+
 ## 2.1.0 - 2026-11-18
 
 # **Take a backup before updating.** Going back to an earlier version re-creates every entity as a new one without history, so the only way back is a backup. (#123)
