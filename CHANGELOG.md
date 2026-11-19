@@ -2,6 +2,11 @@
 
 All notable changes to the Leviton LDATA integration are documented here.
 
+## 2.1.1 - Unreleased
+
+### Fixed
+- **An account whose permissions name no account is no longer taken as having one.** Setup then asked Leviton for residences with an empty account id and cleared the stored token on the failure; it now reports that it could not get the account. (#129)
+
 ## 2.1.0 - 2026-11-18
 
 # **Take a backup before updating.** Going back to an earlier version re-creates every entity as a new one without history, so the only way back is a backup. (#123)
